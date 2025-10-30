@@ -1,0 +1,18 @@
+{
+  "comment": "Registry of site-specific adapters",
+  "note": "This file will be populated in Week 6 with actual adapter configurations",
+  
+  "adapters": [
+    {
+      "domain": "example.com",
+      "configFile": "example-adapter.json",
+      "enabled": false,
+      "note": "Example entry - replace with real adapters"
+    }
+  ],
+  
+  "defaultAdapter": {
+    "comment": "Fallback configuration when no specific adapter matches",
+    "useUniversalPatterns": true
+  }
+}

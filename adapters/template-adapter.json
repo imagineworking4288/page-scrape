@@ -1,0 +1,136 @@
+{
+  "comment": "Template for creating site-specific adapters. Copy this structure and customize for each directory site.",
+  
+  "domain": "example.com",
+  "name": "Example Directory",
+  "enabled": true,
+  
+  "selectors": {
+    "comment": "CSS selectors for extracting contact information",
+    
+    "card": {
+      "comment": "Selector for individual contact cards or listings",
+      "value": ".contact-card, .directory-item, .profile-card"
+    },
+    
+    "name": {
+      "comment": "Selector for person's name within a card",
+      "value": ".name, .full-name, h3.title",
+      "fallback": [".person-name", "[data-name]"]
+    },
+    
+    "email": {
+      "comment": "Selector for email address",
+      "value": ".email, a[href^='mailto:']",
+      "fallback": [".contact-email", "[data-email]"],
+      "extractPattern": "mailto:(.+)"
+    },
+    
+    "phone": {
+      "comment": "Selector for phone number",
+      "value": ".phone, .telephone, a[href^='tel:']",
+      "fallback": [".contact-phone", "[data-phone]"],
+      "extractPattern": "tel:(.+)"
+    },
+    
+    "revealButton": {
+      "comment": "Button that reveals hidden contact info (for Click Handler Scraper)",
+      "value": ".show-contact, .reveal-email, button.contact-toggle",
+      "optional": true
+    },
+    
+    "profileLink": {
+      "comment": "Link to individual profile page (for Profile Resolver Scraper)",
+      "value": "a.profile-link, a.view-profile",
+      "optional": true
+    }
+  },
+  
+  "pagination": {
+    "comment": "Pagination detection configuration",
+    
+    "type": "numbered",
+    "comment_type": "Options: numbered, next-button, load-more, infinite-scroll, url-pattern, api",
+    
+    "next": {
+      "comment": "Selector for next page button",
+      "value": ".next-page, a.pagination-next, button.load-more"
+    },
+    
+    "pageNumbers": {
+      "comment": "Selector for page number links (for numbered pagination)",
+      "value": ".pagination a, .page-numbers a",
+      "optional": true
+    },
+    
+    "urlPattern": {
+      "comment": "URL pattern for direct page navigation",
+      "value": "?page={page}",
+      "optional": true
+    },
+    
+    "infiniteScroll": {
+      "comment": "Configuration for infinite scroll detection",
+      "triggerDistance": 1000,
+      "maxScrolls": 50,
+      "scrollDelay": 2000,
+      "optional": true
+    }
+  },
+  
+  "extraction": {
+    "comment": "Extraction behavior configuration",
+    
+    "waitForSelector": {
+      "comment": "Wait for this selector before extracting",
+      "value": ".contact-card",
+      "timeout": 5000
+    },
+    
+    "clickToReveal": {
+      "comment": "Whether to click buttons to reveal contact info",
+      "enabled": false,
+      "waitAfterClick": 500
+    },
+    
+    "navigateToProfile": {
+      "comment": "Whether to navigate to individual profiles",
+      "enabled": false,
+      "returnToList": true
+    }
+  },
+  
+  "validation": {
+    "comment": "Validation rules for extracted data",
+    
+    "requiredFields": ["name"],
+    "comment_required": "At least one of these fields must be present",
+    
+    "emailFormat": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+    "phoneFormat": "^[+]?[(]?[0-9]{1,4}[)]?[-\\s\\.]?[(]?[0-9]{1,4}[)]?[-\\s\\.]?[0-9]{1,9}$"
+  },
+  
+  "performance": {
+    "comment": "Performance optimization settings",
+    
+    "rateLimit": {
+      "minDelay": 2000,
+      "maxDelay": 5000
+    },
+    
+    "batchSize": 10,
+    "comment_batch": "Number of cards to process before checking memory",
+    
+    "maxPages": 100,
+    "comment_maxPages": "Maximum number of pages to scrape (safety limit)"
+  },
+  
+  "notes": [
+    "This is a template file showing the structure of site-specific adapters",
+    "Copy this file to create a new adapter for a specific website",
+    "Rename the file to match the domain (e.g., 'linkedin-adapter.json')",
+    "Test your adapter with a small limit first (--limit 10)",
+    "Optional fields can be omitted if not applicable",
+    "All selectors support comma-separated alternatives"
+  ]
+}
