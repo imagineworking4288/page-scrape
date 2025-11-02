@@ -1,5 +1,12 @@
 const SimpleScraper = require('../scrapers/simple-scraper');
-const Logger = require('../utils/logger');
+
+// Mock logger for testing (silent logger to avoid console clutter during tests)
+class MockLogger {
+  info() {}
+  warn() {}
+  error() {}
+  debug() {}
+}
 
 // Mock browser manager and rate limiter for testing
 class MockBrowserManager {
@@ -79,7 +86,7 @@ class TestRunner {
 // Run tests
 async function runTests() {
   const runner = new TestRunner();
-  const logger = new Logger();
+  const logger = new MockLogger();
   const browserManager = new MockBrowserManager();
   const rateLimiter = new MockRateLimiter();
   const scraper = new SimpleScraper(browserManager, rateLimiter, logger);
@@ -99,7 +106,9 @@ async function runTests() {
     ];
 
     for (const email of validEmails) {
-      runner.assertMatch(email, scraper.EMAIL_PATTERN, `Should match ${email}`);
+      // Create a new regex without g flag for testing
+      const testPattern = new RegExp(scraper.EMAIL_PATTERN.source);
+      runner.assertMatch(email, testPattern, `Should match ${email}`);
     }
   });
 
@@ -113,7 +122,9 @@ async function runTests() {
     ];
 
     for (const email of invalidEmails) {
-      const matches = email.match(scraper.EMAIL_PATTERN);
+      // Create a new regex without g flag for testing
+      const testPattern = new RegExp(scraper.EMAIL_PATTERN.source);
+      const matches = email.match(testPattern);
       runner.assert(!matches || matches[0] !== email, `Should not match ${email}`);
     }
   });
@@ -131,7 +142,9 @@ async function runTests() {
     for (const phone of validPhones) {
       let matched = false;
       for (const pattern of scraper.PHONE_PATTERNS) {
-        if (pattern.test(phone)) {
+        // Create a new regex without g flag for testing
+        const testPattern = new RegExp(pattern.source);
+        if (testPattern.test(phone)) {
           matched = true;
           break;
         }
