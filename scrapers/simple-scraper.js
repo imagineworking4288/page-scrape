@@ -12,12 +12,22 @@ class SimpleScraper {
       /([0-9]{10})/g                                                            // 1234567890
     ];
     
-    // Common card selectors to try
+    // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
+      // Specific data attributes (most reliable)
+      '[data-testid*="agent"]', '[data-testid*="profile"]', '[data-testid*="contact"]',
+      '[data-qa*="agent"]', '[data-qa*="profile"]', '[data-qa*="contact"]',
+      '[data-cy*="agent"]', '[data-cy*="profile"]', '[data-cy*="contact"]',
+      
+      // Common class names
       '.card', '.profile', '.agent', '.person', '.member', '.contact',
       '.listing', '.item', '.result', '.entry', '.record',
+      
+      // Partial class matches
       '[class*="card"]', '[class*="profile"]', '[class*="agent"]',
       '[class*="person"]', '[class*="member"]', '[class*="contact"]',
+      
+      // Generic containers
       'article', 'li[class*="item"]', 'div[class*="listing"]',
       '.grid-item', '.list-item', '.directory-item'
     ];
@@ -144,48 +154,87 @@ class SimpleScraper {
           return [...new Set(phones)];
         };
         
-        // Helper to extract name
+        // IMPROVED: Helper to extract name with more flexible patterns
         const extractName = (element) => {
           // Try common name selectors first
           const nameSelectors = [
             'h1', 'h2', 'h3', 'h4',
             '.name', '.title', '.agent-name', '.profile-name',
-            '[class*="name"]', '[class*="title"]',
-            'strong', 'b'
+            '[class*="name"]', '[class*="title"]', '[class*="agent"]',
+            'a.profile-link', 'a[href*="/agent/"]', 'a[href*="/profile/"]',
+            'strong', 'b', 'span[class*="name"]'
           ];
           
           for (const sel of nameSelectors) {
             const nameEl = element.querySelector(sel);
             if (nameEl) {
-              const text = nameEl.textContent.trim();
-              // Basic name pattern: starts with capital, has at least 2 words
-              if (/^[A-Z][a-z]+(?:\s[A-Z][a-z.]+)+$/.test(text)) {
+              let text = nameEl.textContent.trim();
+              
+              // Skip if too short or too long
+              if (text.length < 3 || text.length > 60) continue;
+              
+              // Clean up common prefixes/suffixes
+              text = text.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
+              text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
+              text = text.trim();
+              
+              // Check if it looks like a name (flexible pattern)
+              // Accepts: John Doe, John Q. Doe, O'Brien, Smith-Jones, Mary-Jane, etc.
+              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)+$/i;
+              if (namePattern.test(text)) {
                 return text;
+              }
+              
+              // Also accept names in all caps (convert to title case)
+              if (/^[A-Z\s'\-\.]{5,50}$/.test(text)) {
+                const words = text.split(/\s+/);
+                // Must have at least 2 words
+                if (words.length >= 2) {
+                  return words
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                    .join(' ');
+                }
               }
             }
           }
           
-          // Fallback: Look for capitalized text in first few text nodes
+          // Fallback: Look for text that looks like a name in the first few text nodes
+          const textNodes = [];
           const walker = document.createTreeWalker(
             element,
             NodeFilter.SHOW_TEXT,
-            null,
+            {
+              acceptNode: (node) => {
+                const text = node.textContent.trim();
+                // Only accept substantial text nodes
+                return (text.length >= 5 && text.length <= 60) ? 
+                  NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+              }
+            },
             false
           );
           
           let node;
-          let textNodes = [];
           while (node = walker.nextNode()) {
-            const text = node.textContent.trim();
-            if (text.length > 5 && text.length < 50) {
-              textNodes.push(text);
-            }
-            if (textNodes.length >= 5) break;
+            textNodes.push(node.textContent.trim());
+            if (textNodes.length >= 10) break;
           }
           
+          // Check text nodes for name patterns
           for (const text of textNodes) {
-            if (/^[A-Z][a-z]+(?:\s[A-Z][a-z.]+)+$/.test(text)) {
-              return text;
+            // Skip obvious non-names
+            if (/^(email|phone|contact|address|website|view|more|info|details)/i.test(text)) {
+              continue;
+            }
+            
+            // Look for name pattern
+            const cleanText = text
+              .replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '')
+              .trim();
+            
+            if (/^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)+$/i.test(cleanText) && 
+                cleanText.length >= 5 && cleanText.length <= 50) {
+              return cleanText;
             }
           }
           
@@ -236,15 +285,29 @@ class SimpleScraper {
             });
           }
           
-          // Create contact object (must have at least a name or email)
-          if (name || emails.length > 0) {
+          // IMPROVED: Better confidence scoring
+          let confidence;
+          if (name && emails.length > 0 && phones.length > 0) {
+            // Has all three fields
+            confidence = 'high';
+          } else if ((emails.length > 0 && phones.length > 0) || 
+                     (name && emails.length > 0) || 
+                     (name && phones.length > 0)) {
+            // Has two out of three fields
+            confidence = 'medium';
+          } else {
+            // Has only one field
+            confidence = 'low';
+          }
+          
+          // Create contact object (must have at least a name or email or phone)
+          if (name || emails.length > 0 || phones.length > 0) {
             results.push({
               name: name,
               email: emails[0] || null,  // Use first email found
               phone: phones[0] || null,  // Use first phone found
               source: 'visible_text',
-              confidence: (name && emails.length > 0 && phones.length > 0) ? 'high' : 
-                         ((name && (emails.length > 0 || phones.length > 0)) ? 'medium' : 'low'),
+              confidence: confidence,
               rawText: allText.substring(0, 200) // First 200 chars for debugging
             });
           }
