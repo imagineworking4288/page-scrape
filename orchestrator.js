@@ -6,15 +6,12 @@ const fs = require('fs');
 const path = require('path');
 
 // Import utilities
-const Logger = require('./utils/logger');
+const logger = require('./utils/logger');  // Changed: logger is an instance, not a class
 const BrowserManager = require('./utils/browser-manager');
 const RateLimiter = require('./utils/rate-limiter');
 
 // Import scrapers
 const SimpleScraper = require('./scrapers/simple-scraper');
-
-// Initialize logger
-const logger = new Logger();
 
 // CLI setup
 const program = new Command();
@@ -25,7 +22,7 @@ program
   .requiredOption('-u, --url <url>', 'Target URL to scrape')
   .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
   .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
-  .option('--headless', 'Run browser in headless mode', true)
+  .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
   .parse(process.argv);
 
@@ -40,6 +37,18 @@ function validateUrl(url) {
     logger.error(`Invalid URL: ${url}`);
     return false;
   }
+}
+
+// Convert headless string to boolean
+function parseHeadless(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase();
+    if (lower === 'false' || lower === '0' || lower === 'no') {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Main execution
@@ -57,11 +66,15 @@ async function main() {
       process.exit(1);
     }
     
+    // Parse headless option
+    const headless = parseHeadless(options.headless);
+    
     logger.info(`Target URL: ${options.url}`);
     if (options.limit) {
       logger.info(`Limit: ${options.limit} contacts`);
     }
     logger.info(`Output: ${options.output}`);
+    logger.info(`Headless: ${headless}`);
     logger.info('');
     
     // Initialize components
@@ -76,7 +89,7 @@ async function main() {
     });
     
     // Launch browser
-    await browserManager.launch(options.headless);
+    await browserManager.launch(headless);
     
     // Create scraper
     logger.info('Starting simple scraper...');
@@ -137,13 +150,13 @@ async function main() {
     const outputFile = path.join(outputDir, `contacts-${timestamp}.json`);
     fs.writeFileSync(outputFile, JSON.stringify(processedContacts, null, 2));
     
-    logger.info(`✓ Contacts saved to: ${outputFile}`);
+    logger.info(`Contacts saved to: ${outputFile}`);
     logger.info('');
     
     // Close browser
     await browserManager.close();
     
-    logger.info('✓ Scraping completed successfully');
+    logger.info('Scraping completed successfully');
     process.exit(0);
     
   } catch (error) {
@@ -151,7 +164,7 @@ async function main() {
       logger.error('CAPTCHA detected! The site is blocking automated access.');
       logger.error(`URL: ${options.url}`);
       logger.info('Suggestions:');
-      logger.info('  1. Try running with --headless=false to solve CAPTCHA manually');
+      logger.info('  1. Try running with --headless false to solve CAPTCHA manually');
       logger.info('  2. Increase delays with --delay option');
       logger.info('  3. Try a different URL or subdomain');
     } else {
