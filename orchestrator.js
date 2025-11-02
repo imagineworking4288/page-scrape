@@ -1,147 +1,181 @@
 #!/usr/bin/env node
 
-/**
- * Universal Professional Directory Scraper
- * Main CLI orchestrator for coordinating the scraping process
- * 
- * Usage:
- *   node orchestrator.js --url https://example.com/directory --limit 100
- *   node orchestrator.js -u https://example.com/directory -l 500
- */
-
 const { Command } = require('commander');
+const Table = require('cli-table3');
+const fs = require('fs');
+const path = require('path');
+
+// Import utilities
+const Logger = require('./utils/logger');
 const BrowserManager = require('./utils/browser-manager');
 const RateLimiter = require('./utils/rate-limiter');
-const logger = require('./utils/logger');
-require('dotenv').config();
 
-// Initialize CLI
+// Import scrapers
+const SimpleScraper = require('./scrapers/simple-scraper');
+
+// Initialize logger
+const logger = new Logger();
+
+// CLI setup
 const program = new Command();
-
 program
   .name('universal-scraper')
-  .description('Universal Professional Directory Scraper - Extract contact data from directory websites')
+  .description('Universal professional directory scraper')
   .version('1.0.0')
-  .requiredOption('-u, --url <url>', 'Target directory URL to scrape')
-  .option('-l, --limit <number>', 'Maximum number of contacts to extract', '100')
-  .option('-o, --output <format>', 'Output format (sqlite|csv|sheets|all)', 'all')
-  .option('--headless <boolean>', 'Run browser in headless mode', 'true')
-  .option('--delay <ms>', 'Delay between requests in milliseconds', '2000-5000')
+  .requiredOption('-u, --url <url>', 'Target URL to scrape')
+  .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
+  .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
+  .option('--headless', 'Run browser in headless mode', true)
+  .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
   .parse(process.argv);
 
 const options = program.opts();
 
-/**
- * Main scraping orchestration function
- */
-async function main() {
-  const browserManager = new BrowserManager();
-  const rateLimiter = new RateLimiter();
-  
+// Validate URL
+function validateUrl(url) {
   try {
-    // Display startup banner
-    console.log('\n╔════════════════════════════════════════════════╗');
-    console.log('║  Universal Professional Directory Scraper     ║');
-    console.log('║  Version 1.0.0 - Week 1 Foundation            ║');
-    console.log('╚════════════════════════════════════════════════╝\n');
-    
-    logger.info('Starting Universal Directory Scraper...');
-    logger.info(`Target URL: ${options.url}`);
-    logger.info(`Contact limit: ${options.limit}`);
-    logger.info(`Output format: ${options.output}`);
-    
-    // Validate URL
-    if (!isValidUrl(options.url)) {
-      throw new Error('Invalid URL provided. Please provide a valid HTTP/HTTPS URL.');
-    }
-    
-    // Parse limit
-    const limit = parseInt(options.limit);
-    if (isNaN(limit) || limit <= 0) {
-      throw new Error('Limit must be a positive number');
-    }
-    
-    // Initialize browser
-    logger.info('Initializing browser...');
-    await browserManager.initialize();
-    
-    // Navigate to target URL
-    logger.info('Navigating to target URL...');
-    await rateLimiter.waitBeforeRequest();
-    await browserManager.navigateSafely(options.url);
-    
-    logger.info('Page loaded successfully!');
-    
-    // Log memory usage
-    logger.logMemory();
-    
-    // Week 1: Basic initialization only
-    // Scraping logic will be added in Week 2
-    logger.info('\n=== Week 1 Foundation Test ===');
-    logger.info('✓ Browser initialized successfully');
-    logger.info('✓ Navigation completed without errors');
-    logger.info('✓ Rate limiting active');
-    logger.info('✓ Memory management active');
-    logger.info('✓ CAPTCHA detection active');
-    logger.info('\nWeek 1 foundation is working correctly!');
-    logger.info('Next: Week 2 will add Simple Scraper functionality\n');
-    
-    // Keep page open briefly to verify
-    await rateLimiter.sleep(2000);
-    
+    new URL(url);
+    return true;
   } catch (error) {
-    if (error.message === 'CAPTCHA_DETECTED') {
-      logger.error('CAPTCHA detected! The target website is blocking automated access.');
-      logger.error(`URL: ${error.url || options.url}`);
-      logger.info('Please try a different website or use a CAPTCHA solving service.');
-    } else {
-      logger.error(`Scraping failed: ${error.message}`);
-      if (error.stack) {
-        logger.debug(error.stack);
-      }
-    }
-    process.exit(1);
-  } finally {
-    // Cleanup
-    logger.info('Closing browser...');
-    await browserManager.close();
-    logger.info('Scraper shutdown complete');
-  }
-}
-
-/**
- * Validate URL format
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid
- */
-function isValidUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch (error) {
+    logger.error(`Invalid URL: ${url}`);
     return false;
   }
 }
 
-/**
- * Handle process signals for graceful shutdown
- */
-process.on('SIGINT', () => {
-  logger.info('Received SIGINT signal, shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  logger.info('Received SIGTERM signal, shutting down gracefully...');
-  process.exit(0);
-});
-
-// Run the orchestrator
-if (require.main === module) {
-  main().catch(error => {
-    logger.error(`Fatal error: ${error.message}`);
+// Main execution
+async function main() {
+  let browserManager = null;
+  
+  try {
+    logger.info('═══════════════════════════════════════');
+    logger.info('  UNIVERSAL PROFESSIONAL SCRAPER v1.0');
+    logger.info('═══════════════════════════════════════');
+    logger.info('');
+    
+    // Validate URL
+    if (!validateUrl(options.url)) {
+      process.exit(1);
+    }
+    
+    logger.info(`Target URL: ${options.url}`);
+    if (options.limit) {
+      logger.info(`Limit: ${options.limit} contacts`);
+    }
+    logger.info(`Output: ${options.output}`);
+    logger.info('');
+    
+    // Initialize components
+    logger.info('Initializing components...');
+    browserManager = new BrowserManager(logger);
+    
+    // Parse delay range
+    const [minDelay, maxDelay] = options.delay.split('-').map(d => parseInt(d));
+    const rateLimiter = new RateLimiter(logger, {
+      minDelay: minDelay || 2000,
+      maxDelay: maxDelay || 5000
+    });
+    
+    // Launch browser
+    await browserManager.launch(options.headless);
+    
+    // Create scraper
+    logger.info('Starting simple scraper...');
+    const scraper = new SimpleScraper(browserManager, rateLimiter, logger);
+    
+    // Scrape contacts
+    const contacts = await scraper.scrape(options.url, options.limit);
+    
+    // Post-process contacts
+    const processedContacts = scraper.postProcessContacts(contacts);
+    
+    // Log statistics
+    logger.info('');
+    logger.info('═══════════════════════════════════════');
+    logger.info('  SCRAPING COMPLETE');
+    logger.info('═══════════════════════════════════════');
+    logger.logStats({
+      'Total Contacts': processedContacts.length,
+      'With Email': processedContacts.filter(c => c.email).length,
+      'With Phone': processedContacts.filter(c => c.phone).length,
+      'With Both': processedContacts.filter(c => c.email && c.phone).length,
+      'Complete (Name+Email+Phone)': processedContacts.filter(c => c.name && c.email && c.phone).length,
+      'High Confidence': processedContacts.filter(c => c.confidence === 'high').length,
+      'Medium Confidence': processedContacts.filter(c => c.confidence === 'medium').length,
+      'Low Confidence': processedContacts.filter(c => c.confidence === 'low').length
+    });
+    logger.info('');
+    
+    // Display sample contacts in table
+    if (processedContacts.length > 0) {
+      logger.info('Sample Contacts (first 5):');
+      const table = new Table({
+        head: ['Name', 'Email', 'Phone', 'Confidence'],
+        colWidths: [25, 30, 20, 15],
+        wordWrap: true
+      });
+      
+      processedContacts.slice(0, 5).forEach(contact => {
+        table.push([
+          contact.name || 'N/A',
+          contact.email || 'N/A',
+          contact.phone || 'N/A',
+          contact.confidence || 'N/A'
+        ]);
+      });
+      
+      console.log(table.toString());
+      logger.info('');
+    }
+    
+    // Save to JSON
+    const outputDir = path.join(process.cwd(), 'output');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const outputFile = path.join(outputDir, `contacts-${timestamp}.json`);
+    fs.writeFileSync(outputFile, JSON.stringify(processedContacts, null, 2));
+    
+    logger.info(`✓ Contacts saved to: ${outputFile}`);
+    logger.info('');
+    
+    // Close browser
+    await browserManager.close();
+    
+    logger.info('✓ Scraping completed successfully');
+    process.exit(0);
+    
+  } catch (error) {
+    if (error.message === 'CAPTCHA_DETECTED') {
+      logger.error('CAPTCHA detected! The site is blocking automated access.');
+      logger.error(`URL: ${options.url}`);
+      logger.info('Suggestions:');
+      logger.info('  1. Try running with --headless=false to solve CAPTCHA manually');
+      logger.info('  2. Increase delays with --delay option');
+      logger.info('  3. Try a different URL or subdomain');
+    } else {
+      logger.error('Fatal error:', error);
+    }
+    
+    if (browserManager) {
+      await browserManager.close();
+    }
+    
     process.exit(1);
-  });
+  }
 }
 
-module.exports = { main };
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  logger.warn('Received SIGINT, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  logger.warn('Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+// Run main
+main();

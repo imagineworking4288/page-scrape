@@ -1,33 +1,22 @@
 {
-  "name": "universal-directory-scraper",
+  "name": "universal-scraper",
   "version": "1.0.0",
-  "description": "A modular, pattern-based web scraping system for extracting professional contact data from directory-style websites",
+  "description": "Universal professional directory scraper with intelligent extraction",
   "main": "orchestrator.js",
   "scripts": {
     "start": "node orchestrator.js",
-    "test": "node tests/full-run-test.js"
+    "test": "node tests/scraper-test.js"
   },
-  "keywords": [
-    "web-scraping",
-    "puppeteer",
-    "directory",
-    "contacts",
-    "automation"
-  ],
-  "author": "School Project",
+  "keywords": ["scraper", "puppeteer", "automation", "directory"],
+  "author": "",
   "license": "MIT",
   "dependencies": {
     "puppeteer": "^21.5.2",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "sqlite3": "^5.1.6",
-    "googleapis": "^128.0.0",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
     "cli-table3": "^0.6.3",
     "winston": "^3.11.0"
-  },
-  "engines": {
-    "node": ">=16.0.0"
   }
 }
