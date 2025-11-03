@@ -14,6 +14,12 @@ class SimpleScraper {
     
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
+      // Compass.com specific selectors (prioritized)
+      '[data-tn="agent-card"]',
+      '[data-test="agent-card"]',
+      '.agent-card',
+      '[class*="AgentCard"]',
+      
       // Specific data attributes (most reliable)
       '[data-testid*="agent"]', '[data-testid*="profile"]', '[data-testid*="contact"]',
       '[data-qa*="agent"]', '[data-qa*="profile"]', '[data-qa*="contact"]',
@@ -40,6 +46,9 @@ class SimpleScraper {
       
       // Navigate to URL
       await this.browserManager.navigate(url);
+      
+      // Wait for dynamic content to load
+      await page.waitForTimeout(2000);
       
       // Detect card pattern
       const cardSelector = await this.detectCardPattern(page);
@@ -154,8 +163,22 @@ class SimpleScraper {
           return [...new Set(phones)];
         };
         
-        // IMPROVED: Helper to extract name with more flexible patterns
+        // IMPROVED: Helper to extract name with better validation
         const extractName = (element) => {
+          // Blacklist of common non-name phrases
+          const blacklist = [
+            'get help', 'find an agent', 'contact us', 'view profile', 'learn more',
+            'show more', 'read more', 'see more', 'view all', 'load more',
+            'sign in', 'sign up', 'log in', 'register', 'subscribe',
+            'search', 'filter', 'sort by', 'menu', 'navigation',
+            'back to', 'return to', 'go to', 'click here', 'follow us'
+          ];
+          
+          const isBlacklisted = (text) => {
+            const lower = text.toLowerCase();
+            return blacklist.some(phrase => lower.includes(phrase));
+          };
+          
           // Try common name selectors first
           const nameSelectors = [
             'h1', 'h2', 'h3', 'h4',
@@ -170,6 +193,9 @@ class SimpleScraper {
             if (nameEl) {
               let text = nameEl.textContent.trim();
               
+              // Skip if blacklisted
+              if (isBlacklisted(text)) continue;
+              
               // Skip if too short or too long
               if (text.length < 3 || text.length > 60) continue;
               
@@ -178,9 +204,13 @@ class SimpleScraper {
               text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
               text = text.trim();
               
-              // Check if it looks like a name (flexible pattern)
-              // Accepts: John Doe, John Q. Doe, O'Brien, Smith-Jones, Mary-Jane, etc.
-              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)+$/i;
+              // Check word count (names should be 2-4 words)
+              const wordCount = text.split(/\s+/).length;
+              if (wordCount < 2 || wordCount > 4) continue;
+              
+              // Check if it looks like a name (strict pattern, case-sensitive)
+              // Accepts: John Doe, John Q. Doe, O'Brien, Smith-Jones, Mary-Jane
+              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+){1,2}$/;
               if (namePattern.test(text)) {
                 return text;
               }
@@ -188,8 +218,8 @@ class SimpleScraper {
               // Also accept names in all caps (convert to title case)
               if (/^[A-Z\s'\-\.]{5,50}$/.test(text)) {
                 const words = text.split(/\s+/);
-                // Must have at least 2 words
-                if (words.length >= 2) {
+                // Must have 2-4 words
+                if (words.length >= 2 && words.length <= 4) {
                   return words
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
                     .join(' ');
@@ -222,6 +252,9 @@ class SimpleScraper {
           
           // Check text nodes for name patterns
           for (const text of textNodes) {
+            // Skip if blacklisted
+            if (isBlacklisted(text)) continue;
+            
             // Skip obvious non-names
             if (/^(email|phone|contact|address|website|view|more|info|details)/i.test(text)) {
               continue;
@@ -232,7 +265,9 @@ class SimpleScraper {
               .replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '')
               .trim();
             
-            if (/^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)+$/i.test(cleanText) && 
+            const wordCount = cleanText.split(/\s+/).length;
+            if (wordCount >= 2 && wordCount <= 4 &&
+                /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+){1,2}$/.test(cleanText) && 
                 cleanText.length >= 5 && cleanText.length <= 50) {
               return cleanText;
             }
