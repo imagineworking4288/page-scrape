@@ -6,51 +6,115 @@ class DataMerger {
   mergeContacts(htmlContacts, pdfContacts) {
     this.logger.info(`Merging ${htmlContacts.length} HTML contacts with ${pdfContacts.length} PDF contacts`);
     
-    const merged = new Map();
+    // FIXED: Multi-key matching strategy
+    // We'll use Maps for each key type
+    const emailMap = new Map();  // email -> contact
+    const phoneMap = new Map();  // phone -> contact
+    const nameMap = new Map();   // name -> contact
+    const allContacts = new Map(); // unique ID -> contact
     
-    // Add HTML contacts first (they have priority)
+    let contactId = 0;
+    
+    // Step 1: Add HTML contacts (they have priority)
     for (const contact of htmlContacts) {
-      const key = this.createContactKey(contact);
-      merged.set(key, { ...contact, source: 'html' });
+      const id = `html_${contactId++}`;
+      const contactWithSource = { ...contact, source: 'html', _id: id };
+      allContacts.set(id, contactWithSource);
+      
+      // Register in lookup maps
+      if (contact.email) {
+        const emailKey = this.normalizeEmail(contact.email);
+        emailMap.set(emailKey, id);
+      }
+      if (contact.phone) {
+        const phoneKey = this.normalizePhone(contact.phone);
+        phoneMap.set(phoneKey, id);
+      }
+      if (contact.name) {
+        const nameKey = contact.name.toLowerCase().trim();
+        nameMap.set(nameKey, id);
+      }
     }
     
-    this.logger.debug(`Added ${htmlContacts.length} HTML contacts to merge map`);
+    this.logger.debug(`Indexed ${htmlContacts.length} HTML contacts`);
     
-    // Merge PDF contacts
+    // Step 2: Process PDF contacts with multi-key matching
     let newFromPdf = 0;
     let mergedCount = 0;
     
     for (const contact of pdfContacts) {
-      const key = this.createContactKey(contact);
+      let matchedId = null;
       
-      if (merged.has(key)) {
-        // Contact exists - merge missing fields
-        const existing = merged.get(key);
-        merged.set(key, this.mergeTwoContacts(existing, contact));
+      // Try to match by email first (most reliable)
+      if (contact.email) {
+        const emailKey = this.normalizeEmail(contact.email);
+        if (emailMap.has(emailKey)) {
+          matchedId = emailMap.get(emailKey);
+          this.logger.debug(`Matched by email: ${contact.email}`);
+        }
+      }
+      
+      // If no email match, try phone
+      if (!matchedId && contact.phone) {
+        const phoneKey = this.normalizePhone(contact.phone);
+        if (phoneMap.has(phoneKey)) {
+          matchedId = phoneMap.get(phoneKey);
+          this.logger.debug(`Matched by phone: ${contact.phone}`);
+        }
+      }
+      
+      // If no email/phone match, try name as last resort
+      if (!matchedId && contact.name) {
+        const nameKey = contact.name.toLowerCase().trim();
+        if (nameMap.has(nameKey)) {
+          matchedId = nameMap.get(nameKey);
+          this.logger.debug(`Matched by name: ${contact.name}`);
+        }
+      }
+      
+      if (matchedId) {
+        // Found a match - merge the contacts
+        const existing = allContacts.get(matchedId);
+        const merged = this.mergeTwoContacts(existing, contact);
+        allContacts.set(matchedId, merged);
+        
+        // Update lookup maps with any new data
+        if (merged.email && !emailMap.has(this.normalizeEmail(merged.email))) {
+          emailMap.set(this.normalizeEmail(merged.email), matchedId);
+        }
+        if (merged.phone && !phoneMap.has(this.normalizePhone(merged.phone))) {
+          phoneMap.set(this.normalizePhone(merged.phone), matchedId);
+        }
+        
         mergedCount++;
       } else {
-        // New contact from PDF
-        merged.set(key, { ...contact, source: 'pdf' });
+        // No match found - add as new contact from PDF
+        const id = `pdf_${contactId++}`;
+        const contactWithSource = { ...contact, source: 'pdf', _id: id };
+        allContacts.set(id, contactWithSource);
+        
+        // Register in lookup maps
+        if (contact.email) {
+          emailMap.set(this.normalizeEmail(contact.email), id);
+        }
+        if (contact.phone) {
+          phoneMap.set(this.normalizePhone(contact.phone), id);
+        }
+        if (contact.name) {
+          nameMap.set(contact.name.toLowerCase().trim(), id);
+        }
+        
         newFromPdf++;
       }
     }
     
     this.logger.info(`Merge results: ${newFromPdf} new from PDF, ${mergedCount} merged`);
     
-    return Array.from(merged.values());
-  }
-
-  createContactKey(contact) {
-    // Format: "normalized_email||normalized_phone"
-    const email = this.normalizeEmail(contact.email);
-    const phone = this.normalizePhone(contact.phone);
-    
-    // If both are empty, use name as fallback (lowercase)
-    if (!email && !phone && contact.name) {
-      return `||${contact.name.toLowerCase().trim()}`;
-    }
-    
-    return `${email}||${phone}`;
+    // Convert back to array and remove internal _id field
+    return Array.from(allContacts.values()).map(contact => {
+      const { _id, ...rest } = contact;
+      return rest;
+    });
   }
 
   mergeTwoContacts(existing, newContact) {

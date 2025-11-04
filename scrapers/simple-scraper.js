@@ -204,22 +204,22 @@ class SimpleScraper {
               text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
               text = text.trim();
               
-              // Check word count (names should be 2-4 words)
+              // Check word count (names should be 1-4 words) - NOW ACCEPTS SINGLE WORDS
               const wordCount = text.split(/\s+/).length;
-              if (wordCount < 2 || wordCount > 4) continue;
+              if (wordCount < 1 || wordCount > 4) continue;
               
-              // Check if it looks like a name (strict pattern, case-sensitive)
-              // Accepts: John Doe, John Q. Doe, O'Brien, Smith-Jones, Mary-Jane
-              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+){1,2}$/;
+              // FIXED: More permissive pattern that accepts single-word names
+              // Accepts: O'Brien, John Doe, John Q. Doe, Smith-Jones, Mary-Jane
+              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/;
               if (namePattern.test(text)) {
                 return text;
               }
               
               // Also accept names in all caps (convert to title case)
-              if (/^[A-Z\s'\-\.]{5,50}$/.test(text)) {
+              if (/^[A-Z\s'\-\.]{3,50}$/.test(text)) {
                 const words = text.split(/\s+/);
-                // Must have 2-4 words
-                if (words.length >= 2 && words.length <= 4) {
+                // Must have 1-4 words
+                if (words.length >= 1 && words.length <= 4) {
                   return words
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
                     .join(' ');
@@ -237,7 +237,7 @@ class SimpleScraper {
               acceptNode: (node) => {
                 const text = node.textContent.trim();
                 // Only accept substantial text nodes
-                return (text.length >= 5 && text.length <= 60) ? 
+                return (text.length >= 3 && text.length <= 60) ? 
                   NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
               }
             },
@@ -266,9 +266,10 @@ class SimpleScraper {
               .trim();
             
             const wordCount = cleanText.split(/\s+/).length;
-            if (wordCount >= 2 && wordCount <= 4 &&
-                /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+){1,2}$/.test(cleanText) && 
-                cleanText.length >= 5 && cleanText.length <= 50) {
+            // FIXED: Now accepts 1-4 words instead of 2-4
+            if (wordCount >= 1 && wordCount <= 4 &&
+                /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/.test(cleanText) && 
+                cleanText.length >= 3 && cleanText.length <= 50) {
               return cleanText;
             }
           }

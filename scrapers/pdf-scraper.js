@@ -13,7 +13,8 @@ class PdfScraper {
       /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
       /([0-9]{10})/g
     ];
-    this.NAME_PATTERN = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)+$/;
+    // FIXED: Changed + to * at the end to make additional name parts optional (accepts single-word names)
+    this.NAME_PATTERN = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/;
   }
 
   async scrapePdf(url, limit = null) {
@@ -214,15 +215,15 @@ class PdfScraper {
       cleanText = cleanText.replace(/,\s*(jr|sr|ii|iii|iv)\.?$/i, '');
       cleanText = cleanText.trim();
       
-      // Check if it looks like a name
-      if (this.NAME_PATTERN.test(cleanText) && cleanText.length >= 5 && cleanText.length <= 50) {
+      // Check if it looks like a name (now accepts single-word names)
+      if (this.NAME_PATTERN.test(cleanText) && cleanText.length >= 3 && cleanText.length <= 50) {
         return cleanText;
       }
       
       // Check for all-caps names (convert to title case)
-      if (/^[A-Z\s'\-]{5,50}$/.test(cleanText)) {
+      if (/^[A-Z\s'\-]{3,50}$/.test(cleanText)) {
         const words = cleanText.split(/\s+/);
-        if (words.length >= 2 && words.length <= 4) {
+        if (words.length >= 1 && words.length <= 4) {
           return words
             .map(word => word.charAt(0) + word.slice(1).toLowerCase())
             .join(' ');
@@ -233,7 +234,7 @@ class PdfScraper {
     // Fallback: check all text for name patterns
     for (const element of textElements) {
       const text = element.text.trim();
-      if (this.NAME_PATTERN.test(text) && text.length >= 5 && text.length <= 50) {
+      if (this.NAME_PATTERN.test(text) && text.length >= 3 && text.length <= 50) {
         return text;
       }
     }
