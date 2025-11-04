@@ -1,13 +1,15 @@
 {
   "name": "universal-scraper",
   "version": "1.0.0",
-  "description": "Universal professional directory scraper with intelligent extraction",
+  "description": "Universal professional directory scraper with intelligent extraction and PDF fallback",
   "main": "orchestrator.js",
   "scripts": {
     "start": "node orchestrator.js",
-    "test": "node tests/scraper-test.js"
+    "test": "node tests/scraper-test.js",
+    "test:pdf": "node tests/pdf-scraper-test.js",
+    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js"
   },
-  "keywords": ["scraper", "puppeteer", "automation", "directory"],
+  "keywords": ["scraper", "puppeteer", "automation", "directory", "pdf"],
   "author": "",
   "license": "MIT",
   "dependencies": {

@@ -6,12 +6,14 @@ const fs = require('fs');
 const path = require('path');
 
 // Import utilities
-const logger = require('./utils/logger');  // Changed: logger is an instance, not a class
+const logger = require('./utils/logger');
 const BrowserManager = require('./utils/browser-manager');
 const RateLimiter = require('./utils/rate-limiter');
 
 // Import scrapers
 const SimpleScraper = require('./scrapers/simple-scraper');
+const PdfScraper = require('./scrapers/pdf-scraper');
+const DataMerger = require('./scrapers/data-merger');
 
 // CLI setup
 const program = new Command();
@@ -24,6 +26,8 @@ program
   .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
   .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
+  .option('--no-pdf', 'Disable PDF fallback (HTML only)')
+  .option('--completeness <threshold>', 'Min completeness for PDF (default: 0.7)', '0.7')
   .parse(process.argv);
 
 const options = program.opts();
@@ -75,6 +79,10 @@ async function main() {
     }
     logger.info(`Output: ${options.output}`);
     logger.info(`Headless: ${headless}`);
+    logger.info(`PDF Fallback: ${options.pdf !== false ? 'enabled' : 'disabled'}`);
+    if (options.pdf !== false) {
+      logger.info(`Completeness Threshold: ${(parseFloat(options.completeness) * 100).toFixed(0)}%`);
+    }
     logger.info('');
     
     // Initialize components
@@ -91,15 +99,48 @@ async function main() {
     // Launch browser
     await browserManager.launch(headless);
     
-    // Create scraper
-    logger.info('Starting simple scraper...');
-    const scraper = new SimpleScraper(browserManager, rateLimiter, logger);
+    // Create scrapers and merger
+    logger.info('Starting hybrid HTML+PDF scraper...');
+    const simpleScraper = new SimpleScraper(browserManager, rateLimiter, logger);
+    const pdfScraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const merger = new DataMerger(logger);
     
-    // Scrape contacts
-    const contacts = await scraper.scrape(options.url, options.limit);
+    // Step 1: HTML scraping
+    logger.info('Step 1: HTML scraping...');
+    const htmlContacts = await simpleScraper.scrape(options.url, options.limit);
+    
+    // Calculate completeness
+    const complete = htmlContacts.filter(c => c.name && c.email && c.phone).length;
+    const completeness = htmlContacts.length > 0 ? complete / htmlContacts.length : 0;
+    logger.info(`HTML completeness: ${(completeness * 100).toFixed(1)}% (${complete}/${htmlContacts.length} contacts have all fields)`);
+    
+    // Step 2: PDF fallback if needed
+    let finalContacts = htmlContacts;
+    const usePdf = options.pdf !== false;
+    const minCompleteness = parseFloat(options.completeness) || 0.7;
+    
+    if (usePdf && completeness < minCompleteness) {
+      logger.info(`Completeness ${(completeness * 100).toFixed(1)}% < ${(minCompleteness * 100).toFixed(0)}%, using PDF fallback...`);
+      
+      try {
+        const pdfContacts = await pdfScraper.scrapePdf(options.url, options.limit);
+        logger.info(`PDF extracted ${pdfContacts.length} contacts`);
+        
+        // Merge
+        logger.info('Merging HTML and PDF results...');
+        finalContacts = merger.mergeContacts(htmlContacts, pdfContacts);
+        logger.info(`Merged result: ${finalContacts.length} total contacts`);
+      } catch (error) {
+        logger.warn(`PDF scraping failed: ${error.message}`);
+        logger.warn('Falling back to HTML results only');
+        finalContacts = htmlContacts;
+      }
+    } else {
+      logger.info('HTML extraction sufficient, skipping PDF');
+    }
     
     // Post-process contacts
-    const processedContacts = scraper.postProcessContacts(contacts);
+    const processedContacts = simpleScraper.postProcessContacts(finalContacts);
     
     // Log statistics
     logger.info('');
@@ -114,7 +155,10 @@ async function main() {
       'Complete (Name+Email+Phone)': processedContacts.filter(c => c.name && c.email && c.phone).length,
       'High Confidence': processedContacts.filter(c => c.confidence === 'high').length,
       'Medium Confidence': processedContacts.filter(c => c.confidence === 'medium').length,
-      'Low Confidence': processedContacts.filter(c => c.confidence === 'low').length
+      'Low Confidence': processedContacts.filter(c => c.confidence === 'low').length,
+      'From HTML': processedContacts.filter(c => c.source === 'html').length,
+      'From PDF': processedContacts.filter(c => c.source === 'pdf').length,
+      'Merged': processedContacts.filter(c => c.source === 'merged').length
     });
     logger.info('');
     
@@ -122,8 +166,8 @@ async function main() {
     if (processedContacts.length > 0) {
       logger.info('Sample Contacts (first 5):');
       const table = new Table({
-        head: ['Name', 'Email', 'Phone', 'Confidence'],
-        colWidths: [25, 30, 20, 15],
+        head: ['Name', 'Email', 'Phone', 'Source', 'Confidence'],
+        colWidths: [25, 30, 20, 10, 12],
         wordWrap: true
       });
       
@@ -132,6 +176,7 @@ async function main() {
           contact.name || 'N/A',
           contact.email || 'N/A',
           contact.phone || 'N/A',
+          contact.source || 'N/A',
           contact.confidence || 'N/A'
         ]);
       });
