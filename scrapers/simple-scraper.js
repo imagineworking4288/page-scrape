@@ -208,9 +208,9 @@ class SimpleScraper {
               const wordCount = text.split(/\s+/).length;
               if (wordCount < 1 || wordCount > 4) continue;
               
-              // FIXED: More permissive pattern that accepts single-word names
-              // Accepts: O'Brien, John Doe, John Q. Doe, Smith-Jones, Mary-Jane
-              const namePattern = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/;
+              // FIXED: More permissive pattern that accepts both straight and curly apostrophes
+              // Accepts: O'Brien, O'Brien, John Doe, John Q. Doe, Smith-Jones, Mary-Jane
+              const namePattern = /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/;
               if (namePattern.test(text)) {
                 return text;
               }
@@ -260,7 +260,7 @@ class SimpleScraper {
               continue;
             }
             
-            // Look for name pattern
+            // Look for name pattern - FIXED: Now accepts both apostrophe types
             const cleanText = text
               .replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '')
               .trim();
@@ -268,7 +268,7 @@ class SimpleScraper {
             const wordCount = cleanText.split(/\s+/).length;
             // FIXED: Now accepts 1-4 words instead of 2-4
             if (wordCount >= 1 && wordCount <= 4 &&
-                /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/.test(cleanText) && 
+                /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/.test(cleanText) && 
                 cleanText.length >= 3 && cleanText.length <= 50) {
               return cleanText;
             }

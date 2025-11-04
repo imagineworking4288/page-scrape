@@ -13,8 +13,8 @@ class PdfScraper {
       /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
       /([0-9]{10})/g
     ];
-    // FIXED: Changed + to * at the end to make additional name parts optional (accepts single-word names)
-    this.NAME_PATTERN = /^[A-Z][a-z'\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z'\-]+)*$/;
+    // FIXED: Now accepts BOTH straight (') and curly (') apostrophes
+    this.NAME_PATTERN = /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/;
   }
 
   async scrapePdf(url, limit = null) {
