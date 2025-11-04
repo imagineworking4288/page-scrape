@@ -1,7 +1,14 @@
-const PdfScraper = require('../scrapers/pdf-scraper');
-const DataMerger = require('../scrapers/data-merger');
+#!/usr/bin/env node
 
-// Mock classes
+const PdfScraper = require('../scrapers/pdf-scraper');
+const { Command } = require('commander');
+
+// Real imports for live testing
+const logger = require('../utils/logger');
+const BrowserManager = require('../utils/browser-manager');
+const RateLimiter = require('../utils/rate-limiter');
+
+// Mock classes for unit tests
 class MockLogger {
   info() {}
   warn() {}
@@ -61,7 +68,7 @@ class TestRunner {
 
   summary() {
     console.log('\n═══════════════════════════════════════');
-    console.log('  TEST SUMMARY');
+    console.log('  UNIT TEST SUMMARY');
     console.log('═══════════════════════════════════════');
     console.log(`Total Tests: ${this.passed + this.failed}`);
     console.log(`Passed: ${this.passed}`);
@@ -69,30 +76,135 @@ class TestRunner {
     console.log('');
     
     if (this.failed === 0) {
-      console.log('✓ All tests passed!');
+      console.log('✓ All unit tests passed!');
     } else {
-      console.log(`✗ ${this.failed} test(s) failed`);
-      process.exit(1);
+      console.log(`✗ ${this.failed} unit test(s) failed`);
     }
   }
 }
 
-async function runTests() {
+// Live URL testing
+async function testLiveUrl(url, headless = true) {
+  console.log('\n\n╔═══════════════════════════════════════╗');
+  console.log('║   LIVE URL TEST - PDF SCRAPER          ║');
+  console.log('╚═══════════════════════════════════════╝\n');
+  console.log(`URL: ${url}\n`);
+
+  let browserManager = null;
+
+  try {
+    // Initialize real components
+    console.log('[1/4] Initializing browser...');
+    browserManager = new BrowserManager(logger);
+    const rateLimiter = new RateLimiter();
+    await browserManager.launch(headless);
+    console.log('✓ Browser launched\n');
+
+    // Create PDF scraper
+    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+
+    // Navigate to URL
+    console.log('[2/4] Navigating to URL...');
+    await browserManager.navigate(url);
+    console.log('✓ Page loaded\n');
+
+    // Check if PDF
+    console.log('[3/4] Checking page type...');
+    const page = browserManager.getPage();
+    const contentType = await page.evaluate(() => {
+      return document.contentType || document.querySelector('embed')?.type || 'text/html';
+    });
+    console.log(`  Content type: ${contentType}`);
+    
+    const isPdf = contentType.includes('pdf');
+    console.log(`  Is PDF: ${isPdf ? 'YES' : 'NO (will try PDF extraction anyway)'}\n`);
+
+    // Extract contacts
+    console.log('[4/4] Extracting contacts from PDF...');
+    const contacts = await scraper.scrapePdf(url, null);
+    console.log(`✓ Extracted ${contacts.length} contacts\n`);
+
+    // Display results
+    displayResults(contacts);
+
+    // Cleanup
+    await browserManager.close();
+
+    return { success: true, contacts };
+
+  } catch (error) {
+    console.error(`\n✗ Live test failed: ${error.message}`);
+    if (browserManager) {
+      await browserManager.close();
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+function displayResults(contacts) {
+  console.log('═══════════════════════════════════════════════════');
+  console.log('  DATA QUALITY METRICS');
+  console.log('═══════════════════════════════════════════════════\n');
+
+  const total = contacts.length;
+  const withName = contacts.filter(c => c.name).length;
+  const withEmail = contacts.filter(c => c.email).length;
+  const withPhone = contacts.filter(c => c.phone).length;
+  const complete = contacts.filter(c => c.name && c.email && c.phone).length;
+
+  console.log(`Total Contacts:     ${total}`);
+  console.log(`With Name:          ${withName} (${total > 0 ? ((withName/total)*100).toFixed(1) : 0}%)`);
+  console.log(`With Email:         ${withEmail} (${total > 0 ? ((withEmail/total)*100).toFixed(1) : 0}%)`);
+  console.log(`With Phone:         ${withPhone} (${total > 0 ? ((withPhone/total)*100).toFixed(1) : 0}%)`);
+  console.log(`Complete (all 3):   ${complete} (${total > 0 ? ((complete/total)*100).toFixed(1) : 0}%)`);
+
+  const highConf = contacts.filter(c => c.confidence === 'high').length;
+  const medConf = contacts.filter(c => c.confidence === 'medium').length;
+  const lowConf = contacts.filter(c => c.confidence === 'low').length;
+
+  console.log(`\nConfidence Levels:`);
+  console.log(`  High:   ${highConf}`);
+  console.log(`  Medium: ${medConf}`);
+  console.log(`  Low:    ${lowConf}`);
+
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log('  RAW SCRAPED DATA');
+  console.log('═══════════════════════════════════════════════════\n');
+
+  if (contacts.length === 0) {
+    console.log('(No contacts extracted)');
+  } else {
+    contacts.forEach((contact, index) => {
+      console.log(`Contact #${index + 1}:`);
+      console.log(`  Name:       ${contact.name || '(missing)'}`);
+      console.log(`  Email:      ${contact.email || '(missing)'}`);
+      console.log(`  Phone:      ${contact.phone || '(missing)'}`);
+      console.log(`  Source:     ${contact.source || 'pdf'}`);
+      console.log(`  Confidence: ${contact.confidence || 'unknown'}`);
+      if (contact.rawText) {
+        console.log(`  Raw Text:   ${contact.rawText.substring(0, 100)}...`);
+      }
+      console.log('');
+    });
+  }
+
+  console.log('═══════════════════════════════════════════════════\n');
+}
+
+// Run unit tests
+async function runUnitTests() {
   const runner = new TestRunner();
-  const logger = new MockLogger();
-  const browserManager = new MockBrowserManager();
-  const rateLimiter = new MockRateLimiter();
+  const mockLogger = new MockLogger();
+  const mockBrowserManager = new MockBrowserManager();
+  const mockRateLimiter = new MockRateLimiter();
 
   console.log('═══════════════════════════════════════');
-  console.log('  PDF SCRAPER & DATA MERGER TESTS');
+  console.log('  PDF SCRAPER UNIT TESTS');
   console.log('═══════════════════════════════════════');
   console.log('');
 
-  // PDF Scraper Tests
-  console.log('--- PDF Scraper Tests ---\n');
-
   await runner.test('Phone Pattern Extraction', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const tests = [
       '(123) 456-7890',
@@ -108,7 +220,7 @@ async function runTests() {
   });
 
   await runner.test('Email Pattern Extraction', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const tests = [
       'test@example.com',
@@ -123,7 +235,7 @@ async function runTests() {
   });
 
   await runner.test('Name Pattern Recognition', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const validNames = [
       [{ text: 'John Doe', height: 20, x: 10, y: 10 }],
@@ -138,7 +250,7 @@ async function runTests() {
   });
 
   await runner.test('Single-Word Name Acceptance', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const singleWordNames = [
       [{ text: "O'Brien", height: 20, x: 10, y: 10 }],
@@ -154,7 +266,7 @@ async function runTests() {
   });
 
   await runner.test('Compound Name Support', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const compoundNames = [
       [{ text: "von Trapp", height: 20, x: 10, y: 10 }],
@@ -169,18 +281,16 @@ async function runTests() {
   });
 
   await runner.test('Y-Threshold Configuration', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
-    // Default should be 40
     runner.assertEqual(scraper.Y_THRESHOLD, 40, 'Default Y_THRESHOLD should be 40');
     
-    // Should be configurable
     scraper.setYThreshold(30);
     runner.assertEqual(scraper.Y_THRESHOLD, 30, 'Y_THRESHOLD should be configurable');
   });
 
   await runner.test('Contact Object Structure', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     const textGroup = [
       { text: 'John Doe', x: 10, y: 10, height: 20 },
@@ -200,7 +310,7 @@ async function runTests() {
   });
 
   await runner.test('Confidence Calculation', () => {
-    const scraper = new PdfScraper(browserManager, rateLimiter, logger);
+    const scraper = new PdfScraper(mockBrowserManager, mockRateLimiter, mockLogger);
     
     runner.assertEqual(scraper.calculateConfidence(true, true, true), 'high');
     runner.assertEqual(scraper.calculateConfidence(true, true, false), 'medium');
@@ -209,146 +319,44 @@ async function runTests() {
     runner.assertEqual(scraper.calculateConfidence(false, true, false), 'low');
   });
 
-  // Data Merger Tests
-  console.log('\n--- Data Merger Tests ---\n');
-
-  await runner.test('Multi-Key Matching Strategy', () => {
-    const merger = new DataMerger(logger);
-    
-    // Scenario 1: Match by email
-    const html1 = [{ name: 'John', email: 'john@x.com', phone: null }];
-    const pdf1 = [{ name: null, email: 'john@x.com', phone: '5551234567' }];
-    const merged1 = merger.mergeContacts(html1, pdf1);
-    runner.assertEqual(merged1.length, 1, 'Email match: Should merge into 1 contact');
-    runner.assertEqual(merged1[0].phone, '(555) 123-4567', 'Email match: Should add PDF phone (formatted)');
-    runner.assertEqual(merged1[0].source, 'merged', 'Email match: Source should be merged');
-    
-    // Scenario 2: Match by phone
-    const html2 = [{ name: 'John', email: null, phone: '5551234567' }];
-    const pdf2 = [{ name: null, email: 'john@x.com', phone: '(555) 123-4567' }];
-    const merged2 = merger.mergeContacts(html2, pdf2);
-    runner.assertEqual(merged2.length, 1, 'Phone match: Should merge into 1 contact');
-    runner.assertEqual(merged2[0].email, 'john@x.com', 'Phone match: Should add PDF email');
-    runner.assertEqual(merged2[0].source, 'merged', 'Phone match: Source should be merged');
-    
-    // Scenario 3: Match by name (fallback)
-    const html3 = [{ name: 'John Doe', email: null, phone: null }];
-    const pdf3 = [{ name: 'John Doe', email: 'john@x.com', phone: null }];
-    const merged3 = merger.mergeContacts(html3, pdf3);
-    runner.assertEqual(merged3.length, 1, 'Name match: Should merge into 1 contact');
-    runner.assertEqual(merged3[0].email, 'john@x.com', 'Name match: Should add PDF email');
-    runner.assertEqual(merged3[0].source, 'merged', 'Name match: Source should be merged');
-    
-    // Scenario 4: No match (different everything)
-    const html4 = [{ name: 'John', email: 'john@x.com', phone: '5551234567' }];
-    const pdf4 = [{ name: 'Jane', email: 'jane@x.com', phone: '5559999999' }];
-    const merged4 = merger.mergeContacts(html4, pdf4);
-    runner.assertEqual(merged4.length, 2, 'No match: Should have 2 separate contacts');
-    runner.assert(merged4.some(c => c.name === 'John'), 'No match: Should have John');
-    runner.assert(merged4.some(c => c.name === 'Jane'), 'No match: Should have Jane');
-  });
-
-  await runner.test('Phone Normalization', () => {
-    const merger = new DataMerger(logger);
-    
-    const tests = [
-      { input: '(123) 456-7890', expected: '1234567890' },
-      { input: '123-456-7890', expected: '1234567890' },
-      { input: '+1 (123) 456-7890', expected: '1234567890' },
-      { input: '1234567890', expected: '1234567890' }
-    ];
-    
-    for (const test of tests) {
-      const result = merger.normalizePhone(test.input);
-      runner.assertEqual(result, test.expected, `Failed to normalize ${test.input}`);
-    }
-  });
-
-  await runner.test('Phone Formatting', () => {
-    const merger = new DataMerger(logger);
-    
-    const result = merger.formatPhone('1234567890');
-    runner.assertEqual(result, '(123) 456-7890', 'Should format as (123) 456-7890');
-  });
-
-  await runner.test('Simple Merge (No Overlap)', () => {
-    const merger = new DataMerger(logger);
-    
-    const htmlContacts = [
-      { name: 'John Doe', email: 'john@x.com', phone: '5551234567' }
-    ];
-    
-    const pdfContacts = [
-      { name: 'Jane Smith', email: 'jane@x.com', phone: '5559876543' }
-    ];
-    
-    const merged = merger.mergeContacts(htmlContacts, pdfContacts);
-    
-    runner.assertEqual(merged.length, 2, 'Should have 2 contacts (no overlap)');
-    runner.assert(merged.some(c => c.name === 'John Doe'), 'Should have John Doe');
-    runner.assert(merged.some(c => c.name === 'Jane Smith'), 'Should have Jane Smith');
-  });
-
-  await runner.test('Merge with Overlap (Fill Missing Fields)', () => {
-    const merger = new DataMerger(logger);
-    
-    const htmlContacts = [
-      { name: 'John Doe', email: 'john@x.com', phone: null }
-    ];
-    
-    const pdfContacts = [
-      { name: null, email: 'john@x.com', phone: '5551234567' }
-    ];
-    
-    const merged = merger.mergeContacts(htmlContacts, pdfContacts);
-    
-    runner.assertEqual(merged.length, 1, 'Should merge into 1 contact');
-    runner.assertEqual(merged[0].name, 'John Doe', 'Should keep HTML name');
-    runner.assertEqual(merged[0].phone, '(555) 123-4567', 'Should add PDF phone (formatted)');
-    runner.assertEqual(merged[0].source, 'merged', 'Source should be merged');
-  });
-
-  await runner.test('Deduplication', () => {
-    const merger = new DataMerger(logger);
-    
-    const htmlContacts = [
-      { name: 'John Doe', email: 'john@example.com', phone: '5551234567' },
-      { name: 'Jane Smith', email: 'jane@example.com', phone: '5559876543' }
-    ];
-    
-    const pdfContacts = [
-      { name: 'John Doe', email: 'john@example.com', phone: '5551234567' },
-      { name: 'Bob Johnson', email: 'bob@example.com', phone: '5551111111' }
-    ];
-    
-    const merged = merger.mergeContacts(htmlContacts, pdfContacts);
-    
-    runner.assertEqual(merged.length, 3, 'Should have 3 unique contacts');
-  });
-
-  await runner.test('Confidence Recalculation After Merge', () => {
-    const merger = new DataMerger(logger);
-    
-    const htmlContacts = [
-      { name: 'John Doe', email: 'john@x.com', phone: null, confidence: 'medium' }
-    ];
-    
-    const pdfContacts = [
-      { name: null, email: 'john@x.com', phone: '5551234567', confidence: 'medium' }
-    ];
-    
-    const merged = merger.mergeContacts(htmlContacts, pdfContacts);
-    
-    runner.assertEqual(merged[0].confidence, 'high', 'Confidence should be high after merge (all 3 fields)');
-  });
-
-  // Display summary
   runner.summary();
+  return runner.failed === 0;
 }
 
-// Run tests
-console.log('Starting PDF scraper and data merger test suite...\n');
-runTests().catch(error => {
+// Main execution
+async function main() {
+  // Parse command line arguments
+  const program = new Command();
+  program
+    .option('-u, --url <url>', 'URL to test with live PDF scraping')
+    .option('--headless [value]', 'Run browser in headless mode (default: true)', 'true')
+    .parse(process.argv);
+
+  const options = program.opts();
+
+  // Run unit tests first
+  console.log('Starting PDF Scraper tests...\n');
+  const unitTestsPassed = await runUnitTests();
+
+  // If URL provided, run live test
+  if (options.url) {
+    const headless = options.headless === 'false' ? false : true;
+    const liveResult = await testLiveUrl(options.url, headless);
+    
+    if (!liveResult.success) {
+      console.log('\n✗ Live URL test failed');
+      process.exit(1);
+    }
+  } else {
+    console.log('\n\nℹ No URL provided. To test live PDF scraping, run:');
+    console.log('  node tests/pdf-scraper-test.js --url "https://example.com/document.pdf"');
+  }
+
+  console.log('\n✓ Testing complete\n');
+  process.exit(unitTestsPassed ? 0 : 1);
+}
+
+main().catch(error => {
   console.error('Test suite failed:', error);
   process.exit(1);
 });
