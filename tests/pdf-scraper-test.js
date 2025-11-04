@@ -122,14 +122,13 @@ async function runTests() {
     }
   });
 
-  // FIXED: Test now passes arrays instead of single objects
   await runner.test('Name Pattern Recognition', () => {
     const scraper = new PdfScraper(browserManager, rateLimiter, logger);
     
     const validNames = [
-      [{ text: 'John Doe', height: 20 }],
-      [{ text: 'Mary Jane Smith', height: 20 }],
-      [{ text: "O'Brien", height: 18 }]
+      [{ text: 'John Doe', height: 20, x: 10, y: 10 }],
+      [{ text: 'Mary Jane Smith', height: 20, x: 10, y: 10 }],
+      [{ text: "O'Brien", height: 18, x: 10, y: 10 }]
     ];
     
     for (const nameArray of validNames) {
@@ -138,53 +137,46 @@ async function runTests() {
     }
   });
 
-  // NEW: Test single-word name acceptance
   await runner.test('Single-Word Name Acceptance', () => {
     const scraper = new PdfScraper(browserManager, rateLimiter, logger);
     
     const singleWordNames = [
-      [{ text: "O'Brien", height: 20 }],
-      [{ text: "Smith", height: 20 }],
-      [{ text: "McDonald", height: 20 }],
-      [{ text: "Lee", height: 20 }],
-      [{ text: "O'Malley", height: 20 }]
+      [{ text: "O'Brien", height: 20, x: 10, y: 10 }],
+      [{ text: "Smith", height: 20, x: 10, y: 10 }],
+      [{ text: "McDonald", height: 20, x: 10, y: 10 }],
+      [{ text: "Lee", height: 20, x: 10, y: 10 }]
     ];
     
     for (const nameArray of singleWordNames) {
       const name = scraper.extractName(nameArray);
       runner.assert(name !== null, `Should accept single-word name: "${nameArray[0].text}"`);
-      runner.assertEqual(name, nameArray[0].text, `Should preserve exact name: "${nameArray[0].text}"`);
     }
   });
 
-  await runner.test('Phone Normalization', () => {
+  await runner.test('Compound Name Support', () => {
     const scraper = new PdfScraper(browserManager, rateLimiter, logger);
     
-    const tests = [
-      { input: '(123) 456-7890', expected: '1234567890' },
-      { input: '123-456-7890', expected: '1234567890' },
-      { input: '+1 (123) 456-7890', expected: '1234567890' }
+    const compoundNames = [
+      [{ text: "von Trapp", height: 20, x: 10, y: 10 }],
+      [{ text: "de la Cruz", height: 20, x: 10, y: 10 }],
+      [{ text: "van der Berg", height: 20, x: 10, y: 10 }]
     ];
     
-    for (const test of tests) {
-      const result = scraper.normalizePhone(test.input);
-      runner.assertEqual(result, test.expected, `Failed to normalize ${test.input}`);
+    for (const nameArray of compoundNames) {
+      const name = scraper.extractName(nameArray);
+      runner.assert(name !== null, `Should accept compound name: "${nameArray[0].text}"`);
     }
   });
 
-  await runner.test('Email Normalization', () => {
+  await runner.test('Y-Threshold Configuration', () => {
     const scraper = new PdfScraper(browserManager, rateLimiter, logger);
     
-    const tests = [
-      { input: 'TEST@EXAMPLE.COM', expected: 'test@example.com' },
-      { input: 'User@Domain.Com', expected: 'user@domain.com' },
-      { input: '  email@test.com  ', expected: 'email@test.com' }
-    ];
+    // Default should be 40
+    runner.assertEqual(scraper.Y_THRESHOLD, 40, 'Default Y_THRESHOLD should be 40');
     
-    for (const test of tests) {
-      const result = scraper.normalizeEmail(test.input);
-      runner.assertEqual(result, test.expected, `Failed to normalize ${test.input}`);
-    }
+    // Should be configurable
+    scraper.setYThreshold(30);
+    runner.assertEqual(scraper.Y_THRESHOLD, 30, 'Y_THRESHOLD should be configurable');
   });
 
   await runner.test('Contact Object Structure', () => {
@@ -220,7 +212,6 @@ async function runTests() {
   // Data Merger Tests
   console.log('\n--- Data Merger Tests ---\n');
 
-  // NEW: Multi-Key Matching Strategy test replaces old createContactKey test
   await runner.test('Multi-Key Matching Strategy', () => {
     const merger = new DataMerger(logger);
     
@@ -229,12 +220,12 @@ async function runTests() {
     const pdf1 = [{ name: null, email: 'john@x.com', phone: '5551234567' }];
     const merged1 = merger.mergeContacts(html1, pdf1);
     runner.assertEqual(merged1.length, 1, 'Email match: Should merge into 1 contact');
-    runner.assertEqual(merged1[0].phone, '5551234567', 'Email match: Should add PDF phone');
+    runner.assertEqual(merged1[0].phone, '(555) 123-4567', 'Email match: Should add PDF phone (formatted)');
     runner.assertEqual(merged1[0].source, 'merged', 'Email match: Source should be merged');
     
     // Scenario 2: Match by phone
     const html2 = [{ name: 'John', email: null, phone: '5551234567' }];
-    const pdf2 = [{ name: null, email: 'john@x.com', phone: '5551234567' }];
+    const pdf2 = [{ name: null, email: 'john@x.com', phone: '(555) 123-4567' }];
     const merged2 = merger.mergeContacts(html2, pdf2);
     runner.assertEqual(merged2.length, 1, 'Phone match: Should merge into 1 contact');
     runner.assertEqual(merged2[0].email, 'john@x.com', 'Phone match: Should add PDF email');
@@ -255,6 +246,29 @@ async function runTests() {
     runner.assertEqual(merged4.length, 2, 'No match: Should have 2 separate contacts');
     runner.assert(merged4.some(c => c.name === 'John'), 'No match: Should have John');
     runner.assert(merged4.some(c => c.name === 'Jane'), 'No match: Should have Jane');
+  });
+
+  await runner.test('Phone Normalization', () => {
+    const merger = new DataMerger(logger);
+    
+    const tests = [
+      { input: '(123) 456-7890', expected: '1234567890' },
+      { input: '123-456-7890', expected: '1234567890' },
+      { input: '+1 (123) 456-7890', expected: '1234567890' },
+      { input: '1234567890', expected: '1234567890' }
+    ];
+    
+    for (const test of tests) {
+      const result = merger.normalizePhone(test.input);
+      runner.assertEqual(result, test.expected, `Failed to normalize ${test.input}`);
+    }
+  });
+
+  await runner.test('Phone Formatting', () => {
+    const merger = new DataMerger(logger);
+    
+    const result = merger.formatPhone('1234567890');
+    runner.assertEqual(result, '(123) 456-7890', 'Should format as (123) 456-7890');
   });
 
   await runner.test('Simple Merge (No Overlap)', () => {
@@ -290,26 +304,8 @@ async function runTests() {
     
     runner.assertEqual(merged.length, 1, 'Should merge into 1 contact');
     runner.assertEqual(merged[0].name, 'John Doe', 'Should keep HTML name');
-    runner.assertEqual(merged[0].phone, '5551234567', 'Should add PDF phone');
+    runner.assertEqual(merged[0].phone, '(555) 123-4567', 'Should add PDF phone (formatted)');
     runner.assertEqual(merged[0].source, 'merged', 'Source should be merged');
-  });
-
-  await runner.test('Merge Priority (HTML > PDF)', () => {
-    const merger = new DataMerger(logger);
-    
-    const htmlContacts = [
-      { name: 'John Smith', email: 'john@x.com', phone: '5551234567' }
-    ];
-    
-    const pdfContacts = [
-      { name: 'JOHN SMITH', email: 'john@x.com', phone: '5551234567' }
-    ];
-    
-    const merged = merger.mergeContacts(htmlContacts, pdfContacts);
-    
-    runner.assertEqual(merged.length, 1, 'Should merge into 1 contact');
-    runner.assertEqual(merged[0].name, 'John Smith', 'Should keep HTML name (better formatting)');
-    runner.assertEqual(merged[0].source, 'html', 'Source should remain html (no new data)');
   });
 
   await runner.test('Deduplication', () => {

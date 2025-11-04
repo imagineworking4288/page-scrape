@@ -1,25 +1,234 @@
+// NOTE: This implementation requires pdf-parse npm package
+// Run: npm install pdf-parse
+
+const fs = require('fs');
+const path = require('path');
+
 class PdfScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
     
-    // Configuration
-    this.Y_THRESHOLD = 100; // Vertical grouping threshold in pixels
+    // Try to load pdf-parse, fallback to coordinate-based if not available
+    try {
+      this.pdfParse = require('pdf-parse');
+      this.usePdfParse = true;
+      this.logger.info('Using pdf-parse for direct PDF text extraction');
+    } catch (error) {
+      this.usePdfParse = false;
+      this.logger.warn('pdf-parse not installed, using coordinate-based extraction');
+      this.logger.warn('Install with: npm install pdf-parse');
+    }
     
-    // Regex patterns
-    this.EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    this.PHONE_PATTERNS = [
+    // FIXED: Configurable Y_THRESHOLD with sensible default
+    this.Y_THRESHOLD = 40; // Reduced from 100 to 40 pixels
+    
+    // Pre-compiled regex patterns for performance
+    this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    this.PHONE_REGEXES = [
       /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
       /([0-9]{10})/g
     ];
-    // FIXED: Now accepts BOTH straight (') and curly (') apostrophes
-    this.NAME_PATTERN = /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/;
+    
+    // IMPROVED: Smart name pattern supporting compound names
+    // Accepts: O'Brien, O'Brien, McDonald, von Trapp, de la Cruz, Mary-Jane, etc.
+    // \u2019 = curly apostrophe ('), \u0027 = straight apostrophe (')
+    this.NAME_REGEX = /^(?:[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|[A-Z][a-z]+(?:[A-Z][a-z]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+)(?:\s+(?:[A-Z]\.?\s*|[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+))*$/;
+  }
+
+  /**
+   * Set custom Y threshold for grouping
+   * @param {number} threshold - Pixels between groups
+   */
+  setYThreshold(threshold) {
+    if (threshold < 10 || threshold > 200) {
+      throw new Error('Y_THRESHOLD must be between 10 and 200 pixels');
+    }
+    this.Y_THRESHOLD = threshold;
+    this.logger.info(`Y_THRESHOLD set to ${threshold}px`);
   }
 
   async scrapePdf(url, limit = null) {
     try {
       this.logger.info(`Starting PDF scrape of ${url}`);
+      
+      // Use direct PDF parsing if available, otherwise fall back to coordinate-based
+      if (this.usePdfParse) {
+        return await this.scrapePdfDirect(url, limit);
+      } else {
+        return await this.scrapePdfCoordinateBased(url, limit);
+      }
+      
+    } catch (error) {
+      this.logger.error(`PDF scraping failed: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * IMPROVED: Direct PDF text extraction using pdf-parse library
+   * This is much more reliable than coordinate-based extraction
+   */
+  async scrapePdfDirect(url, limit = null) {
+    try {
+      const page = this.browserManager.getPage();
+      
+      // Navigate to URL if not already there
+      if (page.url() !== url) {
+        await this.browserManager.navigate(url);
+      }
+      
+      // Wait for PDF to load
+      await page.waitForTimeout(3000);
+      
+      // Check if it's actually a PDF
+      const contentType = await page.evaluate(() => {
+        return document.contentType || document.querySelector('embed')?.type || null;
+      });
+      
+      if (!contentType || !contentType.includes('pdf')) {
+        this.logger.warn('URL does not appear to be a PDF, falling back to coordinate-based extraction');
+        return await this.scrapePdfCoordinateBased(url, limit);
+      }
+      
+      // Download the PDF temporarily
+      this.logger.info('Downloading PDF for parsing...');
+      const pdfBuffer = await page.evaluate(async () => {
+        const response = await fetch(window.location.href);
+        const arrayBuffer = await response.arrayBuffer();
+        return Array.from(new Uint8Array(arrayBuffer));
+      });
+      
+      // Convert back to Buffer
+      const buffer = Buffer.from(pdfBuffer);
+      
+      // Parse PDF
+      this.logger.info('Parsing PDF text...');
+      const data = await this.pdfParse(buffer);
+      const text = data.text;
+      
+      this.logger.info(`Extracted ${text.length} characters from PDF`);
+      
+      // Split text into sections (paragraphs/blocks)
+      const sections = this.splitIntoSections(text);
+      this.logger.info(`Split into ${sections.length} sections`);
+      
+      // Extract contacts from sections
+      const contacts = this.extractContactsFromSections(sections, limit);
+      this.logger.info(`Extracted ${contacts.length} contacts from PDF`);
+      
+      return contacts;
+      
+    } catch (error) {
+      this.logger.error(`Direct PDF parsing failed: ${error.message}`);
+      this.logger.info('Falling back to coordinate-based extraction');
+      return await this.scrapePdfCoordinateBased(url, limit);
+    }
+  }
+
+  /**
+   * Split PDF text into logical sections based on blank lines
+   */
+  splitIntoSections(text) {
+    // Split by multiple newlines (blank lines)
+    const sections = text
+      .split(/\n\s*\n+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 10); // Ignore very short sections
+    
+    return sections;
+  }
+
+  /**
+   * Extract contacts from text sections
+   */
+  extractContactsFromSections(sections, limit = null) {
+    const contacts = [];
+    
+    for (const section of sections) {
+      if (limit && contacts.length >= limit) break;
+      
+      // Extract data from this section
+      const emails = this.extractEmails(section);
+      const phones = this.extractPhones(section);
+      const name = this.extractNameFromText(section);
+      
+      // Must have at least one field
+      if (!name && emails.length === 0 && phones.length === 0) {
+        continue;
+      }
+      
+      // Calculate confidence
+      const confidence = this.calculateConfidence(name, emails.length > 0, phones.length > 0);
+      
+      contacts.push({
+        name: name || null,
+        email: emails[0] || null,
+        phone: phones[0] || null,
+        source: 'pdf',
+        confidence: confidence,
+        rawText: section.substring(0, 200)
+      });
+    }
+    
+    return contacts;
+  }
+
+  /**
+   * Extract name from plain text (smarter logic)
+   */
+  extractNameFromText(text) {
+    // Split into lines
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    // Check first 5 lines (names usually appear early)
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      let line = lines[i];
+      
+      // Clean up prefixes
+      line = line.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
+      line = line.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
+      line = line.trim();
+      
+      // Skip if too short or too long
+      if (line.length < 2 || line.length > 100) continue;
+      
+      // Check word count
+      const wordCount = line.split(/\s+/).length;
+      if (wordCount < 1 || wordCount > 5) continue;
+      
+      // Check if matches name pattern
+      if (this.NAME_REGEX.test(line)) {
+        return line;
+      }
+      
+      // Check for all-caps names (convert to title case)
+      if (/^[A-Z\s'\-\.]{2,100}$/.test(line)) {
+        const words = line.split(/\s+/);
+        if (words.length >= 1 && words.length <= 5) {
+          return words
+            .map(word => {
+              // Keep lowercase prepositions lowercase
+              if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
+                return word.toLowerCase();
+              }
+              return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            })
+            .join(' ');
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Fallback: Coordinate-based extraction (original method)
+   */
+  async scrapePdfCoordinateBased(url, limit = null) {
+    try {
+      this.logger.info('Using coordinate-based PDF extraction');
       const page = this.browserManager.getPage();
       
       // Navigate to URL if not already there
@@ -43,8 +252,8 @@ class PdfScraper {
       return contacts;
       
     } catch (error) {
-      this.logger.error(`PDF scraping failed: ${error.message}`);
-      return []; // Return empty array on failure
+      this.logger.error(`Coordinate-based PDF scraping failed: ${error.message}`);
+      return [];
     }
   }
 
@@ -117,7 +326,6 @@ class PdfScraper {
           groups.push(contact);
           contactsExtracted++;
           
-          // Check limit again after adding contact
           if (limit && contactsExtracted >= limit) {
             break;
           }
@@ -177,7 +385,7 @@ class PdfScraper {
 
   extractEmails(text) {
     if (!text) return [];
-    const matches = text.match(this.EMAIL_PATTERN);
+    const matches = text.match(this.EMAIL_REGEX);
     return matches ? [...new Set(matches)] : [];
   }
 
@@ -185,17 +393,15 @@ class PdfScraper {
     if (!text) return [];
     const phones = [];
     
-    for (const pattern of this.PHONE_PATTERNS) {
-      const regex = new RegExp(pattern.source, 'g');
-      const matches = text.match(regex);
+    for (const regex of this.PHONE_REGEXES) {
+      const matches = text.match(new RegExp(regex.source, 'g'));
       if (matches) {
         phones.push(...matches);
       }
     }
     
-    // Normalize and deduplicate
-    const normalized = phones.map(p => this.normalizePhone(p)).filter(p => p);
-    return [...new Set(normalized)];
+    // Deduplicate
+    return [...new Set(phones)];
   }
 
   extractName(textElements) {
@@ -203,56 +409,54 @@ class PdfScraper {
       return null;
     }
     
-    // Sort by height (larger text first - likely to be names/titles)
-    const sortedByHeight = [...textElements].sort((a, b) => b.height - a.height);
+    // IMPROVED: Position-weighted name extraction
+    // Priority: top of group (likely name) + larger text
+    const scored = textElements.map((el, index) => {
+      let score = 0;
+      
+      // Position score (earlier = better)
+      score += (textElements.length - index) * 10;
+      
+      // Height score (larger = better, but capped)
+      score += Math.min(el.height, 30);
+      
+      return { ...el, score };
+    });
     
-    // Check top 5 largest text elements
-    for (let i = 0; i < Math.min(5, sortedByHeight.length); i++) {
-      const text = sortedByHeight[i].text.trim();
+    // Sort by score
+    scored.sort((a, b) => b.score - a.score);
+    
+    // Check top 5 scored elements
+    for (let i = 0; i < Math.min(5, scored.length); i++) {
+      let text = scored[i].text.trim();
       
       // Clean up prefixes
-      let cleanText = text.replace(/^(agent|broker|realtor|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
-      cleanText = cleanText.replace(/,\s*(jr|sr|ii|iii|iv)\.?$/i, '');
-      cleanText = cleanText.trim();
+      text = text.replace(/^(agent|broker|realtor|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
+      text = text.replace(/,\s*(jr|sr|ii|iii|iv)\.?$/i, '');
+      text = text.trim();
       
-      // Check if it looks like a name (now accepts single-word names)
-      if (this.NAME_PATTERN.test(cleanText) && cleanText.length >= 3 && cleanText.length <= 50) {
-        return cleanText;
+      // Check if it looks like a name
+      if (this.NAME_REGEX.test(text) && text.length >= 2 && text.length <= 100) {
+        return text;
       }
       
       // Check for all-caps names (convert to title case)
-      if (/^[A-Z\s'\-]{3,50}$/.test(cleanText)) {
-        const words = cleanText.split(/\s+/);
-        if (words.length >= 1 && words.length <= 4) {
+      if (/^[A-Z\s'\-]{2,100}$/.test(text)) {
+        const words = text.split(/\s+/);
+        if (words.length >= 1 && words.length <= 5) {
           return words
-            .map(word => word.charAt(0) + word.slice(1).toLowerCase())
+            .map(word => {
+              if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
+                return word.toLowerCase();
+              }
+              return word.charAt(0) + word.slice(1).toLowerCase();
+            })
             .join(' ');
         }
       }
     }
     
-    // Fallback: check all text for name patterns
-    for (const element of textElements) {
-      const text = element.text.trim();
-      if (this.NAME_PATTERN.test(text) && text.length >= 3 && text.length <= 50) {
-        return text;
-      }
-    }
-    
     return null;
-  }
-
-  normalizeEmail(email) {
-    if (!email) return '';
-    return email.toLowerCase().trim();
-  }
-
-  normalizePhone(phone) {
-    if (!phone) return '';
-    // Remove all non-digits
-    const digits = phone.replace(/\D/g, '');
-    // Keep last 10 digits
-    return digits.slice(-10);
   }
 
   calculateConfidence(hasName, hasEmail, hasPhone) {

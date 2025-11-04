@@ -9,16 +9,23 @@
     "test:pdf": "node tests/pdf-scraper-test.js",
     "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js"
   },
-  "keywords": ["scraper", "puppeteer", "automation", "directory", "pdf"],
+  "keywords": [
+    "scraper",
+    "puppeteer",
+    "automation",
+    "directory",
+    "pdf"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "cli-table3": "^0.6.3",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.1",
+    "pdf-parse": "^1.1.4",
     "puppeteer": "^21.5.2",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "commander": "^11.1.0",
-    "dotenv": "^16.3.1",
-    "cli-table3": "^0.6.3",
     "winston": "^3.11.0"
   }
 }

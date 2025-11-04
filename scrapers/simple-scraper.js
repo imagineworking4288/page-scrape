@@ -4,13 +4,21 @@ class SimpleScraper {
     this.rateLimiter = rateLimiter;
     this.logger = logger;
     
-    // Regex patterns
-    this.EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    this.PHONE_PATTERNS = [
-      /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,  // (123) 456-7890
-      /(?:\+1[-.\s]?)?([0-9]{3})[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,         // 123-456-7890
-      /([0-9]{10})/g                                                            // 1234567890
+    // Pre-compiled regex patterns for performance
+    this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    this.PHONE_REGEXES = [
+      /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
+      /(?:\+1[-.\s]?)?([0-9]{3})[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
+      /([0-9]{10})/g
     ];
+    
+    // IMPROVED: Smart name pattern that handles compound names
+    // Accepts: O'Brien, O'Brien, McDonald, von Trapp, de la Cruz, Mary-Jane, etc.
+    // \u2019 = curly apostrophe ('), \u0027 = straight apostrophe (')
+    this.NAME_REGEX = /^(?:[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|[A-Z][a-z]+(?:[A-Z][a-z]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+)(?:\s+(?:[A-Z]\.?\s*|[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+))*$/;
+    
+    // FIXED: Word-boundary blacklist instead of substring matching
+    this.NAME_BLACKLIST_REGEX = /\b(get\s+help|find\s+an?\s+agent|contact\s+us|view\s+profile|learn\s+more|show\s+more|read\s+more|see\s+more|view\s+all|load\s+more|sign\s+in|sign\s+up|log\s+in|register|subscribe|search|filter|sort\s+by|menu|navigation|back\s+to|return\s+to|go\s+to|click\s+here|follow\s+us)\b/i;
     
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
@@ -140,21 +148,26 @@ class SimpleScraper {
 
   async extractContacts(page, cardSelector, limit) {
     try {
-      const contacts = await page.evaluate((selector, emailPattern, phonePatterns, lim) => {
+      // Pass regex patterns as strings to browser context
+      const contacts = await page.evaluate((selector, emailPattern, phonePatterns, namePattern, blacklistPattern, lim) => {
         const results = [];
+        
+        // Recreate regex in browser context
+        const emailRegex = new RegExp(emailPattern, 'g');
+        const nameRegex = new RegExp(namePattern);
+        const blacklistRegex = new RegExp(blacklistPattern, 'i');
+        const phoneRegexes = phonePatterns.map(p => new RegExp(p, 'g'));
         
         // Helper to extract emails
         const extractEmails = (text) => {
-          const regex = new RegExp(emailPattern, 'g');
-          const matches = text.match(regex);
+          const matches = text.match(emailRegex);
           return matches ? [...new Set(matches)] : [];
         };
         
         // Helper to extract phones
         const extractPhones = (text) => {
           const phones = [];
-          for (const pattern of phonePatterns) {
-            const regex = new RegExp(pattern, 'g');
+          for (const regex of phoneRegexes) {
             const matches = text.match(regex);
             if (matches) {
               phones.push(...matches);
@@ -163,22 +176,8 @@ class SimpleScraper {
           return [...new Set(phones)];
         };
         
-        // IMPROVED: Helper to extract name with better validation
+        // IMPROVED: Smart name extraction with minimal restrictions
         const extractName = (element) => {
-          // Blacklist of common non-name phrases
-          const blacklist = [
-            'get help', 'find an agent', 'contact us', 'view profile', 'learn more',
-            'show more', 'read more', 'see more', 'view all', 'load more',
-            'sign in', 'sign up', 'log in', 'register', 'subscribe',
-            'search', 'filter', 'sort by', 'menu', 'navigation',
-            'back to', 'return to', 'go to', 'click here', 'follow us'
-          ];
-          
-          const isBlacklisted = (text) => {
-            const lower = text.toLowerCase();
-            return blacklist.some(phrase => lower.includes(phrase));
-          };
-          
           // Try common name selectors first
           const nameSelectors = [
             'h1', 'h2', 'h3', 'h4',
@@ -193,42 +192,45 @@ class SimpleScraper {
             if (nameEl) {
               let text = nameEl.textContent.trim();
               
-              // Skip if blacklisted
-              if (isBlacklisted(text)) continue;
+              // Skip if matches blacklist (whole phrases)
+              if (blacklistRegex.test(text)) continue;
               
               // Skip if too short or too long
-              if (text.length < 3 || text.length > 60) continue;
+              if (text.length < 2 || text.length > 100) continue;
               
               // Clean up common prefixes/suffixes
               text = text.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
               text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
               text = text.trim();
               
-              // Check word count (names should be 1-4 words) - NOW ACCEPTS SINGLE WORDS
+              // Check word count (names should be 1-5 words)
               const wordCount = text.split(/\s+/).length;
-              if (wordCount < 1 || wordCount > 4) continue;
+              if (wordCount < 1 || wordCount > 5) continue;
               
-              // FIXED: More permissive pattern that accepts both straight and curly apostrophes
-              // Accepts: O'Brien, O'Brien, John Doe, John Q. Doe, Smith-Jones, Mary-Jane
-              const namePattern = /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/;
-              if (namePattern.test(text)) {
+              // IMPROVED: Smart name validation
+              if (nameRegex.test(text)) {
                 return text;
               }
               
-              // Also accept names in all caps (convert to title case)
-              if (/^[A-Z\s'\-\.]{3,50}$/.test(text)) {
+              // Accept all-caps names (convert to title case)
+              if (/^[A-Z\s'\-\.]{2,100}$/.test(text)) {
                 const words = text.split(/\s+/);
-                // Must have 1-4 words
-                if (words.length >= 1 && words.length <= 4) {
+                if (words.length >= 1 && words.length <= 5) {
                   return words
-                    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                    .map(word => {
+                      // Keep lowercase prepositions lowercase
+                      if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
+                        return word.toLowerCase();
+                      }
+                      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+                    })
                     .join(' ');
                 }
               }
             }
           }
           
-          // Fallback: Look for text that looks like a name in the first few text nodes
+          // Fallback: Look for name-like text in first 20 text nodes
           const textNodes = [];
           const walker = document.createTreeWalker(
             element,
@@ -236,40 +238,37 @@ class SimpleScraper {
             {
               acceptNode: (node) => {
                 const text = node.textContent.trim();
-                // Only accept substantial text nodes
-                return (text.length >= 3 && text.length <= 60) ? 
+                return (text.length >= 2 && text.length <= 100) ? 
                   NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
               }
-            },
-            false
+            }
           );
           
           let node;
+          let count = 0;
           while (node = walker.nextNode()) {
             textNodes.push(node.textContent.trim());
-            if (textNodes.length >= 10) break;
+            if (++count >= 20) break; // Limit to first 20 nodes
           }
           
           // Check text nodes for name patterns
           for (const text of textNodes) {
             // Skip if blacklisted
-            if (isBlacklisted(text)) continue;
+            if (blacklistRegex.test(text)) continue;
             
             // Skip obvious non-names
-            if (/^(email|phone|contact|address|website|view|more|info|details)/i.test(text)) {
+            if (/^(email|phone|contact|address|website|view|more|info|details|call|text|message)$/i.test(text)) {
               continue;
             }
             
-            // Look for name pattern - FIXED: Now accepts both apostrophe types
             const cleanText = text
               .replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '')
               .trim();
             
             const wordCount = cleanText.split(/\s+/).length;
-            // FIXED: Now accepts 1-4 words instead of 2-4
-            if (wordCount >= 1 && wordCount <= 4 &&
-                /^[A-Z][a-z''\-]+(?:\s+[A-Z]\.?\s*)?(?:\s+[A-Z][a-z''\-]+)*$/.test(cleanText) && 
-                cleanText.length >= 3 && cleanText.length <= 50) {
+            if (wordCount >= 1 && wordCount <= 5 &&
+                nameRegex.test(cleanText) && 
+                cleanText.length >= 2 && cleanText.length <= 100) {
               return cleanText;
             }
           }
@@ -321,18 +320,15 @@ class SimpleScraper {
             });
           }
           
-          // IMPROVED: Better confidence scoring
+          // Calculate confidence
           let confidence;
           if (name && emails.length > 0 && phones.length > 0) {
-            // Has all three fields
             confidence = 'high';
           } else if ((emails.length > 0 && phones.length > 0) || 
                      (name && emails.length > 0) || 
                      (name && phones.length > 0)) {
-            // Has two out of three fields
             confidence = 'medium';
           } else {
-            // Has only one field
             confidence = 'low';
           }
           
@@ -340,17 +336,22 @@ class SimpleScraper {
           if (name || emails.length > 0 || phones.length > 0) {
             results.push({
               name: name,
-              email: emails[0] || null,  // Use first email found
-              phone: phones[0] || null,  // Use first phone found
-              source: 'visible_text',
+              email: emails[0] || null,
+              phone: phones[0] || null,
+              source: 'html',
               confidence: confidence,
-              rawText: allText.substring(0, 200) // First 200 chars for debugging
+              rawText: allText.substring(0, 200)
             });
           }
         }
         
         return results;
-      }, cardSelector, this.EMAIL_PATTERN.source, this.PHONE_PATTERNS.map(p => p.source), limit);
+      }, cardSelector, 
+         this.EMAIL_REGEX.source, 
+         this.PHONE_REGEXES.map(r => r.source),
+         this.NAME_REGEX.source,
+         this.NAME_BLACKLIST_REGEX.source,
+         limit);
       
       return contacts;
       
@@ -360,38 +361,19 @@ class SimpleScraper {
     }
   }
 
-  // Helper to normalize phone numbers
-  normalizePhone(phone) {
-    if (!phone) return null;
-    // Remove all non-digits
-    const digits = phone.replace(/\D/g, '');
-    // Format as (XXX) XXX-XXXX
-    if (digits.length === 10) {
-      return `(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}`;
-    } else if (digits.length === 11 && digits[0] === '1') {
-      return `(${digits.substring(1, 4)}) ${digits.substring(4, 7)}-${digits.substring(7)}`;
-    }
-    return phone; // Return as-is if can't normalize
-  }
-
   // Helper to validate email
   isValidEmail(email) {
     if (!email) return false;
-    return this.EMAIL_PATTERN.test(email);
+    return this.EMAIL_REGEX.test(email);
   }
 
-  // Post-process contacts (normalize and deduplicate)
+  // Post-process contacts (deduplicate only - normalization happens in merger)
   postProcessContacts(contacts) {
     const seen = new Set();
     const processed = [];
     
     for (const contact of contacts) {
-      // Normalize phone
-      if (contact.phone) {
-        contact.phone = this.normalizePhone(contact.phone);
-      }
-      
-      // Create hash for deduplication
+      // Create hash for deduplication (using raw values)
       const hash = `${(contact.name || '').toLowerCase()}||${(contact.email || '').toLowerCase()}`;
       
       // Skip if duplicate

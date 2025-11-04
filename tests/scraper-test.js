@@ -96,7 +96,7 @@ async function runTests() {
   console.log('═══════════════════════════════════════');
   console.log('');
 
-  // Test 1: Email Pattern - Valid Emails
+  // Test 1: Email Pattern - Valid Emails (FIXED)
   await runner.test('Email Pattern - Valid Emails', () => {
     const validEmails = [
       'test@example.com',
@@ -106,13 +106,13 @@ async function runTests() {
     ];
 
     for (const email of validEmails) {
-      // Create a new regex without g flag for testing
-      const testPattern = new RegExp(scraper.EMAIL_PATTERN.source);
+      // Use EMAIL_REGEX (not EMAIL_PATTERN)
+      const testPattern = new RegExp(scraper.EMAIL_REGEX.source);
       runner.assertMatch(email, testPattern, `Should match ${email}`);
     }
   });
 
-  // Test 2: Email Pattern - Invalid Emails
+  // Test 2: Email Pattern - Invalid Emails (FIXED)
   await runner.test('Email Pattern - Invalid Emails', () => {
     const invalidEmails = [
       'notanemail',
@@ -122,14 +122,14 @@ async function runTests() {
     ];
 
     for (const email of invalidEmails) {
-      // Create a new regex without g flag for testing
-      const testPattern = new RegExp(scraper.EMAIL_PATTERN.source);
+      // Use EMAIL_REGEX (not EMAIL_PATTERN)
+      const testPattern = new RegExp(scraper.EMAIL_REGEX.source);
       const matches = email.match(testPattern);
       runner.assert(!matches || matches[0] !== email, `Should not match ${email}`);
     }
   });
 
-  // Test 3: Phone Pattern - US Formats
+  // Test 3: Phone Pattern - US Formats (FIXED)
   await runner.test('Phone Pattern - US Formats', () => {
     const validPhones = [
       '(123) 456-7890',
@@ -141,9 +141,9 @@ async function runTests() {
 
     for (const phone of validPhones) {
       let matched = false;
-      for (const pattern of scraper.PHONE_PATTERNS) {
-        // Create a new regex without g flag for testing
-        const testPattern = new RegExp(pattern.source);
+      // Use PHONE_REGEXES (not PHONE_PATTERNS)
+      for (const regex of scraper.PHONE_REGEXES) {
+        const testPattern = new RegExp(regex.source);
         if (testPattern.test(phone)) {
           matched = true;
           break;
@@ -153,21 +153,8 @@ async function runTests() {
     }
   });
 
-  // Test 4: Phone Normalization
-  await runner.test('Phone Normalization', () => {
-    const tests = [
-      { input: '1234567890', expected: '(123) 456-7890' },
-      { input: '(123) 456-7890', expected: '(123) 456-7890' },
-      { input: '123-456-7890', expected: '(123) 456-7890' },
-      { input: '+1 (123) 456-7890', expected: '(123) 456-7890' }
-    ];
-
-    for (const test of tests) {
-      const normalized = scraper.normalizePhone(test.input);
-      runner.assertEqual(normalized, test.expected, 
-        `Failed to normalize ${test.input}, got ${normalized}`);
-    }
-  });
+  // Test 4: Phone Normalization - REMOVED (moved to data-merger)
+  // This test is no longer applicable to simple-scraper
 
   // Test 5: Email Validation
   await runner.test('Email Validation', () => {
@@ -203,7 +190,7 @@ async function runTests() {
         name: 'John Doe', 
         email: 'john@example.com', 
         phone: '(123) 456-7890',
-        source: 'visible_text',
+        source: 'html',
         confidence: 'high'
       }
     ];
@@ -230,6 +217,32 @@ async function runTests() {
 
     const processed = scraper.postProcessContacts(contacts);
     runner.assertEqual(processed.length, 2, 'Should keep contacts with some fields null');
+  });
+
+  // NEW Test 11: Name Regex Pattern
+  await runner.test('Name Regex Pattern - Compound Names', () => {
+    // Test that NAME_REGEX exists and accepts compound names
+    runner.assert(scraper.NAME_REGEX, 'NAME_REGEX should be defined');
+    
+    const validNames = [
+      "John Doe",
+      "O'Brien",
+      "von Trapp",
+      "Mary-Jane",
+      "Smith"
+    ];
+    
+    for (const name of validNames) {
+      runner.assert(scraper.NAME_REGEX.test(name), `Should accept: ${name}`);
+    }
+  });
+
+  // NEW Test 12: Pre-compiled Regex Performance
+  await runner.test('Pre-compiled Regex Patterns', () => {
+    runner.assert(scraper.EMAIL_REGEX instanceof RegExp, 'EMAIL_REGEX should be pre-compiled');
+    runner.assert(Array.isArray(scraper.PHONE_REGEXES), 'PHONE_REGEXES should be array');
+    runner.assert(scraper.PHONE_REGEXES[0] instanceof RegExp, 'Phone patterns should be pre-compiled');
+    runner.assert(scraper.NAME_REGEX instanceof RegExp, 'NAME_REGEX should be pre-compiled');
   });
 
   // Display summary
