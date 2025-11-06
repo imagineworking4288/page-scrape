@@ -9,6 +9,7 @@ const path = require('path');
 const logger = require('./utils/logger');
 const BrowserManager = require('./utils/browser-manager');
 const RateLimiter = require('./utils/rate-limiter');
+const DomainExtractor = require('./utils/domain-extractor');
 
 // Import scrapers
 const SimpleScraper = require('./scrapers/simple-scraper');
@@ -88,6 +89,7 @@ async function main() {
     // Initialize components
     logger.info('Initializing components...');
     browserManager = new BrowserManager(logger);
+    const domainExtractor = new DomainExtractor(logger);
     
     // Parse delay range
     const [minDelay, maxDelay] = options.delay.split('-').map(d => parseInt(d));
@@ -142,6 +144,10 @@ async function main() {
     // Post-process contacts
     const processedContacts = simpleScraper.postProcessContacts(finalContacts);
     
+    // NEW: Generate domain statistics
+    logger.info('Analyzing domain distribution...');
+    const domainStats = domainExtractor.getDomainStats(processedContacts);
+    
     // Log statistics
     logger.info('');
     logger.info('═══════════════════════════════════════');
@@ -162,12 +168,71 @@ async function main() {
     });
     logger.info('');
     
+    // NEW: Log domain statistics
+    logger.info('═══════════════════════════════════════');
+    logger.info('  DOMAIN ANALYSIS');
+    logger.info('═══════════════════════════════════════');
+    logger.logStats({
+      'Unique Domains': domainStats.uniqueDomains,
+      'Business Domains': domainStats.businessDomains,
+      'Business Emails': domainStats.businessEmailCount,
+      'Personal Emails': domainStats.personalEmailCount,
+      'Business Email %': domainStats.withEmail > 0 
+        ? `${((domainStats.businessEmailCount / domainStats.withEmail) * 100).toFixed(1)}%` 
+        : '0.0%'
+    });
+    logger.info('');
+    
+    // NEW: Display top domains table
+    if (domainStats.topDomains.length > 0) {
+      logger.info('Top Domains (all):');
+      const domainTable = new Table({
+        head: ['Domain', 'Count', '%', 'Type'],
+        colWidths: [35, 10, 10, 12],
+        wordWrap: true
+      });
+      
+      domainStats.topDomains.slice(0, 5).forEach(item => {
+        const isBusiness = domainExtractor.isBusinessDomain(item.domain);
+        domainTable.push([
+          item.domain,
+          item.count,
+          item.percentage + '%',
+          isBusiness ? 'Business' : 'Personal'
+        ]);
+      });
+      
+      console.log(domainTable.toString());
+      logger.info('');
+    }
+    
+    // NEW: Display top business domains table
+    if (domainStats.topBusinessDomains.length > 0) {
+      logger.info('Top Business Domains:');
+      const businessDomainTable = new Table({
+        head: ['Domain', 'Count', '% of Business'],
+        colWidths: [40, 10, 18],
+        wordWrap: true
+      });
+      
+      domainStats.topBusinessDomains.slice(0, 5).forEach(item => {
+        businessDomainTable.push([
+          item.domain,
+          item.count,
+          item.percentage + '%'
+        ]);
+      });
+      
+      console.log(businessDomainTable.toString());
+      logger.info('');
+    }
+    
     // Display sample contacts in table
     if (processedContacts.length > 0) {
       logger.info('Sample Contacts (first 5):');
       const table = new Table({
-        head: ['Name', 'Email', 'Phone', 'Source', 'Confidence'],
-        colWidths: [25, 30, 20, 10, 12],
+        head: ['Name', 'Email', 'Phone', 'Domain', 'Type'],
+        colWidths: [20, 25, 18, 20, 10],
         wordWrap: true
       });
       
@@ -176,8 +241,8 @@ async function main() {
           contact.name || 'N/A',
           contact.email || 'N/A',
           contact.phone || 'N/A',
-          contact.source || 'N/A',
-          contact.confidence || 'N/A'
+          contact.domain || 'N/A',
+          contact.domainType || 'N/A'
         ]);
       });
       
@@ -193,7 +258,27 @@ async function main() {
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outputFile = path.join(outputDir, `contacts-${timestamp}.json`);
-    fs.writeFileSync(outputFile, JSON.stringify(processedContacts, null, 2));
+    
+    // NEW: Include domain statistics in output file
+    const outputData = {
+      metadata: {
+        scrapedAt: new Date().toISOString(),
+        url: options.url,
+        totalContacts: processedContacts.length,
+        domainStats: {
+          uniqueDomains: domainStats.uniqueDomains,
+          businessDomains: domainStats.businessDomains,
+          personalDomains: domainStats.personalEmailCount,
+          businessEmailCount: domainStats.businessEmailCount,
+          personalEmailCount: domainStats.personalEmailCount,
+          topDomains: domainStats.topDomains.slice(0, 10),
+          topBusinessDomains: domainStats.topBusinessDomains.slice(0, 10)
+        }
+      },
+      contacts: processedContacts
+    };
+    
+    fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2));
     
     logger.info(`Contacts saved to: ${outputFile}`);
     logger.info('');

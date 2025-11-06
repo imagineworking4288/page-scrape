@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const SimpleScraper = require('../scrapers/simple-scraper');
+const DomainExtractor = require('../utils/domain-extractor');
 const { Command } = require('commander');
 
 // Real imports for live testing
@@ -99,22 +100,23 @@ async function testLiveUrl(url, headless = true) {
 
   try {
     // Initialize real components
-    console.log('[1/5] Initializing browser...');
+    console.log('[1/6] Initializing browser...');
     browserManager = new BrowserManager(logger);
     const rateLimiter = new RateLimiter();
     await browserManager.launch(headless);
     console.log('✓ Browser launched\n');
 
-    // Create scraper
+    // Create scraper and domain extractor
     const scraper = new SimpleScraper(browserManager, rateLimiter, logger);
+    const domainExtractor = new DomainExtractor(logger);
 
     // Navigate to URL
-    console.log('[2/5] Navigating to URL...');
+    console.log('[2/6] Navigating to URL...');
     await browserManager.navigate(url);
     console.log('✓ Page loaded\n');
 
     // Detect card pattern
-    console.log('[3/5] Detecting card pattern...');
+    console.log('[3/6] Detecting card pattern...');
     const page = browserManager.getPage();
     const cardSelector = await scraper.detectCardPattern(page);
     
@@ -129,7 +131,7 @@ async function testLiveUrl(url, headless = true) {
     }
 
     // Extract contacts
-    console.log('[4/5] Extracting contacts...');
+    console.log('[4/6] Extracting contacts...');
     const contacts = await scraper.scrape(url, null);
     console.log(`✓ Extracted ${contacts.length} contacts\n`);
 
@@ -137,14 +139,19 @@ async function testLiveUrl(url, headless = true) {
     const processed = scraper.postProcessContacts(contacts);
     console.log(`✓ After deduplication: ${processed.length} contacts\n`);
 
+    // Analyze domains
+    console.log('[5/6] Analyzing domains...');
+    const domainStats = domainExtractor.getDomainStats(processed);
+    console.log(`✓ Found ${domainStats.uniqueDomains} unique domains\n`);
+
     // Display results
-    console.log('[5/5] Results:\n');
-    displayResults(processed);
+    console.log('[6/6] Results:\n');
+    displayResults(processed, domainStats);
 
     // Cleanup
     await browserManager.close();
 
-    return { success: true, contacts: processed };
+    return { success: true, contacts: processed, domainStats };
 
   } catch (error) {
     console.error(`\n✗ Live test failed: ${error.message}`);
@@ -155,7 +162,7 @@ async function testLiveUrl(url, headless = true) {
   }
 }
 
-function displayResults(contacts) {
+function displayResults(contacts, domainStats) {
   console.log('═══════════════════════════════════════════════════');
   console.log('  DATA QUALITY METRICS');
   console.log('═══════════════════════════════════════════════════\n');
@@ -181,6 +188,32 @@ function displayResults(contacts) {
   console.log(`  Medium: ${medConf}`);
   console.log(`  Low:    ${lowConf}`);
 
+  // NEW: Display domain statistics
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log('  DOMAIN ANALYSIS');
+  console.log('═══════════════════════════════════════════════════\n');
+
+  console.log(`Unique Domains:     ${domainStats.uniqueDomains}`);
+  console.log(`Business Domains:   ${domainStats.businessDomains}`);
+  console.log(`Business Emails:    ${domainStats.businessEmailCount} (${withEmail > 0 ? ((domainStats.businessEmailCount / withEmail) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(`Personal Emails:    ${domainStats.personalEmailCount} (${withEmail > 0 ? ((domainStats.personalEmailCount / withEmail) * 100).toFixed(1) : '0.0'}%)`);
+
+  if (domainStats.topDomains.length > 0) {
+    console.log(`\nTop 5 Domains:`);
+    domainStats.topDomains.slice(0, 5).forEach((item, index) => {
+      const domainExtractor = new DomainExtractor();
+      const type = domainExtractor.isBusinessDomain(item.domain) ? 'Business' : 'Personal';
+      console.log(`  ${index + 1}. ${item.domain} - ${item.count} contacts (${item.percentage}%) [${type}]`);
+    });
+  }
+
+  if (domainStats.topBusinessDomains.length > 0) {
+    console.log(`\nTop 5 Business Domains:`);
+    domainStats.topBusinessDomains.slice(0, 5).forEach((item, index) => {
+      console.log(`  ${index + 1}. ${item.domain} - ${item.count} contacts (${item.percentage}% of business)`);
+    });
+  }
+
   console.log('\n═══════════════════════════════════════════════════');
   console.log('  RAW SCRAPED DATA');
   console.log('═══════════════════════════════════════════════════\n');
@@ -188,11 +221,13 @@ function displayResults(contacts) {
   if (contacts.length === 0) {
     console.log('(No contacts extracted)');
   } else {
-    contacts.forEach((contact, index) => {
+    contacts.slice(0, 5).forEach((contact, index) => {
       console.log(`Contact #${index + 1}:`);
       console.log(`  Name:       ${contact.name || '(missing)'}`);
       console.log(`  Email:      ${contact.email || '(missing)'}`);
       console.log(`  Phone:      ${contact.phone || '(missing)'}`);
+      console.log(`  Domain:     ${contact.domain || '(missing)'}`);
+      console.log(`  Type:       ${contact.domainType || '(missing)'}`);
       console.log(`  Source:     ${contact.source || 'html'}`);
       console.log(`  Confidence: ${contact.confidence || 'unknown'}`);
       if (contact.rawText) {
@@ -358,6 +393,27 @@ async function runUnitTests() {
     runner.assert(Array.isArray(scraper.PHONE_REGEXES), 'PHONE_REGEXES should be array');
     runner.assert(scraper.PHONE_REGEXES[0] instanceof RegExp, 'Phone patterns should be pre-compiled');
     runner.assert(scraper.NAME_REGEX instanceof RegExp, 'NAME_REGEX should be pre-compiled');
+  });
+
+  // NEW: Test 12: Domain Extractor Integration
+  await runner.test('Domain Extractor Integration', () => {
+    runner.assert(scraper.domainExtractor, 'Should have domain extractor');
+    runner.assert(typeof scraper.addDomainInfo === 'function', 'Should have addDomainInfo method');
+  });
+
+  // NEW: Test 13: Domain Info Added to Contacts
+  await runner.test('Domain Info Added to Contacts', () => {
+    const contact = {
+      name: 'John Doe',
+      email: 'john@example.com',
+      phone: '1234567890'
+    };
+    
+    scraper.addDomainInfo(contact);
+    
+    runner.assert(contact.domain !== undefined, 'Should have domain field');
+    runner.assert(contact.domainType !== undefined, 'Should have domainType field');
+    runner.assertEqual(contact.domain, 'example.com', 'Should extract correct domain');
   });
 
   runner.summary();

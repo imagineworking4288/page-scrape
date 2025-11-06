@@ -3,6 +3,7 @@
 const DataMerger = require('../scrapers/data-merger');
 const SimpleScraper = require('../scrapers/simple-scraper');
 const PdfScraper = require('../scrapers/pdf-scraper');
+const DomainExtractor = require('../utils/domain-extractor');
 const { Command } = require('commander');
 
 // Real imports for live testing
@@ -77,7 +78,7 @@ async function testLiveUrl(url, headless = true) {
 
   try {
     // Initialize real components
-    console.log('[1/7] Initializing browser and components...');
+    console.log('[1/8] Initializing browser and components...');
     browserManager = new BrowserManager(logger);
     const rateLimiter = new RateLimiter();
     await browserManager.launch(headless);
@@ -85,16 +86,17 @@ async function testLiveUrl(url, headless = true) {
     const simpleScraper = new SimpleScraper(browserManager, rateLimiter, logger);
     const pdfScraper = new PdfScraper(browserManager, rateLimiter, logger);
     const merger = new DataMerger(logger);
+    const domainExtractor = new DomainExtractor(logger);
     
     console.log('✓ All components initialized\n');
 
     // Navigate to URL
-    console.log('[2/7] Navigating to URL...');
+    console.log('[2/8] Navigating to URL...');
     await browserManager.navigate(url);
     console.log('✓ Page loaded\n');
 
     // HTML Scraping
-    console.log('[3/7] Extracting contacts via HTML scraper...');
+    console.log('[3/8] Extracting contacts via HTML scraper...');
     const htmlContacts = await simpleScraper.scrape(url, null);
     console.log(`✓ HTML extracted ${htmlContacts.length} contacts\n`);
 
@@ -102,7 +104,7 @@ async function testLiveUrl(url, headless = true) {
     displayScraperResults('HTML', htmlContacts);
 
     // PDF Scraping
-    console.log('[4/7] Extracting contacts via PDF scraper...');
+    console.log('[4/8] Extracting contacts via PDF scraper...');
     let pdfContacts = [];
     try {
       pdfContacts = await pdfScraper.scrapePdf(url, null);
@@ -118,22 +120,27 @@ async function testLiveUrl(url, headless = true) {
     }
 
     // Merge data
-    console.log('[5/7] Merging HTML and PDF data...');
+    console.log('[5/8] Merging HTML and PDF data...');
     const mergedContacts = merger.mergeContacts(htmlContacts, pdfContacts);
     console.log(`✓ Merged into ${mergedContacts.length} total contacts\n`);
 
     // Analyze merge results
-    console.log('[6/7] Analyzing merge results...');
+    console.log('[6/8] Analyzing merge results...');
     analyzeMergeResults(htmlContacts, pdfContacts, mergedContacts);
 
+    // Analyze domains
+    console.log('[7/8] Analyzing domain distribution...');
+    const domainStats = domainExtractor.getDomainStats(mergedContacts);
+    console.log(`✓ Found ${domainStats.uniqueDomains} unique domains\n`);
+
     // Display final merged data
-    console.log('[7/7] Final merged results:\n');
-    displayFinalResults(mergedContacts);
+    console.log('[8/8] Final merged results:\n');
+    displayFinalResults(mergedContacts, domainStats);
 
     // Cleanup
     await browserManager.close();
 
-    return { success: true, contacts: mergedContacts };
+    return { success: true, contacts: mergedContacts, domainStats };
 
   } catch (error) {
     console.error(`\n✗ Live test failed: ${error.message}`);
@@ -155,12 +162,14 @@ function displayScraperResults(source, contacts) {
   const withEmail = contacts.filter(c => c.email).length;
   const withPhone = contacts.filter(c => c.phone).length;
   const complete = contacts.filter(c => c.name && c.email && c.phone).length;
+  const withDomain = contacts.filter(c => c.domain).length;
 
   console.log(`  ${source} Data Quality:`);
   console.log(`    Total:    ${total}`);
   console.log(`    Name:     ${withName} (${((withName/total)*100).toFixed(1)}%)`);
   console.log(`    Email:    ${withEmail} (${((withEmail/total)*100).toFixed(1)}%)`);
   console.log(`    Phone:    ${withPhone} (${((withPhone/total)*100).toFixed(1)}%)`);
+  console.log(`    Domain:   ${withDomain} (${((withDomain/total)*100).toFixed(1)}%)`);
   console.log(`    Complete: ${complete} (${((complete/total)*100).toFixed(1)}%)`);
   console.log('');
 }
@@ -201,7 +210,7 @@ function analyzeMergeResults(htmlContacts, pdfContacts, mergedContacts) {
   console.log('');
 }
 
-function displayFinalResults(contacts) {
+function displayFinalResults(contacts, domainStats) {
   console.log('═══════════════════════════════════════════════════');
   console.log('  DATA QUALITY METRICS');
   console.log('═══════════════════════════════════════════════════\n');
@@ -227,6 +236,32 @@ function displayFinalResults(contacts) {
   console.log(`  Medium: ${medConf}`);
   console.log(`  Low:    ${lowConf}`);
 
+  // NEW: Display domain statistics
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log('  DOMAIN ANALYSIS');
+  console.log('═══════════════════════════════════════════════════\n');
+
+  console.log(`Unique Domains:     ${domainStats.uniqueDomains}`);
+  console.log(`Business Domains:   ${domainStats.businessDomains}`);
+  console.log(`Business Emails:    ${domainStats.businessEmailCount} (${withEmail > 0 ? ((domainStats.businessEmailCount / withEmail) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(`Personal Emails:    ${domainStats.personalEmailCount} (${withEmail > 0 ? ((domainStats.personalEmailCount / withEmail) * 100).toFixed(1) : '0.0'}%)`);
+
+  if (domainStats.topDomains.length > 0) {
+    console.log(`\nTop 5 Domains:`);
+    domainStats.topDomains.slice(0, 5).forEach((item, index) => {
+      const domainExtractor = new DomainExtractor();
+      const type = domainExtractor.isBusinessDomain(item.domain) ? 'Business' : 'Personal';
+      console.log(`  ${index + 1}. ${item.domain} - ${item.count} contacts (${item.percentage}%) [${type}]`);
+    });
+  }
+
+  if (domainStats.topBusinessDomains.length > 0) {
+    console.log(`\nTop 5 Business Domains:`);
+    domainStats.topBusinessDomains.slice(0, 5).forEach((item, index) => {
+      console.log(`  ${index + 1}. ${item.domain} - ${item.count} contacts (${item.percentage}% of business)`);
+    });
+  }
+
   console.log('\n═══════════════════════════════════════════════════');
   console.log('  RAW MERGED DATA');
   console.log('═══════════════════════════════════════════════════\n');
@@ -234,11 +269,13 @@ function displayFinalResults(contacts) {
   if (contacts.length === 0) {
     console.log('(No contacts extracted)');
   } else {
-    contacts.forEach((contact, index) => {
+    contacts.slice(0, 5).forEach((contact, index) => {
       console.log(`Contact #${index + 1}:`);
       console.log(`  Name:       ${contact.name || '(missing)'}`);
       console.log(`  Email:      ${contact.email || '(missing)'}`);
       console.log(`  Phone:      ${contact.phone || '(missing)'}`);
+      console.log(`  Domain:     ${contact.domain || '(missing)'}`);
+      console.log(`  Type:       ${contact.domainType || '(missing)'}`);
       console.log(`  Source:     ${contact.source || 'unknown'}`);
       console.log(`  Confidence: ${contact.confidence || 'unknown'}`);
       if (contact.rawText) {
@@ -290,6 +327,30 @@ async function runUnitTests() {
     runner.assertEqual(merged.length, 1, 'Should merge into 1 contact');
     runner.assertEqual(merged[0].email, 'john@x.com', 'Should add PDF email');
     runner.assertEqual(merged[0].source, 'merged', 'Source should be merged');
+  });
+
+  // NEW: Domain-based matching test
+  await runner.test('Domain + Name Matching', () => {
+    const html = [{ 
+      name: 'John Doe', 
+      email: 'john@acme.com', 
+      phone: null,
+      domain: 'acme.com',
+      domainType: 'business'
+    }];
+    const pdf = [{ 
+      name: 'John Doe', 
+      email: null, 
+      phone: '5551234567',
+      domain: 'acme.com',
+      domainType: 'business'
+    }];
+    const merged = merger.mergeContacts(html, pdf);
+    
+    runner.assertEqual(merged.length, 1, 'Should merge into 1 contact via domain+name');
+    runner.assertEqual(merged[0].phone, '(555) 123-4567', 'Should add PDF phone');
+    runner.assertEqual(merged[0].email, 'john@acme.com', 'Should keep HTML email');
+    runner.assertEqual(merged[0].domain, 'acme.com', 'Should preserve domain');
   });
 
   await runner.test('No Match - Different Contacts', () => {
@@ -362,6 +423,55 @@ async function runUnitTests() {
     const merged = merger.mergeContacts(html, pdf);
     
     runner.assertEqual(merged[0].confidence, 'high', 'Should be high after merge');
+  });
+
+  // NEW: Domain preservation test
+  await runner.test('Domain Preservation During Merge', () => {
+    const html = [{ 
+      name: 'John Doe', 
+      email: 'john@acme.com', 
+      phone: null,
+      domain: 'acme.com',
+      domainType: 'business'
+    }];
+    const pdf = [{ 
+      name: null, 
+      email: 'john@acme.com', 
+      phone: '5551234567',
+      domain: 'acme.com',
+      domainType: 'business'
+    }];
+    const merged = merger.mergeContacts(html, pdf);
+    
+    runner.assertEqual(merged[0].domain, 'acme.com', 'Should preserve domain');
+    runner.assertEqual(merged[0].domainType, 'business', 'Should preserve domain type');
+  });
+
+  // NEW: Domain backfilling test
+  await runner.test('Domain Backfilling', () => {
+    const html = [{ 
+      name: 'John Doe', 
+      email: 'john@example.com', 
+      phone: null
+      // Missing domain fields
+    }];
+    const pdf = [{ 
+      name: null, 
+      email: 'john@example.com', 
+      phone: '5551234567'
+      // Missing domain fields
+    }];
+    const merged = merger.mergeContacts(html, pdf);
+    
+    runner.assert(merged[0].domain !== undefined, 'Should backfill domain');
+    runner.assert(merged[0].domainType !== undefined, 'Should backfill domainType');
+    runner.assertEqual(merged[0].domain, 'example.com', 'Should extract correct domain');
+  });
+
+  // NEW: Domain extractor integration test
+  await runner.test('Domain Extractor Integration', () => {
+    runner.assert(merger.domainExtractor, 'Merger should have domain extractor');
+    runner.assert(typeof merger.domainExtractor.extractAndNormalize === 'function', 'Should have extraction method');
   });
 
   runner.summary();

@@ -1,8 +1,13 @@
+const DomainExtractor = require('../utils/domain-extractor');
+
 class SimpleScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
+    
+    // Initialize domain extractor
+    this.domainExtractor = new DomainExtractor(logger);
     
     // Pre-compiled regex patterns for performance
     this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -146,6 +151,10 @@ class SimpleScraper {
     }
   }
 
+  /**
+   * Extract contacts from page
+   * MODIFIED: Now adds domain information after extraction
+   */
   async extractContacts(page, cardSelector, limit) {
     try {
       // Pass regex patterns as strings to browser context
@@ -353,12 +362,44 @@ class SimpleScraper {
          this.NAME_BLACKLIST_REGEX.source,
          limit);
       
+      // Add domain information to each contact
+      for (const contact of contacts) {
+        this.addDomainInfo(contact);
+      }
+      
       return contacts;
       
     } catch (error) {
       this.logger.error(`Contact extraction failed: ${error.message}`);
       return [];
     }
+  }
+
+  /**
+   * NEW METHOD: Add domain information to contact object
+   * Extracts domain from email and adds domain fields
+   * 
+   * @param {Object} contact - Contact object (modified in place)
+   */
+  addDomainInfo(contact) {
+    if (!contact.email) {
+      contact.domain = null;
+      contact.domainType = null;
+      return;
+    }
+    
+    // Extract and normalize domain
+    const domain = this.domainExtractor.extractAndNormalize(contact.email);
+    
+    if (!domain) {
+      contact.domain = null;
+      contact.domainType = null;
+      return;
+    }
+    
+    // Add domain fields
+    contact.domain = domain;
+    contact.domainType = this.domainExtractor.isBusinessDomain(domain) ? 'business' : 'personal';
   }
 
   // Helper to validate email

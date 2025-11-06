@@ -3,12 +3,16 @@
 
 const fs = require('fs');
 const path = require('path');
+const DomainExtractor = require('../utils/domain-extractor');
 
 class PdfScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
+    
+    // Initialize domain extractor
+    this.domainExtractor = new DomainExtractor(logger);
     
     // Try to load pdf-parse, fallback to coordinate-based if not available
     try {
@@ -142,6 +146,7 @@ class PdfScraper {
 
   /**
    * Extract contacts from text sections
+   * MODIFIED: Now includes domain extraction
    */
   extractContactsFromSections(sections, limit = null) {
     const contacts = [];
@@ -162,14 +167,20 @@ class PdfScraper {
       // Calculate confidence
       const confidence = this.calculateConfidence(name, emails.length > 0, phones.length > 0);
       
-      contacts.push({
+      // Create base contact
+      const contact = {
         name: name || null,
         email: emails[0] || null,
         phone: phones[0] || null,
         source: 'pdf',
         confidence: confidence,
         rawText: section.substring(0, 200)
-      });
+      };
+      
+      // Add domain information
+      this.addDomainInfo(contact);
+      
+      contacts.push(contact);
     }
     
     return contacts;
@@ -352,6 +363,10 @@ class PdfScraper {
     return groups;
   }
 
+  /**
+   * Extract contact from text group
+   * MODIFIED: Now includes domain extraction
+   */
   extractContactFromGroup(textGroup) {
     if (!textGroup || textGroup.length === 0) {
       return null;
@@ -373,7 +388,8 @@ class PdfScraper {
     // Calculate confidence
     const confidence = this.calculateConfidence(name, emails.length > 0, phones.length > 0);
     
-    return {
+    // Create base contact
+    const contact = {
       name: name || null,
       email: emails[0] || null,
       phone: phones[0] || null,
@@ -381,6 +397,38 @@ class PdfScraper {
       confidence: confidence,
       rawText: allText.substring(0, 200)
     };
+    
+    // Add domain information
+    this.addDomainInfo(contact);
+    
+    return contact;
+  }
+
+  /**
+   * NEW METHOD: Add domain information to contact object
+   * Extracts domain from email and adds domain fields
+   * 
+   * @param {Object} contact - Contact object (modified in place)
+   */
+  addDomainInfo(contact) {
+    if (!contact.email) {
+      contact.domain = null;
+      contact.domainType = null;
+      return;
+    }
+    
+    // Extract and normalize domain
+    const domain = this.domainExtractor.extractAndNormalize(contact.email);
+    
+    if (!domain) {
+      contact.domain = null;
+      contact.domainType = null;
+      return;
+    }
+    
+    // Add domain fields
+    contact.domain = domain;
+    contact.domainType = this.domainExtractor.isBusinessDomain(domain) ? 'business' : 'personal';
   }
 
   extractEmails(text) {

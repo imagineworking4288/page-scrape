@@ -1,6 +1,11 @@
+const DomainExtractor = require('../utils/domain-extractor');
+
 class DataMerger {
   constructor(logger) {
     this.logger = logger;
+    
+    // Initialize domain extractor
+    this.domainExtractor = new DomainExtractor(logger);
     
     // Pre-compiled regex for phone cleaning
     this.PHONE_CLEAN_REGEX = /\D/g;
@@ -13,10 +18,11 @@ class DataMerger {
     const normalizedHtml = htmlContacts.map(c => this.normalizeContact(c));
     const normalizedPdf = pdfContacts.map(c => this.normalizeContact(c));
     
-    // Multi-key matching strategy
+    // Multi-key matching strategy (now includes domain)
     const emailMap = new Map();
     const phoneMap = new Map();
     const nameMap = new Map();
+    const domainMap = new Map(); // NEW: Domain-based grouping
     const allContacts = new Map();
     
     let contactId = 0;
@@ -37,11 +43,19 @@ class DataMerger {
       if (contact.nameNormalized) {
         nameMap.set(contact.nameNormalized, id);
       }
+      
+      // NEW: Register in domain map for domain-based matching
+      if (contact.domain) {
+        if (!domainMap.has(contact.domain)) {
+          domainMap.set(contact.domain, []);
+        }
+        domainMap.get(contact.domain).push(id);
+      }
     }
     
     this.logger.debug(`Indexed ${normalizedHtml.length} HTML contacts`);
     
-    // Step 2: Process PDF contacts with multi-key matching
+    // Step 2: Process PDF contacts with multi-key matching (now includes domain)
     let newFromPdf = 0;
     let mergedCount = 0;
     
@@ -61,7 +75,20 @@ class DataMerger {
         matchType = 'phone';
       }
       
-      // If no email/phone match, try name as last resort
+      // NEW: If no email/phone match, try domain + name combination
+      if (!matchedId && contact.domain && contact.nameNormalized) {
+        const sameDomainContacts = domainMap.get(contact.domain) || [];
+        for (const existingId of sameDomainContacts) {
+          const existing = allContacts.get(existingId);
+          if (existing.nameNormalized === contact.nameNormalized) {
+            matchedId = existingId;
+            matchType = 'domain+name';
+            break;
+          }
+        }
+      }
+      
+      // If no match yet, try name as last resort
       if (!matchedId && contact.nameNormalized && nameMap.has(contact.nameNormalized)) {
         matchedId = nameMap.get(contact.nameNormalized);
         matchType = 'name';
@@ -79,6 +106,13 @@ class DataMerger {
         }
         if (merged.phoneNormalized && !phoneMap.has(merged.phoneNormalized)) {
           phoneMap.set(merged.phoneNormalized, matchedId);
+        }
+        
+        // NEW: Update domain map if domain was added
+        if (merged.domain && !domainMap.has(merged.domain)) {
+          domainMap.set(merged.domain, [matchedId]);
+        } else if (merged.domain && !domainMap.get(merged.domain).includes(matchedId)) {
+          domainMap.get(merged.domain).push(matchedId);
         }
         
         this.logger.debug(`Matched by ${matchType}: ${contact.name || contact.email || contact.phone}`);
@@ -100,6 +134,14 @@ class DataMerger {
           nameMap.set(contact.nameNormalized, id);
         }
         
+        // NEW: Register in domain map
+        if (contact.domain) {
+          if (!domainMap.has(contact.domain)) {
+            domainMap.set(contact.domain, []);
+          }
+          domainMap.get(contact.domain).push(id);
+        }
+        
         newFromPdf++;
       }
     }
@@ -111,7 +153,7 @@ class DataMerger {
   }
 
   /**
-   * IMPROVED: Normalize a contact (email, phone, name)
+   * IMPROVED: Normalize a contact (email, phone, name, domain)
    * This ensures consistent matching across sources
    */
   normalizeContact(contact) {
@@ -134,6 +176,15 @@ class DataMerger {
       normalized.nameNormalized = this.normalizeName(contact.name);
     }
     
+    // NEW: Ensure domain is present and normalized
+    if (contact.email && !contact.domain) {
+      const domain = this.domainExtractor.extractAndNormalize(contact.email);
+      if (domain) {
+        normalized.domain = domain;
+        normalized.domainType = this.domainExtractor.isBusinessDomain(domain) ? 'business' : 'personal';
+      }
+    }
+    
     return normalized;
   }
 
@@ -152,6 +203,9 @@ class DataMerger {
     return cleaned;
   }
 
+  /**
+   * MODIFIED: Merge two contacts with domain preservation
+   */
   mergeTwoContacts(existing, newContact) {
     // Track if we actually merged any new data
     let hasNewData = false;
@@ -164,6 +218,10 @@ class DataMerger {
       phoneFormatted: existing.phoneFormatted || newContact.phoneFormatted,
       rawText: existing.rawText || newContact.rawText,
       
+      // NEW: Preserve domain information
+      domain: existing.domain || newContact.domain,
+      domainType: existing.domainType || newContact.domainType,
+      
       // Keep normalized fields for potential future matching
       emailNormalized: existing.emailNormalized || newContact.emailNormalized,
       phoneNormalized: existing.phoneNormalized || newContact.phoneNormalized,
@@ -174,6 +232,7 @@ class DataMerger {
     if (!existing.name && newContact.name) hasNewData = true;
     if (!existing.email && newContact.email) hasNewData = true;
     if (!existing.phone && newContact.phone) hasNewData = true;
+    if (!existing.domain && newContact.domain) hasNewData = true;
     
     // Set source based on whether we merged new data
     merged.source = hasNewData ? 'merged' : existing.source;
