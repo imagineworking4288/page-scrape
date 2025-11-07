@@ -17,13 +17,12 @@ class SimpleScraper {
       /([0-9]{10})/g
     ];
     
-    // IMPROVED: Smart name pattern that handles compound names
-    // Accepts: O'Brien, O'Brien, McDonald, von Trapp, de la Cruz, Mary-Jane, etc.
-    // \u2019 = curly apostrophe ('), \u0027 = straight apostrophe (')
-    this.NAME_REGEX = /^(?:[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|[A-Z][a-z]+(?:[A-Z][a-z]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+)(?:\s+(?:[A-Z]\.?\s*|[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+))*$/;
+    // SIMPLIFIED: Much more permissive name pattern
+    // Accepts any capitalized words (including single names)
+    this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
     
-    // FIXED: Word-boundary blacklist instead of substring matching
-    this.NAME_BLACKLIST_REGEX = /\b(get\s+help|find\s+an?\s+agent|contact\s+us|view\s+profile|learn\s+more|show\s+more|read\s+more|see\s+more|view\s+all|load\s+more|sign\s+in|sign\s+up|log\s+in|register|subscribe|search|filter|sort\s+by|menu|navigation|back\s+to|return\s+to|go\s+to|click\s+here|follow\s+us)\b/i;
+    // REDUCED: Only blacklist obvious UI elements
+    this.NAME_BLACKLIST_REGEX = /^(get\s+help|find\s+an?\s+agent|contact\s+us|view\s+profile|learn\s+more|show\s+more|read\s+more|see\s+more|view\s+all|load\s+more|sign\s+in|sign\s+up|log\s+in|menu|search|filter|back\s+to|click\s+here)$/i;
     
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
@@ -153,7 +152,7 @@ class SimpleScraper {
 
   /**
    * Extract contacts from page
-   * MODIFIED: Now adds domain information after extraction
+   * FIXED: Improved name extraction logic that checks ALL matching elements
    */
   async extractContacts(page, cardSelector, limit) {
     try {
@@ -185,61 +184,80 @@ class SimpleScraper {
           return [...new Set(phones)];
         };
         
-        // IMPROVED: Smart name extraction with minimal restrictions
+        // FIXED: Improved name extraction that checks ALL matching elements
         const extractName = (element) => {
-          // Try common name selectors first
-          const nameSelectors = [
-            'h1', 'h2', 'h3', 'h4',
-            '.name', '.title', '.agent-name', '.profile-name',
-            '[class*="name"]', '[class*="title"]', '[class*="agent"]',
-            'a.profile-link', 'a[href*="/agent/"]', 'a[href*="/profile/"]',
-            'strong', 'b', 'span[class*="name"]'
+          // Priority selectors in order of reliability
+          const selectorGroups = [
+            // Group 1: Heading tags (most likely to contain names)
+            ['h1', 'h2', 'h3'],
+            
+            // Group 2: Specific name-related classes
+            ['.name', '.agent-name', '.profile-name', '[class*="name"]'],
+            
+            // Group 3: Links (often contain names on directory sites)
+            ['a[href*="/agent/"]', 'a[href*="/profile/"]', 'a.profile-link'],
+            
+            // Group 4: Common emphasis tags
+            ['strong', 'b'],
+            
+            // Group 5: Title-related elements
+            ['.title', '[class*="title"]']
           ];
           
-          for (const sel of nameSelectors) {
-            const nameEl = element.querySelector(sel);
-            if (nameEl) {
-              let text = nameEl.textContent.trim();
+          // Try each selector group
+          for (const selectors of selectorGroups) {
+            for (const sel of selectors) {
+              // CRITICAL FIX: Get ALL matching elements, not just the first
+              const nameElements = element.querySelectorAll(sel);
               
-              // Skip if matches blacklist (whole phrases)
-              if (blacklistRegex.test(text)) continue;
-              
-              // Skip if too short or too long
-              if (text.length < 2 || text.length > 100) continue;
-              
-              // Clean up common prefixes/suffixes
-              text = text.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
-              text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
-              text = text.trim();
-              
-              // Check word count (names should be 1-5 words)
-              const wordCount = text.split(/\s+/).length;
-              if (wordCount < 1 || wordCount > 5) continue;
-              
-              // IMPROVED: Smart name validation
-              if (nameRegex.test(text)) {
-                return text;
-              }
-              
-              // Accept all-caps names (convert to title case)
-              if (/^[A-Z\s'\-\.]{2,100}$/.test(text)) {
-                const words = text.split(/\s+/);
-                if (words.length >= 1 && words.length <= 5) {
-                  return words
-                    .map(word => {
-                      // Keep lowercase prepositions lowercase
-                      if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
-                        return word.toLowerCase();
-                      }
-                      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-                    })
-                    .join(' ');
+              // Try each matching element
+              for (const nameEl of nameElements) {
+                let text = nameEl.textContent.trim();
+                
+                // Skip if empty or too short/long
+                if (!text || text.length < 2 || text.length > 100) continue;
+                
+                // Skip if matches blacklist (whole phrase only)
+                if (blacklistRegex.test(text)) continue;
+                
+                // Clean up common prefixes/suffixes
+                text = text.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
+                text = text.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
+                text = text.trim();
+                
+                // Re-check length after cleanup
+                if (text.length < 2 || text.length > 100) continue;
+                
+                // Check word count (names should be 1-5 words)
+                const wordCount = text.split(/\s+/).length;
+                if (wordCount < 1 || wordCount > 5) continue;
+                
+                // Validate with regex pattern
+                if (nameRegex.test(text)) {
+                  return text;
+                }
+                
+                // Accept all-caps names (convert to title case)
+                if (/^[A-Z\s'\-\.]{2,100}$/.test(text)) {
+                  const words = text.split(/\s+/);
+                  if (words.length >= 1 && words.length <= 5) {
+                    return words
+                      .map(word => {
+                        // Keep lowercase prepositions lowercase
+                        if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
+                          return word.toLowerCase();
+                        }
+                        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+                      })
+                      .join(' ');
+                  }
                 }
               }
             }
           }
           
-          // Fallback: Look for name-like text in first 20 text nodes
+          // If no name found with specific selectors, try text node fallback
+          // (This is a last resort for sites with unusual markup)
           const textNodes = [];
           const walker = document.createTreeWalker(
             element,
@@ -257,7 +275,7 @@ class SimpleScraper {
           let count = 0;
           while (node = walker.nextNode()) {
             textNodes.push(node.textContent.trim());
-            if (++count >= 20) break; // Limit to first 20 nodes
+            if (++count >= 10) break; // Limit to first 10 nodes
           }
           
           // Check text nodes for name patterns

@@ -35,10 +35,18 @@ class PdfScraper {
       /([0-9]{10})/g
     ];
     
-    // IMPROVED: Smart name pattern supporting compound names
-    // Accepts: O'Brien, O'Brien, McDonald, von Trapp, de la Cruz, Mary-Jane, etc.
-    // \u2019 = curly apostrophe ('), \u0027 = straight apostrophe (')
-    this.NAME_REGEX = /^(?:[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|[A-Z][a-z]+(?:[A-Z][a-z]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+)(?:\s+(?:[A-Z]\.?\s*|[A-Z][a-z'\u2019]+(?:-[A-Z][a-z'\u2019]+)*|(?:von|van|de|del|della|di|da|le|la|el)\s+[A-Z][a-z'\u2019]+))*$/;
+    // FIXED: Simplified name pattern matching simple-scraper
+    // Accepts any capitalized words (including single names)
+    this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
+    
+    // FIXED: Reduced blacklist - only obvious non-names
+    this.NAME_BLACKLIST = new Set([
+      'agent', 'broker', 'realtor', 'licensed', 'certified',
+      'email', 'phone', 'contact', 'address', 'website',
+      'view', 'more', 'info', 'details', 'call', 'text', 'message',
+      'get help', 'find an agent', 'contact us', 'view profile',
+      'learn more', 'show more', 'read more', 'see more'
+    ]);
   }
 
   /**
@@ -146,7 +154,7 @@ class PdfScraper {
 
   /**
    * Extract contacts from text sections
-   * MODIFIED: Now includes domain extraction
+   * FIXED: Improved name extraction with multiple attempts
    */
   extractContactsFromSections(sections, limit = null) {
     const contacts = [];
@@ -187,47 +195,137 @@ class PdfScraper {
   }
 
   /**
-   * Extract name from plain text (smarter logic)
+   * FIXED: Extract name from plain text with improved logic
+   * Uses multiple strategies to find names in various text formats
    */
   extractNameFromText(text) {
+    if (!text || text.length < 2) {
+      return null;
+    }
+    
     // Split into lines
     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     
-    // Check first 5 lines (names usually appear early)
-    for (let i = 0; i < Math.min(5, lines.length); i++) {
+    // Strategy 1: Check first 10 lines (names usually appear early)
+    for (let i = 0; i < Math.min(10, lines.length); i++) {
       let line = lines[i];
       
-      // Clean up prefixes
-      line = line.replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
-      line = line.replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '');
-      line = line.trim();
-      
-      // Skip if too short or too long
-      if (line.length < 2 || line.length > 100) continue;
-      
-      // Check word count
-      const wordCount = line.split(/\s+/).length;
-      if (wordCount < 1 || wordCount > 5) continue;
-      
-      // Check if matches name pattern
-      if (this.NAME_REGEX.test(line)) {
-        return line;
+      // Skip if it's clearly not a name (contains @, numbers, etc.)
+      if (/@/.test(line) || /\d{3}/.test(line) || /https?:/.test(line)) {
+        continue;
       }
       
-      // Check for all-caps names (convert to title case)
-      if (/^[A-Z\s'\-\.]{2,100}$/.test(line)) {
-        const words = line.split(/\s+/);
-        if (words.length >= 1 && words.length <= 5) {
-          return words
-            .map(word => {
-              // Keep lowercase prepositions lowercase
-              if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
-                return word.toLowerCase();
-              }
-              return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-            })
-            .join(' ');
+      // Try to extract name from this line
+      const extractedName = this.validateAndCleanName(line);
+      if (extractedName) {
+        return extractedName;
+      }
+    }
+    
+    // Strategy 2: Look for capitalized sequences in the entire text
+    // This catches names that might not be on their own line
+    const words = text.split(/\s+/);
+    
+    // Build potential name sequences (2-5 consecutive capitalized words)
+    for (let i = 0; i < words.length - 1; i++) {
+      // Try different lengths (prefer longer names first)
+      for (let len = 5; len >= 1; len--) {
+        if (i + len > words.length) continue;
+        
+        const sequence = words.slice(i, i + len).join(' ');
+        const extractedName = this.validateAndCleanName(sequence);
+        
+        if (extractedName) {
+          // Additional check: make sure it's not in the middle of a sentence
+          const wordBefore = i > 0 ? words[i - 1] : '';
+          const wordAfter = i + len < words.length ? words[i + len] : '';
+          
+          // Skip if surrounded by lowercase words (likely mid-sentence)
+          if (/^[a-z]/.test(wordBefore) && /^[a-z]/.test(wordAfter)) {
+            continue;
+          }
+          
+          return extractedName;
         }
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * FIXED: Validate and clean a potential name string
+   * More permissive than before, matches simple-scraper logic
+   * 
+   * @param {string} text - Potential name text
+   * @returns {string|null} - Cleaned name or null if invalid
+   */
+  validateAndCleanName(text) {
+    if (!text || typeof text !== 'string') {
+      return null;
+    }
+    
+    // Initial cleanup
+    text = text.trim();
+    
+    // Skip if too short or too long
+    if (text.length < 2 || text.length > 100) {
+      return null;
+    }
+    
+    // Skip if matches exact blacklist phrases (case-insensitive)
+    const lowerText = text.toLowerCase();
+    if (this.NAME_BLACKLIST.has(lowerText)) {
+      return null;
+    }
+    
+    // Clean up common prefixes/suffixes
+    text = text
+      .replace(/^(agent|broker|realtor|licensed|certified|mr\.|mrs\.|ms\.|dr\.)\s+/i, '')
+      .replace(/,?\s*(jr\.?|sr\.?|ii|iii|iv|esq\.?|phd|md)\.?$/i, '')
+      .trim();
+    
+    // Re-check length after cleanup
+    if (text.length < 2 || text.length > 100) {
+      return null;
+    }
+    
+    // Check word count (names should be 1-5 words)
+    const words = text.split(/\s+/);
+    if (words.length < 1 || words.length > 5) {
+      return null;
+    }
+    
+    // FIXED: Use simplified regex pattern
+    if (this.NAME_REGEX.test(text)) {
+      return text;
+    }
+    
+    // FIXED: Accept all-caps names (convert to title case)
+    if (/^[A-Z\s'\-\.]{2,100}$/.test(text)) {
+      if (words.length >= 1 && words.length <= 5) {
+        return words
+          .map(word => {
+            // Keep lowercase prepositions lowercase
+            if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
+              return word.toLowerCase();
+            }
+            // Convert to title case
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+          })
+          .join(' ');
+      }
+    }
+    
+    // FIXED: Accept names that start with capital and contain mostly letters
+    // This catches names that might have unusual spacing or punctuation
+    if (/^[A-Z]/.test(text) && /^[A-Za-z\s'\-\.]{2,100}$/.test(text)) {
+      const alphaCount = (text.match(/[a-zA-Z]/g) || []).length;
+      const totalLength = text.replace(/\s/g, '').length;
+      
+      // Must be at least 70% alphabetic characters
+      if (alphaCount / totalLength >= 0.7) {
+        return text;
       }
     }
     
@@ -364,8 +462,7 @@ class PdfScraper {
   }
 
   /**
-   * Extract contact from text group
-   * MODIFIED: Now includes domain extraction
+   * FIXED: Extract contact from text group with improved name extraction
    */
   extractContactFromGroup(textGroup) {
     if (!textGroup || textGroup.length === 0) {
@@ -452,55 +549,43 @@ class PdfScraper {
     return [...new Set(phones)];
   }
 
+  /**
+   * FIXED: Extract name from coordinate-based text elements
+   * Improved to try multiple elements with better scoring
+   */
   extractName(textElements) {
     if (!textElements || textElements.length === 0) {
       return null;
     }
     
-    // IMPROVED: Position-weighted name extraction
-    // Priority: top of group (likely name) + larger text
+    // Score each element based on position and size
     const scored = textElements.map((el, index) => {
       let score = 0;
       
       // Position score (earlier = better)
       score += (textElements.length - index) * 10;
       
-      // Height score (larger = better, but capped)
+      // Height score (larger text = better, but capped)
       score += Math.min(el.height, 30);
+      
+      // Bonus for elements near the top
+      if (index < 3) {
+        score += 20;
+      }
       
       return { ...el, score };
     });
     
-    // Sort by score
+    // Sort by score (highest first)
     scored.sort((a, b) => b.score - a.score);
     
-    // Check top 5 scored elements
-    for (let i = 0; i < Math.min(5, scored.length); i++) {
-      let text = scored[i].text.trim();
+    // Try top scoring elements
+    for (let i = 0; i < Math.min(10, scored.length); i++) {
+      const text = scored[i].text.trim();
+      const cleanedName = this.validateAndCleanName(text);
       
-      // Clean up prefixes
-      text = text.replace(/^(agent|broker|realtor|mr\.|mrs\.|ms\.|dr\.)\s+/i, '');
-      text = text.replace(/,\s*(jr|sr|ii|iii|iv)\.?$/i, '');
-      text = text.trim();
-      
-      // Check if it looks like a name
-      if (this.NAME_REGEX.test(text) && text.length >= 2 && text.length <= 100) {
-        return text;
-      }
-      
-      // Check for all-caps names (convert to title case)
-      if (/^[A-Z\s'\-]{2,100}$/.test(text)) {
-        const words = text.split(/\s+/);
-        if (words.length >= 1 && words.length <= 5) {
-          return words
-            .map(word => {
-              if (/^(von|van|de|del|della|di|da|le|la|el)$/i.test(word)) {
-                return word.toLowerCase();
-              }
-              return word.charAt(0) + word.slice(1).toLowerCase();
-            })
-            .join(' ');
-        }
+      if (cleanedName) {
+        return cleanedName;
       }
     }
     
