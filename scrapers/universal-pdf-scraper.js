@@ -28,9 +28,20 @@ class UniversalPdfScraper {
     // Regex patterns
     this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
     this.PHONE_REGEX = /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g;
-    this.NAME_REGEX = /^([A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){0,3})$/;
 
-    this.CONTEXT_WINDOW = 200;
+    // Multiple name patterns for better matching
+    this.NAME_PATTERNS = [
+      // Standard capitalized name (2-4 words)
+      /\b([A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){1,3})\b/,
+      // Name with middle initial
+      /\b([A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+)\b/,
+      // First Last format (simple)
+      /\b([A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})\b/,
+      // All caps name (convert later)
+      /\b([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)\b/
+    ];
+
+    this.CONTEXT_WINDOW = 300;
 
     // Card selectors (copied from simple-scraper.js)
     this.CARD_SELECTORS = [
@@ -300,17 +311,74 @@ class UniversalPdfScraper {
   extractNameFromContext(contextWindow) {
     const lines = contextWindow.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-    // Search lines before middle (names appear before email)
+    // Strategy 1: Search lines before email (most common)
     const beforeMiddle = lines.slice(0, Math.ceil(lines.length / 2));
-
     for (const line of beforeMiddle.reverse()) {
-      const match = line.match(this.NAME_REGEX);
-      if (match && !this.isNameBlacklisted(match[1])) {
-        return match[1];
+      const name = this.extractNameFromLine(line);
+      if (name) return name;
+    }
+
+    // Strategy 2: Search ALL lines if nothing found
+    for (const line of lines) {
+      const name = this.extractNameFromLine(line);
+      if (name) return name;
+    }
+
+    // Strategy 3: Try the entire context as single string
+    const name = this.extractNameFromLine(contextWindow.replace(/\n/g, ' '));
+    if (name) return name;
+
+    return null;
+  }
+
+  extractNameFromLine(line) {
+    // Skip very short or very long lines
+    if (line.length < 3 || line.length > 100) return null;
+
+    // Try each name pattern
+    for (const pattern of this.NAME_PATTERNS) {
+      const match = line.match(pattern);
+      if (match && match[1]) {
+        let name = match[1].trim();
+
+        // Convert ALL CAPS to Title Case
+        if (name === name.toUpperCase() && name.length > 3) {
+          name = this.toTitleCase(name);
+        }
+
+        // Validate and clean
+        if (!this.isNameBlacklisted(name) && this.isValidName(name)) {
+          return name;
+        }
       }
     }
 
     return null;
+  }
+
+  toTitleCase(str) {
+    return str.toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+  }
+
+  isValidName(name) {
+    // Must have at least 2 words
+    const words = name.split(/\s+/);
+    if (words.length < 2) return false;
+
+    // Each word must be at least 2 chars (except middle initials)
+    for (const word of words) {
+      if (word.length < 2 && !/^[A-Z]\.$/.test(word)) {
+        return false;
+      }
+    }
+
+    // Must not be all numbers
+    if (/^\d+$/.test(name.replace(/\s/g, ''))) return false;
+
+    // Must have letters
+    if (!/[a-zA-Z]/.test(name)) return false;
+
+    return true;
   }
 
   extractPhoneFromContext(contextWindow) {
@@ -332,12 +400,20 @@ class UniversalPdfScraper {
     // Name fallback: try HTML card text
     if (!contact.name && cardData.cardText) {
       const lines = cardData.cardText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-      for (const line of lines.slice(0, 5)) {
-        const match = line.match(this.NAME_REGEX);
-        if (match && !this.isNameBlacklisted(match[1])) {
-          contact.name = match[1];
+
+      // Try first 10 lines of HTML card text
+      for (const line of lines.slice(0, 10)) {
+        const name = this.extractNameFromLine(line);
+        if (name) {
+          contact.name = name;
           break;
         }
+      }
+
+      // If still no name, try entire card text as single string
+      if (!contact.name) {
+        const name = this.extractNameFromLine(cardData.cardText.replace(/\n/g, ' '));
+        if (name) contact.name = name;
       }
     }
 
