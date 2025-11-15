@@ -89,6 +89,7 @@ async function main() {
     // Initialize components
     logger.info('Initializing components...');
     browserManager = new BrowserManager(logger);
+    browserManagerGlobal = browserManager; // FIXED: Assign to global for signal handlers
     const domainExtractor = new DomainExtractor(logger);
     
     // Parse delay range
@@ -309,14 +310,30 @@ async function main() {
   }
 }
 
-// Handle graceful shutdown
+// FIXED: Handle graceful shutdown with proper browser cleanup
+let browserManagerGlobal = null;
+
 process.on('SIGINT', async () => {
   logger.warn('Received SIGINT, shutting down gracefully...');
+  if (browserManagerGlobal) {
+    try {
+      await browserManagerGlobal.close();
+    } catch (error) {
+      logger.error(`Error closing browser during SIGINT: ${error.message}`);
+    }
+  }
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   logger.warn('Received SIGTERM, shutting down gracefully...');
+  if (browserManagerGlobal) {
+    try {
+      await browserManagerGlobal.close();
+    } catch (error) {
+      logger.error(`Error closing browser during SIGTERM: ${error.message}`);
+    }
+  }
   process.exit(0);
 });
 

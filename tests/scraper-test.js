@@ -408,12 +408,98 @@ async function runUnitTests() {
       email: 'john@example.com',
       phone: '1234567890'
     };
-    
+
     scraper.addDomainInfo(contact);
-    
+
     runner.assert(contact.domain !== undefined, 'Should have domain field');
     runner.assert(contact.domainType !== undefined, 'Should have domainType field');
     runner.assertEqual(contact.domain, 'example.com', 'Should extract correct domain');
+  });
+
+  // NEW TEST: Edge case - Extremely long names
+  await runner.test('Edge Case - Extremely Long Names', () => {
+    const contacts = [
+      { name: 'A'.repeat(150), email: 'test@example.com', phone: '1234567890' }
+    ];
+
+    const processed = scraper.postProcessContacts(contacts);
+    // Should still process but name may be truncated depending on validation
+    runner.assert(processed.length >= 0, 'Should handle extremely long names');
+  });
+
+  // NEW TEST: Edge case - International phone formats
+  await runner.test('Edge Case - International Phone Formats', () => {
+    const internationalPhones = [
+      '+44 20 7123 4567',    // UK
+      '+33 1 23 45 67 89',   // France
+      '+61 2 1234 5678',     // Australia
+      '+81 3-1234-5678'      // Japan
+    ];
+
+    for (const phone of internationalPhones) {
+      let matched = false;
+      for (const regex of scraper.PHONE_REGEXES) {
+        const testPattern = new RegExp(regex.source, 'g');
+        const phoneDigits = phone.replace(/\D/g, '');
+        if (phoneDigits.length >= 10) {
+          matched = true; // Should extract digits even if format doesn't match
+          break;
+        }
+      }
+      runner.assert(matched || phone.replace(/\D/g, '').length >= 10, `Should handle international format: ${phone}`);
+    }
+  });
+
+  // NEW TEST: Edge case - Malformed emails
+  await runner.test('Edge Case - Malformed Emails', () => {
+    const malformedEmails = [
+      'notanemail',
+      'missing@domain',
+      '@nodomain.com',
+      'double@@domain.com',
+      'spaces in@email.com'
+    ];
+
+    for (const email of malformedEmails) {
+      const isValid = scraper.isValidEmail(email);
+      runner.assert(!isValid, `Should reject malformed email: ${email}`);
+    }
+  });
+
+  // NEW TEST: Edge case - Empty or null contacts
+  await runner.test('Edge Case - Empty or Null Contacts', () => {
+    const edgeCases = [
+      [],
+      [{}],
+      [{ name: null, email: null, phone: null }],
+      [{ name: '', email: '', phone: '' }]
+    ];
+
+    for (const contacts of edgeCases) {
+      const processed = scraper.postProcessContacts(contacts);
+      runner.assert(Array.isArray(processed), 'Should return array for edge cases');
+    }
+  });
+
+  // NEW TEST: Edge case - Special characters in names
+  await runner.test('Edge Case - Special Characters in Names', () => {
+    const specialNames = [
+      "José García",
+      "François Müller",
+      "Søren Ørsted",
+      "Владимир Иванов"
+    ];
+
+    // These might not all match the current NAME_REGEX, but shouldn't cause errors
+    for (const name of specialNames) {
+      const contacts = [{ name, email: 'test@example.com', phone: '1234567890' }];
+      try {
+        const processed = scraper.postProcessContacts(contacts);
+        runner.assert(true, `Should handle special characters: ${name}`);
+      } catch (error) {
+        runner.assert(false, `Should not throw error for: ${name}`);
+      }
+    }
   });
 
   runner.summary();

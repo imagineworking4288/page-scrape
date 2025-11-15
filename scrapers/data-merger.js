@@ -259,10 +259,10 @@ class DataMerger {
    */
   normalizePhone(phone) {
     if (!phone) return '';
-    
+
     // Remove all non-digits
     const digits = phone.replace(this.PHONE_CLEAN_REGEX, '');
-    
+
     // Handle different lengths
     if (digits.length === 10) {
       // Perfect: 1234567890
@@ -271,30 +271,54 @@ class DataMerger {
       // US format with country code: 11234567890
       return digits.substring(1);
     } else if (digits.length > 10) {
-      // Take last 10 digits
+      // Take last 10 digits (handles international formats)
+      // FIXED: Better logging for international numbers
+      if (this.logger && digits.length > 11) {
+        this.logger.debug(`Long phone number (${digits.length} digits), using last 10: ${phone}`);
+      }
       return digits.slice(-10);
     } else if (digits.length === 7) {
-      // Local number without area code - can't reliably match
-      this.logger.debug(`Phone too short (7 digits): ${phone}`);
+      // FIXED: Keep 7-digit local numbers but log warning
+      // They won't match across sources without area code, but keep for display
+      if (this.logger) {
+        this.logger.debug(`Phone missing area code (7 digits): ${phone} - keeping for display only`);
+      }
+      return digits; // Keep the 7 digits instead of returning empty
+    } else if (digits.length >= 3 && digits.length < 7) {
+      // Too short to be a valid phone number
+      if (this.logger) {
+        this.logger.warn(`Phone too short (${digits.length} digits): ${phone} - discarding`);
+      }
       return '';
     } else {
-      // Unknown format
-      this.logger.debug(`Unusual phone format: ${phone} (${digits.length} digits)`);
-      return digits; // Return as-is for now
+      // Unknown format - preserve digits for debugging
+      if (this.logger && digits.length > 0) {
+        this.logger.debug(`Unusual phone format: ${phone} (${digits.length} digits) - preserving`);
+      }
+      return digits; // Return as-is
     }
   }
 
   /**
    * Format phone for display: (123) 456-7890
-   * @param {string} normalizedPhone - 10 digits
+   * @param {string} normalizedPhone - 10 digits (or 7 for local numbers)
    * @returns {string} - Formatted phone
    */
   formatPhone(normalizedPhone) {
-    if (!normalizedPhone || normalizedPhone.length !== 10) {
-      return normalizedPhone; // Return as-is if can't format
+    if (!normalizedPhone) {
+      return normalizedPhone;
     }
-    
-    return `(${normalizedPhone.substring(0, 3)}) ${normalizedPhone.substring(3, 6)}-${normalizedPhone.substring(6)}`;
+
+    // FIXED: Handle both 10-digit and 7-digit numbers
+    if (normalizedPhone.length === 10) {
+      return `(${normalizedPhone.substring(0, 3)}) ${normalizedPhone.substring(3, 6)}-${normalizedPhone.substring(6)}`;
+    } else if (normalizedPhone.length === 7) {
+      // Format 7-digit local number: 123-4567
+      return `${normalizedPhone.substring(0, 3)}-${normalizedPhone.substring(3)}`;
+    } else {
+      // Return as-is if can't format (unusual length)
+      return normalizedPhone;
+    }
   }
 
   /**

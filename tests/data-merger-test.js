@@ -474,6 +474,85 @@ async function runUnitTests() {
     runner.assert(typeof merger.domainExtractor.extractAndNormalize === 'function', 'Should have extraction method');
   });
 
+  // NEW TEST: Edge case - 7-digit phone numbers
+  await runner.test('Edge Case - 7-Digit Phone Numbers', () => {
+    const result = merger.normalizePhone('123-4567');
+    runner.assertEqual(result, '1234567', 'Should preserve 7-digit numbers');
+
+    const formatted = merger.formatPhone('1234567');
+    runner.assertEqual(formatted, '123-4567', 'Should format 7-digit numbers as XXX-XXXX');
+  });
+
+  // NEW TEST: Edge case - International phone numbers
+  await runner.test('Edge Case - International Phone Numbers', () => {
+    const tests = [
+      { input: '+44 20 7123 4567', expectedLength: 10 }, // Should extract last 10 digits
+      { input: '+33 1 23 45 67 89', expectedLength: 10 },
+      { input: '+1 (555) 123-4567', expected: '5551234567' }
+    ];
+
+    for (const test of tests) {
+      const result = merger.normalizePhone(test.input);
+      if (test.expected) {
+        runner.assertEqual(result, test.expected, `Failed to normalize ${test.input}`);
+      } else {
+        runner.assertEqual(result.length, test.expectedLength, `Failed length check for ${test.input}`);
+      }
+    }
+  });
+
+  // NEW TEST: Edge case - Extremely short phone numbers
+  await runner.test('Edge Case - Extremely Short Phone Numbers', () => {
+    const shortNumbers = ['123', '45', '6'];
+
+    for (const num of shortNumbers) {
+      const result = merger.normalizePhone(num);
+      runner.assertEqual(result, '', `Should discard very short number: ${num}`);
+    }
+  });
+
+  // NEW TEST: Edge case - Empty merge scenarios
+  await runner.test('Edge Case - Empty Merge Scenarios', () => {
+    const merged1 = merger.mergeContacts([], []);
+    runner.assertEqual(merged1.length, 0, 'Should handle empty arrays');
+
+    const merged2 = merger.mergeContacts([{ name: 'John', email: 'john@x.com' }], []);
+    runner.assertEqual(merged2.length, 1, 'Should handle empty PDF array');
+
+    const merged3 = merger.mergeContacts([], [{ name: 'Jane', email: 'jane@x.com' }]);
+    runner.assertEqual(merged3.length, 1, 'Should handle empty HTML array');
+  });
+
+  // NEW TEST: Edge case - Case sensitivity in matching
+  await runner.test('Edge Case - Case Sensitivity in Matching', () => {
+    const html = [{ name: 'JOHN DOE', email: 'JOHN@EXAMPLE.COM', phone: '5551234567' }];
+    const pdf = [{ name: 'john doe', email: 'john@example.com', phone: '(555) 123-4567' }];
+    const merged = merger.mergeContacts(html, pdf);
+
+    runner.assertEqual(merged.length, 1, 'Should match despite case differences');
+    runner.assertEqual(merged[0].source, 'merged', 'Should be merged contact');
+  });
+
+  // NEW TEST: Edge case - Special characters in names
+  await runner.test('Edge Case - Special Characters in Name Matching', () => {
+    const html = [{ name: "O'Brien-Smith", email: null, phone: '5551234567' }];
+    const pdf = [{ name: "O'Brien-Smith", email: 'obrien@x.com', phone: null }];
+    const merged = merger.mergeContacts(html, pdf);
+
+    runner.assertEqual(merged.length, 1, 'Should match names with special characters');
+    runner.assert(merged[0].email !== null, 'Should merge email from PDF');
+  });
+
+  // NEW TEST: Edge case - Null and undefined handling
+  await runner.test('Edge Case - Null and Undefined Handling', () => {
+    const contact = { name: null, email: undefined, phone: '' };
+    const normalized = merger.normalizeContact(contact);
+
+    runner.assert('nameNormalized' in normalized, 'Should have nameNormalized field');
+    runner.assert('emailNormalized' in normalized, 'Should have emailNormalized field');
+    runner.assert('phoneNormalized' in normalized, 'Should have phoneNormalized field');
+  });
+
   runner.summary();
   return runner.failed === 0;
 }
