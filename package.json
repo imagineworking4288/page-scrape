@@ -7,7 +7,8 @@
     "start": "node orchestrator.js",
     "test": "node tests/scraper-test.js",
     "test:pdf": "node tests/pdf-scraper-test.js",
-    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js"
+    "test:merger": "node tests/data-merger-test.js",
+    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js && node tests/data-merger-test.js"
   },
   "keywords": [
     "scraper",

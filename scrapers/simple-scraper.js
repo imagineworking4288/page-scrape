@@ -423,6 +423,8 @@ class SimpleScraper {
   // Helper to validate email
   isValidEmail(email) {
     if (!email) return false;
+    // FIXED: Reset regex lastIndex to avoid issues with global flag
+    this.EMAIL_REGEX.lastIndex = 0;
     return this.EMAIL_REGEX.test(email);
   }
 
