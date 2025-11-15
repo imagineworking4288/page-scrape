@@ -1,5 +1,11 @@
 const DomainExtractor = require('../utils/domain-extractor');
 
+/**
+ * @deprecated This scraper is deprecated in favor of UniversalPdfScraper.
+ * Use: const UniversalScraper = require('./universal-pdf-scraper');
+ */
+console.warn('WARNING: simple-scraper.js is deprecated. Use universal-pdf-scraper.js instead.');
+
 class SimpleScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;

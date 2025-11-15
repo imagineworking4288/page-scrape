@@ -1,5 +1,11 @@
 const DomainExtractor = require('../utils/domain-extractor');
 
+/**
+ * @deprecated This merger is no longer needed with UniversalPdfScraper.
+ * Data merging now happens within the scraper itself.
+ */
+console.warn('WARNING: data-merger.js is deprecated. Merging now happens in universal-pdf-scraper.js.');
+
 class DataMerger {
   constructor(logger) {
     this.logger = logger;
