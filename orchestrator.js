@@ -12,9 +12,7 @@ const RateLimiter = require('./utils/rate-limiter');
 const DomainExtractor = require('./utils/domain-extractor');
 
 // Import scrapers
-const SimpleScraper = require('./scrapers/simple-scraper');
-const PdfScraper = require('./scrapers/pdf-scraper');
-const DataMerger = require('./scrapers/data-merger');
+const UniversalScraper = require('./scrapers/universal-pdf-scraper');
 
 // CLI setup
 const program = new Command();
@@ -102,48 +100,16 @@ async function main() {
     // Launch browser
     await browserManager.launch(headless);
     
-    // Create scrapers and merger
-    logger.info('Starting hybrid HTML+PDF scraper...');
-    const simpleScraper = new SimpleScraper(browserManager, rateLimiter, logger);
-    const pdfScraper = new PdfScraper(browserManager, rateLimiter, logger);
-    const merger = new DataMerger(logger);
-    
-    // Step 1: HTML scraping
-    logger.info('Step 1: HTML scraping...');
-    const htmlContacts = await simpleScraper.scrape(options.url, options.limit);
-    
-    // Calculate completeness
-    const complete = htmlContacts.filter(c => c.name && c.email && c.phone).length;
-    const completeness = htmlContacts.length > 0 ? complete / htmlContacts.length : 0;
-    logger.info(`HTML completeness: ${(completeness * 100).toFixed(1)}% (${complete}/${htmlContacts.length} contacts have all fields)`);
-    
-    // Step 2: PDF fallback if needed
-    let finalContacts = htmlContacts;
-    const usePdf = options.pdf !== false;
-    const minCompleteness = parseFloat(options.completeness) || 0.7;
-    
-    if (usePdf && completeness < minCompleteness) {
-      logger.info(`Completeness ${(completeness * 100).toFixed(1)}% < ${(minCompleteness * 100).toFixed(0)}%, using PDF fallback...`);
-      
-      try {
-        const pdfContacts = await pdfScraper.scrapePdf(options.url, options.limit);
-        logger.info(`PDF extracted ${pdfContacts.length} contacts`);
-        
-        // Merge
-        logger.info('Merging HTML and PDF results...');
-        finalContacts = merger.mergeContacts(htmlContacts, pdfContacts);
-        logger.info(`Merged result: ${finalContacts.length} total contacts`);
-      } catch (error) {
-        logger.warn(`PDF scraping failed: ${error.message}`);
-        logger.warn('Falling back to HTML results only');
-        finalContacts = htmlContacts;
-      }
-    } else {
-      logger.info('HTML extraction sufficient, skipping PDF');
-    }
-    
-    // Post-process contacts
-    const processedContacts = simpleScraper.postProcessContacts(finalContacts);
+    // Create scraper
+    logger.info('Starting universal hybrid scraper...');
+    const scraper = new UniversalScraper(browserManager, rateLimiter, logger);
+
+    // Extract contacts using universal scraper
+    logger.info('Extracting contacts...');
+    const contacts = await scraper.scrape(options.url, options.limit);
+
+    // Post-process (deduplication)
+    const processedContacts = scraper.postProcessContacts(contacts);
     
     // NEW: Generate domain statistics
     logger.info('Analyzing domain distribution...');
