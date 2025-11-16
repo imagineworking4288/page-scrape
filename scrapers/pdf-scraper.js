@@ -5,31 +5,25 @@ const fs = require('fs');
 const path = require('path');
 const DomainExtractor = require('../utils/domain-extractor');
 
-/**
- * @deprecated This scraper is deprecated in favor of UniversalPdfScraper.
- * Use: const UniversalScraper = require('./universal-pdf-scraper');
- */
-console.warn('WARNING: pdf-scraper.js is deprecated. Use universal-pdf-scraper.js instead.');
-
 class PdfScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
-    
+
     // Initialize domain extractor
     this.domainExtractor = new DomainExtractor(logger);
-    
-    // Try to load pdf-parse, fallback to coordinate-based if not available
+
+    // Load pdf-parse (required)
     try {
       this.pdfParse = require('pdf-parse');
-      this.usePdfParse = true;
-      this.logger.info('Using pdf-parse for direct PDF text extraction');
+      this.logger.info('pdf-parse loaded successfully');
     } catch (error) {
-      this.usePdfParse = false;
-      this.logger.warn('pdf-parse not installed, using coordinate-based extraction');
-      this.logger.warn('Install with: npm install pdf-parse');
+      throw new Error('pdf-parse is required. Install with: npm install pdf-parse');
     }
+
+    // Track processed emails to prevent duplicates
+    this.processedEmails = new Set();
     
     // FIXED: Configurable Y_THRESHOLD with sensible default
     this.Y_THRESHOLD = 40; // Reduced from 100 to 40 pixels
@@ -67,21 +61,279 @@ class PdfScraper {
     this.logger.info(`Y_THRESHOLD set to ${threshold}px`);
   }
 
-  async scrapePdf(url, limit = null) {
+  async scrapePdf(url, limit = null, keepPdf = false) {
     try {
-      this.logger.info(`Starting PDF scrape of ${url}`);
-      
-      // Use direct PDF parsing if available, otherwise fall back to coordinate-based
-      if (this.usePdfParse) {
-        return await this.scrapePdfDirect(url, limit);
-      } else {
-        return await this.scrapePdfCoordinateBased(url, limit);
+      this.logger.info(`Starting PDF-primary scrape of ${url}`);
+      const page = this.browserManager.getPage();
+
+      // Navigate
+      if (page.url() !== url) {
+        await this.browserManager.navigate(url);
       }
-      
+      await page.waitForTimeout(3000);
+
+      // Phase 1: Render and parse PDF from disk
+      const pdfData = await this.renderAndParsePdf(page, keepPdf);
+
+      // Phase 2: Extract unique emails from PDF
+      const uniqueEmails = this.extractUniqueEmailsFromText(pdfData.fullText);
+      this.logger.info(`Found ${uniqueEmails.size} unique business emails in PDF`);
+
+      // Phase 3: Build contacts (one per unique email)
+      this.processedEmails.clear();
+      const contacts = this.buildContactsFromPdfEmails(uniqueEmails, pdfData, limit);
+
+      this.logger.info(`Extracted ${contacts.length} contacts from PDF`);
+      return contacts;
+
     } catch (error) {
       this.logger.error(`PDF scraping failed: ${error.message}`);
-      return [];
+      throw error;
     }
+  }
+
+  async renderAndParsePdf(page, keepPdf = false) {
+    const timestamp = new Date().toISOString()
+      .replace(/[:.]/g, '-')
+      .replace('T', '-')
+      .substring(0, 19);
+
+    const pdfDir = path.join(process.cwd(), 'output', 'pdfs');
+    const pdfPath = path.join(pdfDir, `scrape-${timestamp}.pdf`);
+
+    // Create directory if needed
+    if (!fs.existsSync(pdfDir)) {
+      fs.mkdirSync(pdfDir, { recursive: true });
+      this.logger.info(`Created PDF directory: ${pdfDir}`);
+    }
+
+    try {
+      // Save PDF to disk (not memory)
+      await page.pdf({
+        path: pdfPath,
+        format: 'Letter',
+        printBackground: true,
+        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' }
+      });
+
+      this.logger.info(`PDF saved: ${pdfPath}`);
+
+      // Read from disk and parse
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      const data = await this.pdfParse(pdfBuffer);
+
+      // Conditional deletion based on --keep flag
+      if (!keepPdf) {
+        fs.unlinkSync(pdfPath);
+        this.logger.info(`PDF deleted: ${pdfPath}`);
+      } else {
+        this.logger.info(`PDF kept: ${pdfPath}`);
+      }
+
+      return {
+        fullText: data.text,
+        sections: data.text.split(/\n\s*\n+/).map(s => s.trim()).filter(s => s.length > 20)
+      };
+    } catch (error) {
+      // Cleanup on error
+      if (fs.existsSync(pdfPath)) {
+        fs.unlinkSync(pdfPath);
+        this.logger.warn(`Deleted PDF after error: ${pdfPath}`);
+      }
+      throw error;
+    }
+  }
+
+  extractUniqueEmailsFromText(text) {
+    const emails = new Set();
+    const matches = text.match(this.EMAIL_REGEX);
+
+    if (matches) {
+      for (const email of matches) {
+        const normalized = email.toLowerCase().trim();
+        const domain = this.domainExtractor.extractAndNormalize(normalized);
+
+        // Only business domains
+        if (domain && this.domainExtractor.isBusinessDomain(domain)) {
+          emails.add(normalized);
+        }
+      }
+    }
+
+    return emails;
+  }
+
+  buildContactsFromPdfEmails(uniqueEmails, pdfData, limit) {
+    const contacts = [];
+
+    for (const email of uniqueEmails) {
+      // CRITICAL: Never process same email twice
+      if (this.processedEmails.has(email)) {
+        if (this.logger && this.logger.debug) {
+          this.logger.debug(`Skipping duplicate email: ${email}`);
+        }
+        continue;
+      }
+      this.processedEmails.add(email);
+
+      // Find FIRST occurrence in PDF
+      const context = this.findEmailContext(email, pdfData.fullText);
+      if (!context) continue;
+
+      // Extract name from BEFORE email (20 chars)
+      let name = this.extractNameFromContext(context.beforeContext);
+
+      // Fallback: extract name from email if not found
+      if (!name) {
+        name = this.extractNameFromEmail(email);
+      }
+
+      // Extract phone from AFTER email (30 chars)
+      const phone = this.extractPhoneFromContext(context.afterContext);
+
+      // Create contact (ONE per unique email)
+      const contact = {
+        name,
+        email,
+        phone,
+        source: 'pdf',
+        confidence: this.calculateConfidence(!!name, true, !!phone),
+        rawText: (context.beforeContext + email + context.afterContext).substring(0, 200)
+      };
+
+      this.addDomainInfo(contact);
+      contacts.push(contact);
+
+      if (limit && contacts.length >= limit) break;
+    }
+
+    return contacts;
+  }
+
+  findEmailContext(email, fullText) {
+    const emailPos = fullText.toLowerCase().indexOf(email.toLowerCase());
+    if (emailPos === -1) return null;
+
+    // BEFORE email (for name) - 20 chars
+    const beforeStart = Math.max(0, emailPos - 20);
+    const beforeContext = fullText.substring(beforeStart, emailPos);
+
+    // AFTER email (for phone) - 30 chars
+    const afterEnd = Math.min(fullText.length, emailPos + email.length + 30);
+    const afterContext = fullText.substring(emailPos + email.length, afterEnd);
+
+    return { beforeContext, afterContext, emailPos };
+  }
+
+  extractNameFromContext(context) {
+    const lines = context.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    // Check last few lines (name usually right before email)
+    for (const line of lines.slice(-3).reverse()) {
+      const name = this.validateAndCleanName(line);
+      if (name) return name;
+    }
+
+    return null;
+  }
+
+  extractPhoneFromContext(context) {
+    const phones = [];
+
+    for (const regex of this.PHONE_REGEXES) {
+      const matches = context.match(new RegExp(regex.source, 'g'));
+      if (matches) {
+        phones.push(...matches);
+      }
+    }
+
+    return phones.length > 0 ? phones[0] : null;
+  }
+
+  extractNameFromEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+
+    const prefix = email.split('@')[0];
+    if (!prefix || prefix.length < 2) return null;
+
+    // Filter out non-name patterns
+    const nonNameWords = [
+      'info', 'contact', 'admin', 'support', 'team', 'sales',
+      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
+      'noreply', 'no-reply', 'webmaster', 'postmaster'
+    ];
+
+    const lowerPrefix = prefix.toLowerCase();
+    if (nonNameWords.some(word => lowerPrefix === word || lowerPrefix.includes(word))) {
+      return null;
+    }
+
+    // Reject if too long (likely team name)
+    if (prefix.length > 25) return null;
+
+    // Split on delimiters
+    const parts = prefix.split(/[._-]+/);
+    const validParts = parts.filter(p => p.length > 0 && !/^\d+$/.test(p));
+
+    if (validParts.length === 0) return null;
+
+    // Handle concatenated names (e.g., "nikkiadamo", "macevedo")
+    if (validParts.length === 1 && validParts[0].length > 8) {
+      const concatenated = validParts[0];
+
+      // Try common first name dictionary
+      const commonFirstNames = [
+        'nikki', 'michael', 'melody', 'robin', 'tamara', 'brandon',
+        'eric', 'william', 'robert', 'jennifer', 'melissa', 'amanda',
+        'christopher', 'matthew', 'daniel', 'elizabeth', 'jonathan',
+        'ioana', 'marc', 'emily', 'kayode', 'seema', 'yardena'
+      ];
+
+      for (const firstName of commonFirstNames) {
+        if (concatenated.toLowerCase().startsWith(firstName)) {
+          const lastName = concatenated.substring(firstName.length);
+          if (lastName.length >= 2) {
+            return this.toTitleCase(firstName) + ' ' + this.toTitleCase(lastName);
+          }
+        }
+      }
+
+      // Fallback: split at midpoint
+      const mid = Math.ceil(concatenated.length / 2);
+      return this.toTitleCase(concatenated.substring(0, mid)) + ' ' +
+             this.toTitleCase(concatenated.substring(mid));
+    }
+
+    // Handle single-letter initials
+    const titleCaseParts = validParts.map(part => {
+      if (part.length === 1) {
+        return part.toUpperCase() + '.'; // "m" → "M."
+      }
+      return this.toTitleCase(part);
+    });
+
+    const name = titleCaseParts.join(' ');
+
+    // Validate result
+    if (this.isValidName(name)) {
+      return name;
+    }
+
+    // Accept single names if reasonable length
+    if (validParts.length === 1 && name.length >= 2 && name.length <= 15) {
+      return name;
+    }
+
+    return null;
+  }
+
+  toTitleCase(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
+
+  isValidName(name) {
+    const words = name.split(/\s+/);
+    return words.length >= 1 && words.length <= 6;
   }
 
   /**

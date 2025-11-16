@@ -1,20 +1,27 @@
+const fs = require('fs');
+const path = require('path');
 const DomainExtractor = require('../utils/domain-extractor');
-
-/**
- * @deprecated This scraper is deprecated in favor of UniversalPdfScraper.
- * Use: const UniversalScraper = require('./universal-pdf-scraper');
- */
-console.warn('WARNING: simple-scraper.js is deprecated. Use universal-pdf-scraper.js instead.');
 
 class SimpleScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
-    
+
     // Initialize domain extractor
     this.domainExtractor = new DomainExtractor(logger);
-    
+
+    // Load pdf-parse
+    try {
+      this.pdfParse = require('pdf-parse');
+      this.logger.info('pdf-parse loaded successfully');
+    } catch (error) {
+      throw new Error('pdf-parse is required. Install with: npm install pdf-parse');
+    }
+
+    // Track processed emails to prevent duplicates
+    this.processedEmails = new Set();
+
     // Pre-compiled regex patterns for performance
     this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     this.PHONE_REGEXES = [
@@ -22,11 +29,11 @@ class SimpleScraper {
       /(?:\+1[-.\s]?)?([0-9]{3})[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
       /([0-9]{10})/g
     ];
-    
+
     // SIMPLIFIED: Much more permissive name pattern
     // Accepts any capitalized words (including single names)
     this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
-    
+
     // REDUCED: Only blacklist obvious UI elements
     this.NAME_BLACKLIST_REGEX = /^(get\s+help|find\s+an?\s+agent|contact\s+us|view\s+profile|learn\s+more|show\s+more|read\s+more|see\s+more|view\s+all|load\s+more|sign\s+in|sign\s+up|log\s+in|menu|search|filter|back\s+to|click\s+here)$/i;
     
@@ -57,29 +64,38 @@ class SimpleScraper {
     ];
   }
 
-  async scrape(url, limit = null) {
+  async scrape(url, limit = null, keepPdf = false) {
     try {
-      this.logger.info(`Starting simple scrape of ${url}`);
+      this.logger.info(`Starting HTML-first scrape of ${url}`);
       const page = this.browserManager.getPage();
-      
-      // Navigate to URL
+
+      // Navigate
       await this.browserManager.navigate(url);
-      
-      // Wait for dynamic content to load
       await page.waitForTimeout(2000);
-      
+
       // Detect card pattern
       const cardSelector = await this.detectCardPattern(page);
-      this.logger.info(`Using selector: ${cardSelector || 'full page (no cards detected)'}`);
-      
-      // Extract contacts
-      const contacts = await this.extractContacts(page, cardSelector, limit);
-      
+      this.logger.info(`Using selector: ${cardSelector || 'full page'}`);
+
+      // Phase 1: Extract unique emails (apply limit here)
+      const uniqueEmails = await this.extractUniqueEmails(page, cardSelector, limit);
+      this.logger.info(`Found ${uniqueEmails.size} unique business emails`);
+
+      // Phase 2: Build contacts from emails (one per email)
+      const contacts = await this.buildContactsFromEmails(uniqueEmails, page, cardSelector);
+
+      // Phase 3: PDF fallback for missing names only
+      const contactsNeedingNames = contacts.filter(c => !c.name);
+      if (contactsNeedingNames.length > 0) {
+        this.logger.info(`Using PDF fallback for ${contactsNeedingNames.length} missing names...`);
+        await this.fillNamesFromPdf(contacts, page, keepPdf);
+      }
+
       this.logger.info(`Extracted ${contacts.length} contacts`);
       return contacts;
-      
+
     } catch (error) {
-      this.logger.error(`Scraping failed: ${error.message}`);
+      this.logger.error(`HTML scraping failed: ${error.message}`);
       throw error;
     }
   }
@@ -154,6 +170,212 @@ class SimpleScraper {
     } catch (error) {
       return false;
     }
+  }
+
+  async renderAndParsePdf(page, keepPdf = false) {
+    const timestamp = new Date().toISOString()
+      .replace(/[:.]/g, '-')
+      .replace('T', '-')
+      .substring(0, 19);
+
+    const pdfDir = path.join(process.cwd(), 'output', 'pdfs');
+    const pdfPath = path.join(pdfDir, `scrape-${timestamp}.pdf`);
+
+    // Create directory if needed
+    if (!fs.existsSync(pdfDir)) {
+      fs.mkdirSync(pdfDir, { recursive: true });
+      this.logger.info(`Created PDF directory: ${pdfDir}`);
+    }
+
+    try {
+      // Save PDF to disk (not memory)
+      await page.pdf({
+        path: pdfPath,
+        format: 'Letter',
+        printBackground: true,
+        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' }
+      });
+
+      this.logger.info(`PDF saved: ${pdfPath}`);
+
+      // Read from disk and parse
+      const pdfBuffer = fs.readFileSync(pdfPath);
+      const data = await this.pdfParse(pdfBuffer);
+
+      // Conditional deletion based on --keep flag
+      if (!keepPdf) {
+        fs.unlinkSync(pdfPath);
+        this.logger.info(`PDF deleted: ${pdfPath}`);
+      } else {
+        this.logger.info(`PDF kept: ${pdfPath}`);
+      }
+
+      return {
+        fullText: data.text,
+        sections: data.text.split(/\n\s*\n+/).map(s => s.trim()).filter(s => s.length > 20)
+      };
+    } catch (error) {
+      // Cleanup on error
+      if (fs.existsSync(pdfPath)) {
+        fs.unlinkSync(pdfPath);
+        this.logger.warn(`Deleted PDF after error: ${pdfPath}`);
+      }
+      throw error;
+    }
+  }
+
+  async extractUniqueEmails(page, cardSelector, limit) {
+    const emails = await page.evaluate((selector) => {
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+      const emailSet = new Set();
+
+      cards.forEach(card => {
+        // Extract from mailto: links
+        card.querySelectorAll('a[href^="mailto:"]').forEach(link => {
+          const email = link.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+          if (email) emailSet.add(email);
+        });
+      });
+
+      return Array.from(emailSet);
+    }, cardSelector);
+
+    // Filter to business domains only
+    const businessEmails = new Set();
+    for (const email of emails) {
+      const domain = this.domainExtractor.extractAndNormalize(email);
+      if (domain && this.domainExtractor.isBusinessDomain(domain)) {
+        businessEmails.add(email);
+        if (limit && businessEmails.size >= limit) break;
+      }
+    }
+
+    return businessEmails;
+  }
+
+  async buildContactsFromEmails(uniqueEmails, page, cardSelector) {
+    const contacts = await page.evaluate((emails, selector) => {
+      const emailArray = Array.from(emails);
+      const contacts = [];
+
+      for (const email of emailArray) {
+        // Find card containing this email
+        const cards = selector ? document.querySelectorAll(selector) : [document.body];
+        let cardWithEmail = null;
+
+        for (const card of cards) {
+          const mailtoLink = card.querySelector(`a[href^="mailto:${email}"]`);
+          if (mailtoLink) {
+            cardWithEmail = card;
+            break;
+          }
+        }
+
+        if (!cardWithEmail) continue;
+
+        // Extract phone from tel: link
+        let phone = null;
+        const telLink = cardWithEmail.querySelector('a[href^="tel:"]');
+        if (telLink) {
+          phone = telLink.href.replace('tel:', '').trim();
+        }
+
+        // Extract name from heading tags
+        let name = null;
+        const nameSelectors = ['h1', 'h2', 'h3', '.name', '[class*="name"]', 'strong'];
+        for (const sel of nameSelectors) {
+          const nameEl = cardWithEmail.querySelector(sel);
+          if (nameEl && nameEl.textContent.trim().length >= 2) {
+            name = nameEl.textContent.trim();
+            break;
+          }
+        }
+
+        // Extract profile URL
+        let profileUrl = null;
+        const profileLink = cardWithEmail.querySelector('a[href*="/agent/"], a[href*="/profile/"]');
+        if (profileLink) {
+          profileUrl = profileLink.href;
+        }
+
+        contacts.push({
+          name,
+          email,
+          phone,
+          profileUrl,
+          source: 'html',
+          confidence: name && phone ? 'high' : (name || phone ? 'medium' : 'low')
+        });
+      }
+
+      return contacts;
+    }, Array.from(uniqueEmails), cardSelector);
+
+    // Add domain info to all contacts
+    for (const contact of contacts) {
+      this.addDomainInfo(contact);
+    }
+
+    return contacts;
+  }
+
+  async fillNamesFromPdf(contacts, page, keepPdf) {
+    const contactsNeedingNames = contacts.filter(c => !c.name);
+    if (contactsNeedingNames.length === 0) return;
+
+    // Use disk-based PDF workflow
+    const pdfData = await this.renderAndParsePdf(page, keepPdf);
+
+    // Fill missing names from PDF
+    for (const contact of contactsNeedingNames) {
+      if (!contact.email) continue;
+
+      const context = this.findEmailContext(contact.email, pdfData.fullText);
+      if (context) {
+        const name = this.extractNameFromContext(context.beforeContext);
+        if (name) {
+          contact.name = name;
+          contact.source = 'html+pdf';
+          if (this.logger && this.logger.debug) {
+            this.logger.debug(`Filled name from PDF: ${name} for ${contact.email}`);
+          }
+        }
+      }
+    }
+  }
+
+  findEmailContext(email, fullText) {
+    const emailPos = fullText.toLowerCase().indexOf(email.toLowerCase());
+    if (emailPos === -1) return null;
+
+    const beforeStart = Math.max(0, emailPos - 20);
+    const beforeContext = fullText.substring(beforeStart, emailPos);
+
+    return { beforeContext };
+  }
+
+  extractNameFromContext(context) {
+    const lines = context.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    for (const line of lines.slice(-3)) { // Last 3 lines before email
+      const name = this.validateAndCleanName(line);
+      if (name) return name;
+    }
+
+    return null;
+  }
+
+  validateAndCleanName(text) {
+    if (!text || text.length < 2 || text.length > 100) return null;
+
+    text = text.trim();
+
+    // Check against NAME_REGEX
+    if (this.NAME_REGEX.test(text)) {
+      return text;
+    }
+
+    return null;
   }
 
   /**
@@ -434,25 +656,9 @@ class SimpleScraper {
     return this.EMAIL_REGEX.test(email);
   }
 
-  // Post-process contacts (deduplicate only - normalization happens in merger)
+  // Post-process contacts (deduplication now handled during extraction)
   postProcessContacts(contacts) {
-    const seen = new Set();
-    const processed = [];
-    
-    for (const contact of contacts) {
-      // Create hash for deduplication (using raw values)
-      const hash = `${(contact.name || '').toLowerCase()}||${(contact.email || '').toLowerCase()}`;
-      
-      // Skip if duplicate
-      if (seen.has(hash)) {
-        continue;
-      }
-      
-      seen.add(hash);
-      processed.push(contact);
-    }
-    
-    return processed;
+    return contacts;
   }
 }
 

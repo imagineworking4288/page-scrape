@@ -12,7 +12,8 @@ const RateLimiter = require('./utils/rate-limiter');
 const DomainExtractor = require('./utils/domain-extractor');
 
 // Import scrapers
-const UniversalScraper = require('./scrapers/universal-pdf-scraper');
+const SimpleScraper = require('./scrapers/simple-scraper');
+const PdfScraper = require('./scrapers/pdf-scraper');
 
 // CLI setup
 const program = new Command();
@@ -22,10 +23,11 @@ program
   .version('1.0.0')
   .requiredOption('-u, --url <url>', 'Target URL to scrape')
   .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
+  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid', 'hybrid')
   .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
   .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
-  .option('--no-pdf', 'Disable PDF fallback (HTML only)')
+  .option('--keep', 'Keep PDF files in output/pdfs/ directory (default: delete after parsing)')
   .option('--completeness <threshold>', 'Min completeness for PDF (default: 0.7)', '0.7')
   .parse(process.argv);
 
@@ -76,12 +78,10 @@ async function main() {
     if (options.limit) {
       logger.info(`Limit: ${options.limit} contacts`);
     }
+    logger.info(`Method: ${options.method}`);
     logger.info(`Output: ${options.output}`);
     logger.info(`Headless: ${headless}`);
-    logger.info(`PDF Fallback: ${options.pdf !== false ? 'enabled' : 'disabled'}`);
-    if (options.pdf !== false) {
-      logger.info(`Completeness Threshold: ${(parseFloat(options.completeness) * 100).toFixed(0)}%`);
-    }
+    logger.info(`Keep PDFs: ${options.keep ? 'yes' : 'no'}`);
     logger.info('');
     
     // Initialize components
@@ -99,17 +99,35 @@ async function main() {
     
     // Launch browser
     await browserManager.launch(headless);
-    
-    // Create scraper
-    logger.info('Starting universal hybrid scraper...');
-    const scraper = new UniversalScraper(browserManager, rateLimiter, logger);
 
-    // Extract contacts using universal scraper
-    logger.info('Extracting contacts...');
-    const contacts = await scraper.scrape(options.url, options.limit);
+    // Create scraper based on method
+    let contacts;
 
-    // Post-process (deduplication)
-    const processedContacts = scraper.postProcessContacts(contacts);
+    switch (options.method) {
+      case 'html':
+        logger.info('Using HTML-first method (PDF fallback for missing names)...');
+        const htmlScraper = new SimpleScraper(browserManager, rateLimiter, logger);
+        contacts = await htmlScraper.scrape(options.url, options.limit, options.keep);
+        break;
+
+      case 'pdf':
+        logger.info('Using PDF-primary method (disk-based extraction)...');
+        const pdfScraper = new PdfScraper(browserManager, rateLimiter, logger);
+        contacts = await pdfScraper.scrapePdf(options.url, options.limit, options.keep);
+        break;
+
+      case 'hybrid':
+        logger.info('Using hybrid method (HTML + PDF fallback, disk-based)...');
+        const hybridScraper = new SimpleScraper(browserManager, rateLimiter, logger);
+        contacts = await hybridScraper.scrape(options.url, options.limit, options.keep);
+        break;
+
+      default:
+        throw new Error(`Invalid method: ${options.method}. Use html, pdf, or hybrid.`);
+    }
+
+    // Post-process contacts (deduplication now handled by scrapers)
+    const processedContacts = contacts;
     
     // NEW: Generate domain statistics
     logger.info('Analyzing domain distribution...');
