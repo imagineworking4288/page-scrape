@@ -91,6 +91,23 @@ class SimpleScraper {
         await this.fillNamesFromPdf(contacts, page, keepPdf);
       }
 
+      // Phase 4: Email-to-name extraction for remaining nulls (final fallback)
+      const stillMissingNames = contacts.filter(c => !c.name && c.email);
+      if (stillMissingNames.length > 0) {
+        this.logger.info(`Using email-to-name extraction for ${stillMissingNames.length} remaining contacts...`);
+
+        for (const contact of stillMissingNames) {
+          const derivedName = this.extractNameFromEmail(contact.email);
+          if (derivedName) {
+            contact.name = derivedName;
+            contact.source = contact.source === 'html' ? 'html+email' : 'html+pdf+email';
+            if (this.logger && this.logger.debug) {
+              this.logger.debug(`Derived name from email: ${derivedName} for ${contact.email}`);
+            }
+          }
+        }
+      }
+
       this.logger.info(`Extracted ${contacts.length} contacts`);
       return contacts;
 
@@ -334,11 +351,25 @@ class SimpleScraper {
       if (context) {
         const name = this.extractNameFromContext(context.beforeContext);
         if (name) {
-          contact.name = name;
-          contact.source = 'html+pdf';
-          if (this.logger && this.logger.debug) {
-            this.logger.debug(`Filled name from PDF: ${name} for ${contact.email}`);
+          // Validate name matches email prefix to prevent cross-contamination
+          const emailPrefix = contact.email.split('@')[0].toLowerCase();
+          const nameWords = name.toLowerCase().split(/\s+/);
+          const emailWords = emailPrefix.split(/[._-]+/);
+
+          // Check if ANY name word appears in email
+          const hasMatch = nameWords.some(nw =>
+            emailWords.some(ew => ew.includes(nw) || nw.includes(ew))
+          );
+
+          if (hasMatch) {
+            // Name matches email - safe to use
+            contact.name = name;
+            contact.source = 'html+pdf';
+            if (this.logger && this.logger.debug) {
+              this.logger.debug(`Filled name from PDF: ${name} for ${contact.email}`);
+            }
           }
+          // If no match, skip the name (prevents cross-contamination)
         }
       }
     }
@@ -376,6 +407,105 @@ class SimpleScraper {
     }
 
     return null;
+  }
+
+  /**
+   * Extract name from email address as fallback
+   * Examples:
+   *   "brandon.abelard@compass.com" → "Brandon Abelard"
+   *   "eric.agosto@compass.com" → "Eric Agosto"
+   *   "seema@compass.com" → "Seema"
+   *   "j.aguilera@compass.com" → "J Aguilera"
+   *   "abramsretailstrategies@compass.com" → null (team name)
+   *   "agteam@compass.com" → null (team name)
+   */
+  extractNameFromEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+
+    const prefix = email.split('@')[0];
+    if (!prefix || prefix.length < 2) return null;
+
+    // Filter out non-name patterns
+    const nonNameWords = [
+      'info', 'contact', 'admin', 'support', 'team', 'sales',
+      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
+      'noreply', 'no-reply', 'webmaster', 'postmaster',
+      // Team/company indicators
+      'strategies', 'retail', 'group', 'partners', 'associates',
+      'realty', 'properties', 'homes', 'listings'
+    ];
+
+    const lowerPrefix = prefix.toLowerCase();
+    if (nonNameWords.some(word => lowerPrefix === word || lowerPrefix.includes(word))) {
+      return null;
+    }
+
+    // Reject if too long (likely team name)
+    if (prefix.length > 25) return null;
+
+    // Split on delimiters
+    const parts = prefix.split(/[._-]+/);
+    const validParts = parts.filter(p => p.length > 0 && !/^\d+$/.test(p));
+
+    if (validParts.length === 0) return null;
+
+    // Handle concatenated names (e.g., "nikkiadamo", "macevedo")
+    if (validParts.length === 1 && validParts[0].length > 8) {
+      const concatenated = validParts[0];
+
+      // Try common first name dictionary
+      const commonFirstNames = [
+        'nikki', 'michael', 'melody', 'robin', 'tamara', 'brandon',
+        'eric', 'william', 'robert', 'jennifer', 'melissa', 'amanda',
+        'christopher', 'matthew', 'daniel', 'elizabeth', 'jonathan',
+        'ioana', 'marc', 'emily', 'kayode', 'seema', 'yardena'
+      ];
+
+      for (const firstName of commonFirstNames) {
+        if (concatenated.toLowerCase().startsWith(firstName)) {
+          const lastName = concatenated.substring(firstName.length);
+          if (lastName.length >= 2) {
+            return this.toTitleCase(firstName) + ' ' + this.toTitleCase(lastName);
+          }
+        }
+      }
+
+      // Fallback: split at midpoint
+      const mid = Math.ceil(concatenated.length / 2);
+      return this.toTitleCase(concatenated.substring(0, mid)) + ' ' +
+             this.toTitleCase(concatenated.substring(mid));
+    }
+
+    // Handle single-letter initials
+    const titleCaseParts = validParts.map(part => {
+      if (part.length === 1) {
+        return part.toUpperCase() + '.'; // "m" → "M."
+      }
+      return this.toTitleCase(part);
+    });
+
+    const name = titleCaseParts.join(' ');
+
+    // Validate result
+    if (this.isValidNameForEmail(name)) {
+      return name;
+    }
+
+    // Accept single names if reasonable length
+    if (validParts.length === 1 && name.length >= 2 && name.length <= 15) {
+      return name;
+    }
+
+    return null;
+  }
+
+  toTitleCase(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
+
+  isValidNameForEmail(name) {
+    const words = name.split(/\s+/);
+    return words.length >= 1 && words.length <= 6;
   }
 
   /**

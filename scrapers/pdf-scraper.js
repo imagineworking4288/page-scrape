@@ -260,7 +260,10 @@ class PdfScraper {
     const nonNameWords = [
       'info', 'contact', 'admin', 'support', 'team', 'sales',
       'help', 'service', 'office', 'hello', 'inquiries', 'mail',
-      'noreply', 'no-reply', 'webmaster', 'postmaster'
+      'noreply', 'no-reply', 'webmaster', 'postmaster',
+      // Team/company indicators
+      'strategies', 'retail', 'group', 'partners', 'associates',
+      'realty', 'properties', 'homes', 'listings'
     ];
 
     const lowerPrefix = prefix.toLowerCase();
