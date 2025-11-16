@@ -41,7 +41,7 @@ class UniversalPdfScraper {
       /\b([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)\b/
     ];
 
-    this.CONTEXT_WINDOW = 300;
+    this.CONTEXT_WINDOW = 100;  // Reduced from 300 to capture only immediate context
 
     // Card selectors (copied from simple-scraper.js)
     this.CARD_SELECTORS = [
@@ -255,13 +255,15 @@ class UniversalPdfScraper {
         // Find email in PDF
         const pdfMatch = this.findEmailInPdf(email, pdfData.sections);
 
-        // Extract name from PDF context
-        const name = pdfMatch ? this.extractNameFromContext(pdfMatch.context) : null;
+        // Extract name from PDF context WITH position awareness
+        const name = pdfMatch
+          ? this.extractNameFromContext(pdfMatch.context, pdfMatch.emailPosition)
+          : null;
 
-        // Match phone
+        // Match phone WITH position awareness - don't reuse phones[0]
         const phone = pdfMatch
-          ? this.extractPhoneFromContext(pdfMatch.context)
-          : (cardData.phones[i] || cardData.phones[0] || null);
+          ? this.extractPhoneFromContext(pdfMatch.context, pdfMatch.emailPosition)
+          : (cardData.phones[i] || null);
 
         // Profile URL
         const profileUrl = cardData.profileUrls[i] || cardData.profileUrls[0] || null;
@@ -302,33 +304,67 @@ class UniversalPdfScraper {
         const end = Math.min(section.length, emailPos + email.length + this.CONTEXT_WINDOW);
         const context = section.substring(start, end);
 
-        return { section, context, emailPosition: emailPos };
+        // Calculate relative email position within the context
+        const relativeEmailPos = emailPos - start;
+
+        return {
+          section,
+          context,
+          emailPosition: relativeEmailPos  // Position within the context window
+        };
       }
     }
     return null;
   }
 
-  extractNameFromContext(contextWindow) {
+  extractNameFromContext(contextWindow, emailPosition = null) {
     const lines = contextWindow.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-    // Strategy 1: Search lines before email (most common)
-    const beforeMiddle = lines.slice(0, Math.ceil(lines.length / 2));
-    for (const line of beforeMiddle.reverse()) {
-      const name = this.extractNameFromLine(line);
-      if (name) return name;
-    }
+    // Extract all potential names with their positions
+    const nameMatches = [];
+    let currentPos = 0;
 
-    // Strategy 2: Search ALL lines if nothing found
     for (const line of lines) {
       const name = this.extractNameFromLine(line);
-      if (name) return name;
+      if (name) {
+        const linePosition = contextWindow.indexOf(line, currentPos);
+        nameMatches.push({
+          name,
+          position: linePosition,
+          line
+        });
+      }
+      currentPos = contextWindow.indexOf(line, currentPos) + line.length;
     }
 
-    // Strategy 3: Try the entire context as single string
-    const name = this.extractNameFromLine(contextWindow.replace(/\n/g, ' '));
-    if (name) return name;
+    if (nameMatches.length === 0) {
+      // Fallback: Try the entire context as single string
+      const name = this.extractNameFromLine(contextWindow.replace(/\n/g, ' '));
+      return name;
+    }
 
-    return null;
+    // If we know the email position, find the CLOSEST name
+    if (emailPosition !== null && emailPosition > 0) {
+      // Prefer names that appear BEFORE the email (typical pattern)
+      const beforeEmail = nameMatches.filter(m => m.position < emailPosition);
+      if (beforeEmail.length > 0) {
+        // Get the name closest to (but before) the email
+        beforeEmail.sort((a, b) => b.position - a.position);
+        return beforeEmail[0].name;
+      }
+    }
+
+    // Fallback: Try first half of context (before email area)
+    const beforeMiddle = nameMatches.filter(m =>
+      m.position < contextWindow.length / 2
+    );
+    if (beforeMiddle.length > 0) {
+      beforeMiddle.sort((a, b) => b.position - a.position);
+      return beforeMiddle[0].name;
+    }
+
+    // Last resort: Any name found
+    return nameMatches[0].name;
   }
 
   extractNameFromLine(line) {
@@ -361,13 +397,21 @@ class UniversalPdfScraper {
   }
 
   isValidName(name) {
-    // Must have at least 2 words
     const words = name.split(/\s+/);
-    if (words.length < 2) return false;
 
-    // Each word must be at least 2 chars (except middle initials)
+    // Accept 1-6 words (was: minimum 2 words)
+    if (words.length < 1 || words.length > 6) return false;
+
+    // Each word must be at least 2 chars (except middle initials OR single-word names)
     for (const word of words) {
-      if (word.length < 2 && !/^[A-Z]\.$/.test(word)) {
+      // Allow single letters with period (J.)
+      if (/^[A-Z]\.$/.test(word)) continue;
+
+      // Allow single-letter words for single-word names (like "Seema" or initials)
+      if (words.length === 1 && word.length >= 2) continue;
+
+      // For multi-word names, each word should be 2+ chars
+      if (words.length > 1 && word.length < 2) {
         return false;
       }
     }
@@ -381,9 +425,91 @@ class UniversalPdfScraper {
     return true;
   }
 
-  extractPhoneFromContext(contextWindow) {
-    const match = contextWindow.match(this.PHONE_REGEX);
-    return match ? match[0] : null;
+  extractPhoneFromContext(contextWindow, emailPosition = null) {
+    // Find ALL phone matches with their positions
+    const phoneRegex = new RegExp(this.PHONE_REGEX.source, 'g');
+    const matches = [];
+    let match;
+
+    while ((match = phoneRegex.exec(contextWindow)) !== null) {
+      matches.push({
+        phone: match[0],
+        position: match.index
+      });
+    }
+
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return matches[0].phone;
+
+    // If we know email position, find CLOSEST phone
+    if (emailPosition !== null && emailPosition > 0) {
+      // Prefer phones that appear AFTER the email (typical pattern: Email\nM: Phone)
+      const afterEmail = matches.filter(m => m.position > emailPosition);
+      if (afterEmail.length > 0) {
+        // Get the phone closest to (but after) the email
+        afterEmail.sort((a, b) => a.position - b.position);
+        return afterEmail[0].phone;
+      }
+
+      // Fallback: Phone before email (less common but possible)
+      matches.sort((a, b) =>
+        Math.abs(a.position - emailPosition) - Math.abs(b.position - emailPosition)
+      );
+      return matches[0].phone;
+    }
+
+    // No position info: return first phone
+    return matches[0].phone;
+  }
+
+  /**
+   * Extract name from email address as fallback
+   * Examples:
+   *   "brandon.abelard@compass.com" → "Brandon Abelard"
+   *   "eric.agosto@compass.com" → "Eric Agosto"
+   *   "seema@compass.com" → "Seema"
+   *   "j.aguilera@compass.com" → "J Aguilera"
+   */
+  extractNameFromEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+
+    // Extract prefix (before @)
+    const prefix = email.split('@')[0];
+    if (!prefix || prefix.length < 2) return null;
+
+    // Split on common delimiters: dots, underscores, hyphens
+    const parts = prefix.split(/[._-]+/);
+
+    // Filter out empty parts and numbers-only parts
+    const validParts = parts.filter(part =>
+      part.length > 0 && !/^\d+$/.test(part)
+    );
+
+    if (validParts.length === 0) return null;
+
+    // Convert to title case
+    const titleCaseParts = validParts.map(part => {
+      // Handle initials (single letters)
+      if (part.length === 1) {
+        return part.toUpperCase();
+      }
+      // Handle all-lowercase or all-uppercase
+      return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    });
+
+    const name = titleCaseParts.join(' ');
+
+    // Validate the extracted name
+    if (this.isValidName(name)) {
+      return name;
+    }
+
+    // If validation fails but we have something reasonable, return it anyway
+    if (name.length >= 2 && name.length <= 50) {
+      return name;
+    }
+
+    return null;
   }
 
   isNameBlacklisted(name) {
@@ -417,9 +543,20 @@ class UniversalPdfScraper {
       }
     }
 
+    // NEW: Email-based name extraction fallback
+    if (!contact.name && contact.email) {
+      const nameFromEmail = this.extractNameFromEmail(contact.email);
+      if (nameFromEmail) {
+        contact.name = nameFromEmail;
+        if (this.logger && this.logger.debug) {
+          this.logger.debug(`Extracted name from email: ${contact.email} → ${nameFromEmail}`);
+        }
+      }
+    }
+
     // Phone fallback: try PDF regex if no HTML phone
     if (!contact.phone && pdfMatch) {
-      const pdfPhone = this.extractPhoneFromContext(pdfMatch.section);
+      const pdfPhone = this.extractPhoneFromContext(pdfMatch.section, pdfMatch.emailPosition);
       if (pdfPhone) contact.phone = pdfPhone;
     }
 
