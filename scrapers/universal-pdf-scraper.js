@@ -41,7 +41,7 @@ class UniversalPdfScraper {
       /\b([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)\b/
     ];
 
-    this.CONTEXT_WINDOW = 100;  // Reduced from 300 to capture only immediate context
+    this.CONTEXT_WINDOW = 60;  // Capture single contact only (~2-3 lines: Name, Email, Phone)
 
     // Card selectors (copied from simple-scraper.js)
     this.CARD_SELECTORS = [
@@ -469,6 +469,8 @@ class UniversalPdfScraper {
    *   "eric.agosto@compass.com" → "Eric Agosto"
    *   "seema@compass.com" → "Seema"
    *   "j.aguilera@compass.com" → "J Aguilera"
+   *   "abramsretailstrategies@compass.com" → null (team name)
+   *   "agteam@compass.com" → null (team name)
    */
   extractNameFromEmail(email) {
     if (!email || typeof email !== 'string') return null;
@@ -476,6 +478,21 @@ class UniversalPdfScraper {
     // Extract prefix (before @)
     const prefix = email.split('@')[0];
     if (!prefix || prefix.length < 2) return null;
+
+    // Filter out common non-name patterns
+    const nonNameWords = [
+      'info', 'contact', 'admin', 'support', 'team', 'sales',
+      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
+      'noreply', 'no-reply', 'webmaster', 'postmaster'
+    ];
+
+    const lowerPrefix = prefix.toLowerCase();
+    if (nonNameWords.some(word => lowerPrefix === word || lowerPrefix.includes(word))) {
+      return null;
+    }
+
+    // Reject if prefix is too long (likely a team name like "abramsretailstrategies")
+    if (prefix.length > 25) return null;
 
     // Split on common delimiters: dots, underscores, hyphens
     const parts = prefix.split(/[._-]+/);
@@ -486,6 +503,12 @@ class UniversalPdfScraper {
     );
 
     if (validParts.length === 0) return null;
+
+    // If we have a single concatenated word (no delimiters), check if it looks like a team name
+    if (validParts.length === 1 && validParts[0].length > 15) {
+      // Likely a team name like "abramsretailstrategies" or "agteam"
+      return null;
+    }
 
     // Convert to title case
     const titleCaseParts = validParts.map(part => {
@@ -499,13 +522,20 @@ class UniversalPdfScraper {
 
     const name = titleCaseParts.join(' ');
 
+    // Additional validation: check for suspicious patterns
+    const lowerName = name.toLowerCase();
+    if (nonNameWords.some(word => lowerName.includes(word))) {
+      return null;
+    }
+
     // Validate the extracted name
     if (this.isValidName(name)) {
       return name;
     }
 
-    // If validation fails but we have something reasonable, return it anyway
-    if (name.length >= 2 && name.length <= 50) {
+    // If validation fails but we have something reasonable (single word, 2-15 chars), return it
+    // This handles cases like "Seema" or "Yardena"
+    if (validParts.length === 1 && name.length >= 2 && name.length <= 15) {
       return name;
     }
 
@@ -522,8 +552,62 @@ class UniversalPdfScraper {
     return blacklist.some(b => lower.includes(b));
   }
 
+  /**
+   * Validate that the extracted name matches the email address
+   * Prevents cross-contamination where wrong names get assigned to emails
+   *
+   * Examples:
+   *   "Michael Pearson" + "michael.pearson@..." → true
+   *   "Michael Abrahm" + "michael.pearson@..." → false
+   *   "Seema" + "seema@..." → true
+   *   "Robin Abrams" + "robin.abrams@..." → true
+   */
+  validateNameEmailMatch(name, email) {
+    if (!name || !email) return true; // Can't validate if either is missing
+
+    const nameParts = name.toLowerCase().split(/\s+/);
+    const emailPrefix = email.split('@')[0].toLowerCase();
+
+    // Extract individual words from email (split by dots, underscores, hyphens)
+    const emailParts = emailPrefix.split(/[._-]+/).filter(p => p.length > 0);
+
+    // For single-word names (like "Seema"), just check if it appears in email
+    if (nameParts.length === 1) {
+      const namePart = nameParts[0];
+      return emailParts.some(ep => ep.includes(namePart) || namePart.includes(ep));
+    }
+
+    // For multi-word names, check if at least the first and last names match
+    const firstName = nameParts[0];
+    const lastName = nameParts[nameParts.length - 1];
+
+    // Check if both first and last name appear in the email parts
+    const firstNameMatches = emailParts.some(ep =>
+      ep.includes(firstName) || firstName.includes(ep)
+    );
+    const lastNameMatches = emailParts.some(ep =>
+      ep.includes(lastName) || lastName.includes(ep)
+    );
+
+    // Both first and last name should be present in email
+    // OR at least the last name should match (for cases like "J. Aguilera" vs "j.aguilera")
+    return (firstNameMatches && lastNameMatches) || lastNameMatches;
+  }
+
   applyFallbacks(contact, cardData, pdfMatch) {
-    // Name fallback: try HTML card text
+    // PRIORITY 1: Email-based name extraction (most reliable for business emails)
+    // This prevents accepting wrong names from PDF context contamination
+    if (!contact.name && contact.email) {
+      const nameFromEmail = this.extractNameFromEmail(contact.email);
+      if (nameFromEmail) {
+        contact.name = nameFromEmail;
+        if (this.logger && this.logger.debug) {
+          this.logger.debug(`Extracted name from email: ${contact.email} → ${nameFromEmail}`);
+        }
+      }
+    }
+
+    // PRIORITY 2: HTML card text (only if email extraction failed)
     if (!contact.name && cardData.cardText) {
       const lines = cardData.cardText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
@@ -543,13 +627,16 @@ class UniversalPdfScraper {
       }
     }
 
-    // NEW: Email-based name extraction fallback
-    if (!contact.name && contact.email) {
-      const nameFromEmail = this.extractNameFromEmail(contact.email);
-      if (nameFromEmail) {
-        contact.name = nameFromEmail;
-        if (this.logger && this.logger.debug) {
-          this.logger.debug(`Extracted name from email: ${contact.email} → ${nameFromEmail}`);
+    // Validate name against email (prevent cross-contamination)
+    if (contact.name && contact.email) {
+      if (!this.validateNameEmailMatch(contact.name, contact.email)) {
+        if (this.logger && this.logger.warn) {
+          this.logger.warn(`Name-email mismatch detected: "${contact.name}" vs "${contact.email}". Using email-based name.`);
+        }
+        // Replace with email-based name
+        const nameFromEmail = this.extractNameFromEmail(contact.email);
+        if (nameFromEmail) {
+          contact.name = nameFromEmail;
         }
       }
     }
