@@ -331,102 +331,234 @@ class PdfScraper {
    * @param {Set} uniqueEmails - Set of unique email addresses
    * @returns {Array} - Array of contact objects
    */
-  extractContactsByZone(fullText, uniqueEmails) {
+  /**
+   * Extract contacts using email-anchored context search
+   * Finds each email in the document and extracts names from surrounding context
+   * @param {string} fullText - Full PDF text
+   * @param {Set} uniqueEmails - Set of unique email addresses
+   * @returns {Array} - Array of contact objects
+   */
+  extractByEmailAnchor(fullText, uniqueEmails) {
     const contacts = [];
-    const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const processedEmails = new Set();
 
-    let zoneLines = [];
-    let zoneEmails = [];
-    const zoneMultiplier = 3; // N emails = N*3 lines to capture names
+    for (const email of uniqueEmails) {
+      if (processedEmails.has(email.toLowerCase())) continue;
+      processedEmails.add(email.toLowerCase());
 
-    for (const line of lines) {
-      const foundEmail = Array.from(uniqueEmails).find(e => line.includes(e));
-
-      if (foundEmail) {
-        zoneEmails.push(foundEmail);
-        zoneLines.push(line);
-
-        if (zoneLines.length >= zoneEmails.length * zoneMultiplier) {
-          contacts.push(...this.processZone(zoneLines, zoneEmails));
-          zoneLines = [];
-          zoneEmails = [];
-        }
-      } else if (zoneEmails.length > 0) {
-        zoneLines.push(line);
+      // Find email position in document
+      const emailPos = fullText.toLowerCase().indexOf(email.toLowerCase());
+      if (emailPos === -1) {
+        this.logger.warn(`Email not found in PDF text: ${email}`);
+        continue;
       }
-    }
 
-    if (zoneEmails.length > 0) {
-      contacts.push(...this.processZone(zoneLines, zoneEmails));
+      // Extract context windows
+      const beforeStart = Math.max(0, emailPos - 200);
+      const beforeContext = fullText.substring(beforeStart, emailPos);
+
+      const afterEnd = Math.min(fullText.length, emailPos + email.length + 100);
+      const afterContext = fullText.substring(emailPos + email.length, afterEnd);
+
+      // Search for name in BEFORE context (names typically appear before emails)
+      const nameResult = this.findNameInContext(beforeContext, email, emailPos);
+
+      // Search for phone in AFTER context
+      const phone = this.findPhoneInContext(afterContext);
+
+      // Calculate confidence based on findings
+      const confidence = this.calculateAnchorConfidence(nameResult, !!phone);
+
+      const contact = {
+        name: nameResult ? nameResult.name : this.extractNameFromEmail(email),
+        email,
+        phone,
+        source: nameResult ? 'pdf-anchor' : 'pdf-derived',
+        confidence,
+        _debug: {
+          emailPos,
+          nameDistance: nameResult ? nameResult.distance : null,
+          beforeContextSnippet: beforeContext.substring(Math.max(0, beforeContext.length - 100))
+        }
+      };
+
+      // Add domain info
+      this.addDomainInfo(contact);
+
+      contacts.push(contact);
+
+      // Diagnostic logging
+      if (this.logger && this.logger.debug) {
+        this.logger.debug(`Email: ${email}`);
+        this.logger.debug(`  Position: ${emailPos}`);
+        this.logger.debug(`  Name: "${contact.name}" ${nameResult ? `(${nameResult.distance} chars away)` : '(derived from email)'}`);
+        this.logger.debug(`  Phone: ${phone || 'not found'}`);
+        this.logger.debug(`  Confidence: ${confidence}`);
+      }
     }
 
     return contacts;
   }
 
   /**
-   * Process a zone to extract contacts
-   * @param {Array} zoneLines - Lines in the zone
-   * @param {Array} emails - Email addresses in the zone
-   * @returns {Array} - Array of contact objects
+   * Find name in context by searching for capitalized word sequences
+   * Prioritizes names closest to the email position
+   * @param {string} beforeContext - Text before the email
+   * @param {string} email - Email address for term matching
+   * @param {number} emailPos - Position of email in full document
+   * @returns {Object|null} - {name, distance, score} or null
    */
-  processZone(zoneLines, emails) {
-    const namePattern = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}$/;
-    const names = zoneLines.filter(line => namePattern.test(line) && line.length <= 50);
+  findNameInContext(beforeContext, email, emailPos) {
+    const lines = beforeContext.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-    return emails.map(email => {
-      const name = this.matchEmailToName(email, names);
-      const phone = this.extractPhoneFromZone(zoneLines);
+    // Extract email terms for scoring
+    const emailPrefix = email.split('@')[0].toLowerCase();
+    const emailTerms = emailPrefix.split(/[._-]+/).filter(t => t.length >= 2);
 
-      return {
-        name: name || this.deriveNameFromEmail(email),
-        email,
-        phone,
-        source: 'zone-based',
-        confidence: name ? 'high' : 'medium'
-      };
-    });
+    const candidates = [];
+
+    // Search lines from closest to email (end) to furthest (start)
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      const linePositionInContext = beforeContext.lastIndexOf(line);
+      const distanceFromEmail = beforeContext.length - linePositionInContext;
+
+      // Extract all capitalized word sequences from this line
+      const namePattern = /\b([A-Z][a-z]+(?:[\s'-][A-Z][a-z]+){0,4})\b/g;
+      let match;
+
+      while ((match = namePattern.exec(line)) !== null) {
+        const candidateName = match[1].trim();
+
+        // Validate candidate
+        if (!this.isValidNameCandidate(candidateName)) {
+          continue;
+        }
+
+        // Calculate score based on proximity and email term matching
+        const score = this.scoreNameCandidate(candidateName, emailTerms, distanceFromEmail);
+
+        candidates.push({
+          name: candidateName,
+          distance: distanceFromEmail,
+          score,
+          line
+        });
+      }
+    }
+
+    // Return highest scoring candidate
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0];
   }
 
   /**
-   * Match email to name using multiple strategies
-   * @param {string} email - Email address
-   * @param {Array} names - Array of name candidates
-   * @returns {string|null} - Matched name or null
+   * Validate if text is a valid name candidate
+   * @param {string} text - Candidate text
+   * @returns {boolean}
    */
-  matchEmailToName(email, names) {
-    const username = email.split('@')[0];
-    const normalized = username.toLowerCase().replace(/[._-]/g, '');
+  isValidNameCandidate(text) {
+    if (!text || text.length < 2 || text.length > 50) return false;
 
-    // Strategy 1: Exact match (marc.achilles → Marc Achilles)
-    for (const name of names) {
-      const nameNormalized = name.toLowerCase().replace(/[._\s-]/g, '');
-      if (nameNormalized === normalized) return name;
+    // Check against blacklist
+    const blacklist = [
+      'email', 'phone', 'contact', 'website', 'agent', 'broker',
+      'view', 'more', 'info', 'details', 'profile', 'licensed',
+      'certified', 'get help', 'find an', 'learn more', 'show more'
+    ];
+
+    const lowerText = text.toLowerCase();
+    if (blacklist.some(word => lowerText === word || lowerText.includes(word))) {
+      return false;
     }
 
-    // Strategy 2: Last name match (macevedo → Melody Acevedo)
-    if (normalized.length > 3) {
-      for (const name of names) {
-        const lastWord = name.split(' ').pop().toLowerCase();
-        if (normalized.includes(lastWord) || lastWord.includes(normalized)) {
-          return name;
-        }
+    // Must have 1-5 words
+    const wordCount = text.split(/\s+/).length;
+    if (wordCount < 1 || wordCount > 5) return false;
+
+    return true;
+  }
+
+  /**
+   * Score name candidate based on proximity to email and term matching
+   * @param {string} candidateName - Name to score
+   * @param {Array} emailTerms - Terms from email prefix
+   * @param {number} distance - Character distance from email
+   * @returns {number} - Score (higher is better)
+   */
+  scoreNameCandidate(candidateName, emailTerms, distance) {
+    let score = 0;
+
+    // Proximity score (closer = better, max 50 points)
+    const proximityScore = Math.max(0, 50 - (distance / 2));
+    score += proximityScore;
+
+    // Email term matching score (max 40 points)
+    const nameLower = candidateName.toLowerCase();
+    const nameWords = nameLower.split(/\s+/);
+
+    let matchedTerms = 0;
+    for (const term of emailTerms) {
+      const termLower = term.toLowerCase();
+      if (nameWords.some(word => word.includes(termLower) || termLower.includes(word))) {
+        matchedTerms++;
       }
     }
 
-    // Strategy 3: First word match (abramsretailstrategies → Abrams Retail Strategies)
-    const firstPart = username.split(/[._-]/)[0];
-    for (const name of names) {
-      const firstWord = name.split(' ')[0].toLowerCase();
-      if (firstWord === firstPart.toLowerCase()) {
-        return name;
-      }
+    if (emailTerms.length > 0) {
+      score += (matchedTerms / emailTerms.length) * 40;
+    }
+
+    // Completeness score (2+ words = 10 points)
+    if (nameWords.length >= 2) {
+      score += 10;
+    }
+
+    return score;
+  }
+
+  /**
+   * Find phone number in context text
+   * @param {string} context - Text to search
+   * @returns {string|null} - Phone number or null
+   */
+  findPhoneInContext(context) {
+    const phonePatterns = [
+      /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/,
+      /\+1[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/,
+      /\d{10}/
+    ];
+
+    for (const pattern of phonePatterns) {
+      const match = context.match(pattern);
+      if (match) return match[0];
     }
 
     return null;
   }
 
   /**
-   * Derive name from email address
+   * Calculate confidence based on name and phone findings
+   * @param {Object|null} nameResult - Result from findNameInContext
+   * @param {boolean} hasPhone - Whether phone was found
+   * @returns {string} - 'high', 'medium', or 'low'
+   */
+  calculateAnchorConfidence(nameResult, hasPhone) {
+    if (nameResult && hasPhone && nameResult.distance < 50) {
+      return 'high';
+    } else if (nameResult && nameResult.distance < 100) {
+      return 'medium';
+    } else if (hasPhone) {
+      return 'medium';
+    } else {
+      return 'low';
+    }
+  }
+
+  /**
+   * Derive name from email address (fallback method)
    * @param {string} email - Email address
    * @returns {string} - Derived name
    */
@@ -437,20 +569,6 @@ class PdfScraper {
     return parts
       .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
       .join(' ');
-  }
-
-  /**
-   * Extract phone from zone lines
-   * @param {Array} zoneLines - Lines in the zone
-   * @returns {string|null} - Phone number or null
-   */
-  extractPhoneFromZone(zoneLines) {
-    const phonePattern = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
-    for (const line of zoneLines) {
-      const match = line.match(phonePattern);
-      if (match) return match[0];
-    }
-    return null;
   }
 
   /**
@@ -474,7 +592,7 @@ class PdfScraper {
       if (page.url() !== url) {
         await this.browserManager.navigate(url);
       }
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(5000); // Let JavaScript render
 
       // Phase 1: Render and parse PDF from disk
       const pdfData = await this.renderAndParsePdf(page, keepPdf);
@@ -488,6 +606,38 @@ class PdfScraper {
       const contacts = this.buildContactsFromPdfEmails(uniqueEmails, pdfData, limit);
 
       this.logger.info(`Extracted ${contacts.length} contacts from PDF`);
+
+      // Diagnostic report
+      this.logger.info('');
+      this.logger.info('═══════════════════════════════════════');
+      this.logger.info('  EMAIL-ANCHOR EXTRACTION DIAGNOSTICS');
+      this.logger.info('═══════════════════════════════════════');
+
+      const withName = contacts.filter(c => c.name && c.source === 'pdf-anchor').length;
+      const derived = contacts.filter(c => c.source === 'pdf-derived').length;
+      const withPhone = contacts.filter(c => c.phone).length;
+
+      this.logger.info(`Total contacts: ${contacts.length}`);
+      this.logger.info(`Names found in PDF: ${withName} (${((withName/contacts.length)*100).toFixed(1)}%)`);
+      this.logger.info(`Names derived from email: ${derived} (${((derived/contacts.length)*100).toFixed(1)}%)`);
+      this.logger.info(`Phone numbers found: ${withPhone} (${((withPhone/contacts.length)*100).toFixed(1)}%)`);
+
+      // Show sample of problematic cases
+      const problematicCases = contacts.filter(c => c.source === 'pdf-derived').slice(0, 3);
+      if (problematicCases.length > 0) {
+        this.logger.info('');
+        this.logger.info('Sample cases where name was not found:');
+        problematicCases.forEach(c => {
+          this.logger.info(`  ${c.email}:`);
+          this.logger.info(`    Derived name: "${c.name}"`);
+          this.logger.info(`    Email found at position: ${c._debug.emailPos}`);
+          this.logger.info(`    Before context: "...${c._debug.beforeContextSnippet}"`);
+        });
+      }
+
+      this.logger.info('═══════════════════════════════════════');
+      this.logger.info('');
+
       return contacts;
 
     } catch (error) {
@@ -517,7 +667,8 @@ class PdfScraper {
         path: pdfPath,
         format: 'Letter',
         printBackground: true,
-        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' }
+        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' },
+        timeout: 60000  // Add 60 second timeout
       });
 
       this.logger.info(`PDF saved: ${pdfPath}`);
@@ -568,13 +719,12 @@ class PdfScraper {
   }
 
   buildContactsFromPdfEmails(uniqueEmails, pdfData, limit) {
-    // Use zone-based extraction
-    const contacts = this.extractContactsByZone(pdfData.fullText, uniqueEmails);
+    // Use email-anchored extraction
+    const contacts = this.extractByEmailAnchor(pdfData.fullText, uniqueEmails);
 
-    // Process contacts
+    // Process contacts (domain info already added in extractByEmailAnchor)
     contacts.forEach(contact => {
       this.processedEmails.add(contact.email);
-      this.addDomainInfo(contact);
     });
 
     return limit ? contacts.slice(0, limit) : contacts;
