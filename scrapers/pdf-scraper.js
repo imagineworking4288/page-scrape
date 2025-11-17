@@ -50,6 +50,410 @@ class PdfScraper {
   }
 
   /**
+   * Search for name in full document by email terms
+   * @param {string} email - Email address to search for
+   * @param {string} fullText - Full PDF text
+   * @returns {string|null} - Best matching name or null
+   */
+  searchNameByEmail(email, fullText) {
+    if (!email || !fullText) return null;
+
+    // Extract search terms from email prefix
+    const prefix = email.split('@')[0].toLowerCase();
+    let searchTerms = prefix.split(/[._-]+/).filter(term => term.length >= 2);
+
+    // Handle concatenated names (e.g., "macevedo" -> try "acevedo")
+    if (searchTerms.length === 1 && searchTerms[0].length > 6) {
+      const concatenated = searchTerms[0];
+      // Try splitting after first 1-2 chars (common first initial pattern)
+      const possibleLastName = concatenated.substring(1); // "macevedo" -> "acevedo"
+      const possibleLastName2 = concatenated.substring(2); // "macevedo" -> "cevedo"
+
+      // Add these as additional search terms
+      if (possibleLastName.length >= 4) searchTerms.push(possibleLastName);
+      if (possibleLastName2.length >= 5) searchTerms.push(possibleLastName2);
+    }
+
+    if (searchTerms.length === 0) return null;
+
+    // Find all occurrences of search terms in document
+    const candidates = [];
+    const seen = new Set(); // Prevent duplicate candidates
+
+    for (const term of searchTerms) {
+      const regex = new RegExp(`\\b${this.escapeRegex(term)}\\b`, 'gi');
+      let match;
+
+      while ((match = regex.exec(fullText)) !== null) {
+        const position = match.index;
+
+        // Skip if this is the email itself
+        const contextCheck = fullText.substring(Math.max(0, position - 20), Math.min(fullText.length, position + 50));
+        if (contextCheck.toLowerCase().includes(email.toLowerCase())) {
+          continue; // Skip matches that are part of the email address
+        }
+
+        // Extract 100-char context (50 before, 50 after)
+        const contextStart = Math.max(0, position - 50);
+        const contextEnd = Math.min(fullText.length, position + 50);
+        const context = fullText.substring(contextStart, contextEnd);
+
+        // Look for name patterns in this context
+        const lines = context.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+        for (const line of lines) {
+          // Extract ALL potential names (capitalized words) using global regex
+          const nameRegex = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,4})\b/g;
+          let nameMatch;
+
+          while ((nameMatch = nameRegex.exec(line)) !== null) {
+            const candidateName = nameMatch[1].trim();
+
+            // Skip if already seen
+            if (seen.has(candidateName.toLowerCase())) continue;
+            seen.add(candidateName.toLowerCase());
+
+            // Validate candidate
+            if (this.isValidSearchCandidate(candidateName, searchTerms)) {
+              const score = this.scoreSearchCandidate(candidateName, searchTerms, context, email);
+              candidates.push({ name: candidateName, score, position });
+            }
+          }
+        }
+      }
+    }
+
+    // Return best candidate (highest score)
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].name;
+  }
+
+  /**
+   * Check if name candidate is valid for email-based search
+   * @param {string} name - Candidate name
+   * @param {Array<string>} searchTerms - Email prefix terms
+   * @returns {boolean}
+   */
+  isValidSearchCandidate(name, searchTerms) {
+    if (!name || name.length < 2 || name.length > 100) return false;
+
+    const nameLower = name.toLowerCase();
+
+    // Must contain at least one search term
+    const containsTerm = searchTerms.some(term =>
+      nameLower.includes(term.toLowerCase())
+    );
+    if (!containsTerm) return false;
+
+    // Check against blacklist
+    const nonNameWords = [
+      'info', 'contact', 'admin', 'support', 'team', 'sales',
+      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
+      'noreply', 'no-reply', 'webmaster', 'postmaster',
+      'strategies', 'retail', 'group', 'partners', 'associates',
+      'realty', 'properties', 'homes', 'listings'
+    ];
+
+    if (nonNameWords.some(word => nameLower === word || nameLower.includes(word))) {
+      return false;
+    }
+
+    // Check word count (1-5 words)
+    const wordCount = name.split(/\s+/).length;
+    if (wordCount < 1 || wordCount > 5) return false;
+
+    return true;
+  }
+
+  /**
+   * Score a name candidate (0-100)
+   * @param {string} candidateName - Candidate name
+   * @param {Array<string>} searchTerms - Email prefix terms
+   * @param {string} context - Surrounding text
+   * @param {string} email - Full email address
+   * @returns {number} - Score 0-100
+   */
+  scoreSearchCandidate(candidateName, searchTerms, context, email) {
+    let score = 0;
+
+    const nameLower = candidateName.toLowerCase();
+    const nameWords = nameLower.split(/\s+/);
+
+    // 1. Term matching (40 points)
+    let matchedTerms = 0;
+    for (const term of searchTerms) {
+      if (nameWords.some(word => word.includes(term.toLowerCase()) || term.toLowerCase().includes(word))) {
+        matchedTerms++;
+      }
+    }
+    score += (matchedTerms / searchTerms.length) * 40;
+
+    // 2. Proximity to email (40 points)
+    const emailPos = context.toLowerCase().indexOf(email.toLowerCase());
+    if (emailPos !== -1) {
+      const namePos = context.toLowerCase().indexOf(nameLower);
+      if (namePos !== -1) {
+        const distance = Math.abs(emailPos - namePos);
+        const proximityScore = Math.max(0, 40 - (distance / 2));
+        score += proximityScore;
+      }
+    }
+
+    // 3. Completeness (20 points)
+    if (nameWords.length >= 2) {
+      score += 20; // Full name
+    } else if (nameWords.length === 1 && nameWords[0].length >= 3) {
+      score += 10; // Single name
+    }
+
+    // 4. Proper capitalization (10 points)
+    const isProperlyCapitalized = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$/.test(candidateName);
+    if (isProperlyCapitalized) {
+      score += 10;
+    }
+
+    return Math.min(100, score);
+  }
+
+  /**
+   * Helper to escape regex special characters
+   * @param {string} str - String to escape
+   * @returns {string} - Escaped string
+   */
+  escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Extract all names and emails from full text with positions
+   * @param {string} fullText - Full PDF text
+   * @returns {Object} - Object with names and emails arrays
+   */
+  extractAllNamesAndEmails(fullText) {
+    const names = [];
+    const seen = new Set();
+
+    // Extract names using regex - NO newlines allowed in names
+    const namePattern = /\b([A-Z][a-z]+(?:[''-][A-Z][a-z]+)?(?:[ \t]+[A-Z][a-z]+(?:[''-][A-Z][a-z]+)?){1,4})\b/g;
+    let match;
+
+    // Bad words to filter out (UI elements, common phrases)
+    const badWords = [
+      'Email', 'Phone', 'Contact', 'Website', 'Agent', 'Broker',
+      'Register', 'Sign In', 'Get Help', 'View', 'Learn More',
+      'About Us', 'Sales Leadership', 'Private Exclusives', 'Coming Soon',
+      'Make Me', 'Compass One', 'Compass Luxury', 'Compass Academy',
+      'Compass Plus', 'Compass Cares', 'Neighborhood Guides', 'New Development',
+      'Mortgage Calculator', 'Recently Sold', 'External Suppliers',
+      'Find An', 'Show More', 'Read More', 'See More', 'Load More'
+    ];
+
+    while ((match = namePattern.exec(fullText)) !== null) {
+      const candidateName = match[1].trim();
+      const position = match.index;
+
+      // Skip if contains newline (regex shouldn't match, but double-check)
+      if (candidateName.includes('\n') || candidateName.includes('\r')) continue;
+
+      // Skip if already seen or too short/long
+      if (seen.has(candidateName.toLowerCase())) continue;
+      if (candidateName.length < 3 || candidateName.length > 50) continue;
+
+      // Filter out bad words
+      if (badWords.some(bad => candidateName.includes(bad))) continue;
+
+      // Require at least 2 words for a full name (helps filter UI elements)
+      const wordCount = candidateName.split(/\s+/).length;
+      if (wordCount < 2) continue;
+
+      seen.add(candidateName.toLowerCase());
+      names.push({
+        name: candidateName,
+        position: position,
+        lineNumber: -1  // Not tracking line numbers anymore
+      });
+    }
+
+    // Extract emails
+    const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const emails = [];
+
+    while ((match = emailPattern.exec(fullText)) !== null) {
+      emails.push({
+        email: match[0].toLowerCase(),
+        position: match.index
+      });
+    }
+
+    if (this.logger && this.logger.debug) {
+      this.logger.debug(`Found ${names.length} name candidates and ${emails.length} emails in document`);
+    }
+
+    return { names, emails };
+  }
+
+  /**
+   * Match name to email by proximity
+   * @param {string} email - Email address
+   * @param {Array} names - Array of name objects with positions
+   * @param {number} emailPosition - Position of email in text
+   * @returns {string|null} - Matched name or null
+   */
+  matchNameToEmail(email, names, emailPosition) {
+    let bestMatch = null;
+    let smallestDistance = Infinity;
+
+    for (const nameObj of names) {
+      // Name must appear BEFORE email
+      if (nameObj.position >= emailPosition) continue;
+
+      const distance = emailPosition - nameObj.position;
+
+      // Reduce distance from 200 to 100 chars (tighter proximity)
+      if (distance < 100 && distance < smallestDistance) {
+        smallestDistance = distance;
+        bestMatch = nameObj.name;
+      }
+    }
+
+    if (bestMatch && this.logger && this.logger.debug) {
+      this.logger.debug(`Matched "${bestMatch}" to ${email} (distance: ${smallestDistance} chars)`);
+    }
+
+    return bestMatch;
+  }
+
+  /**
+   * Extract contacts by zone-based matching
+   * @param {string} fullText - Full PDF text
+   * @param {Set} uniqueEmails - Set of unique email addresses
+   * @returns {Array} - Array of contact objects
+   */
+  extractContactsByZone(fullText, uniqueEmails) {
+    const contacts = [];
+    const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    let zoneLines = [];
+    let zoneEmails = [];
+    const zoneMultiplier = 3; // N emails = N*3 lines to capture names
+
+    for (const line of lines) {
+      const foundEmail = Array.from(uniqueEmails).find(e => line.includes(e));
+
+      if (foundEmail) {
+        zoneEmails.push(foundEmail);
+        zoneLines.push(line);
+
+        if (zoneLines.length >= zoneEmails.length * zoneMultiplier) {
+          contacts.push(...this.processZone(zoneLines, zoneEmails));
+          zoneLines = [];
+          zoneEmails = [];
+        }
+      } else if (zoneEmails.length > 0) {
+        zoneLines.push(line);
+      }
+    }
+
+    if (zoneEmails.length > 0) {
+      contacts.push(...this.processZone(zoneLines, zoneEmails));
+    }
+
+    return contacts;
+  }
+
+  /**
+   * Process a zone to extract contacts
+   * @param {Array} zoneLines - Lines in the zone
+   * @param {Array} emails - Email addresses in the zone
+   * @returns {Array} - Array of contact objects
+   */
+  processZone(zoneLines, emails) {
+    const namePattern = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}$/;
+    const names = zoneLines.filter(line => namePattern.test(line) && line.length <= 50);
+
+    return emails.map(email => {
+      const name = this.matchEmailToName(email, names);
+      const phone = this.extractPhoneFromZone(zoneLines);
+
+      return {
+        name: name || this.deriveNameFromEmail(email),
+        email,
+        phone,
+        source: 'zone-based',
+        confidence: name ? 'high' : 'medium'
+      };
+    });
+  }
+
+  /**
+   * Match email to name using multiple strategies
+   * @param {string} email - Email address
+   * @param {Array} names - Array of name candidates
+   * @returns {string|null} - Matched name or null
+   */
+  matchEmailToName(email, names) {
+    const username = email.split('@')[0];
+    const normalized = username.toLowerCase().replace(/[._-]/g, '');
+
+    // Strategy 1: Exact match (marc.achilles → Marc Achilles)
+    for (const name of names) {
+      const nameNormalized = name.toLowerCase().replace(/[._\s-]/g, '');
+      if (nameNormalized === normalized) return name;
+    }
+
+    // Strategy 2: Last name match (macevedo → Melody Acevedo)
+    if (normalized.length > 3) {
+      for (const name of names) {
+        const lastWord = name.split(' ').pop().toLowerCase();
+        if (normalized.includes(lastWord) || lastWord.includes(normalized)) {
+          return name;
+        }
+      }
+    }
+
+    // Strategy 3: First word match (abramsretailstrategies → Abrams Retail Strategies)
+    const firstPart = username.split(/[._-]/)[0];
+    for (const name of names) {
+      const firstWord = name.split(' ')[0].toLowerCase();
+      if (firstWord === firstPart.toLowerCase()) {
+        return name;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Derive name from email address
+   * @param {string} email - Email address
+   * @returns {string} - Derived name
+   */
+  deriveNameFromEmail(email) {
+    const username = email.split('@')[0];
+    const parts = username.split(/[._-]/);
+
+    return parts
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  /**
+   * Extract phone from zone lines
+   * @param {Array} zoneLines - Lines in the zone
+   * @returns {string|null} - Phone number or null
+   */
+  extractPhoneFromZone(zoneLines) {
+    const phonePattern = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
+    for (const line of zoneLines) {
+      const match = line.match(phonePattern);
+      if (match) return match[0];
+    }
+    return null;
+  }
+
+  /**
    * Set custom Y threshold for grouping
    * @param {number} threshold - Pixels between groups
    */
@@ -164,50 +568,16 @@ class PdfScraper {
   }
 
   buildContactsFromPdfEmails(uniqueEmails, pdfData, limit) {
-    const contacts = [];
+    // Use zone-based extraction
+    const contacts = this.extractContactsByZone(pdfData.fullText, uniqueEmails);
 
-    for (const email of uniqueEmails) {
-      // CRITICAL: Never process same email twice
-      if (this.processedEmails.has(email)) {
-        if (this.logger && this.logger.debug) {
-          this.logger.debug(`Skipping duplicate email: ${email}`);
-        }
-        continue;
-      }
-      this.processedEmails.add(email);
-
-      // Find FIRST occurrence in PDF
-      const context = this.findEmailContext(email, pdfData.fullText);
-      if (!context) continue;
-
-      // Extract name from BEFORE email (20 chars)
-      let name = this.extractNameFromContext(context.beforeContext);
-
-      // Fallback: extract name from email if not found
-      if (!name) {
-        name = this.extractNameFromEmail(email);
-      }
-
-      // Extract phone from AFTER email (30 chars)
-      const phone = this.extractPhoneFromContext(context.afterContext);
-
-      // Create contact (ONE per unique email)
-      const contact = {
-        name,
-        email,
-        phone,
-        source: 'pdf',
-        confidence: this.calculateConfidence(!!name, true, !!phone),
-        rawText: (context.beforeContext + email + context.afterContext).substring(0, 200)
-      };
-
+    // Process contacts
+    contacts.forEach(contact => {
+      this.processedEmails.add(contact.email);
       this.addDomainInfo(contact);
-      contacts.push(contact);
+    });
 
-      if (limit && contacts.length >= limit) break;
-    }
-
-    return contacts;
+    return limit ? contacts.slice(0, limit) : contacts;
   }
 
   findEmailContext(email, fullText) {
