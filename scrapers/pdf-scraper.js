@@ -39,13 +39,42 @@ class PdfScraper {
     // Accepts any capitalized words (including single names)
     this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
     
-    // FIXED: Reduced blacklist - only obvious non-names
+    // BLACKLIST: Common UI elements that should never be names
     this.NAME_BLACKLIST = new Set([
+      // Authentication & Navigation
+      'sign in', 'log in', 'sign up', 'log out', 'register', 'login',
+
+      // Actions
+      'get help', 'contact us', 'about us', 'view profile', 'view all',
+      'learn more', 'read more', 'see more', 'show more', 'load more',
+      'find an agent', 'find a', 'search', 'filter', 'back to',
+      'click here', 'more info', 'details',
+
+      // Contact Labels
+      'contact', 'email', 'phone', 'call', 'text', 'message',
+      'website', 'address', 'location',
+
+      // Form field labels
+      'name', 'first name', 'last name', 'full name',
+      'your name', 'enter name', 'user name', 'username',
+
+      // Location labels
+      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island',
+      'new york', 'ny', 'nyc', 'city', 'state', 'zip',
+
+      // Menu Items
+      'menu', 'home', 'listings', 'properties', 'agents',
+      'about', 'services', 'resources', 'blog', 'news',
+
+      // Compass.com specific (from logs)
+      'compass', 'compass one', 'compass luxury', 'compass academy', 'compass plus',
+      'compass cares', 'private exclusives', 'coming soon',
+      'new development', 'recently sold', 'sales leadership',
+      'neighborhood guides', 'mortgage calculator', 'external suppliers',
+
+      // Generic descriptors
       'agent', 'broker', 'realtor', 'licensed', 'certified',
-      'email', 'phone', 'contact', 'address', 'website',
-      'view', 'more', 'info', 'details', 'call', 'text', 'message',
-      'get help', 'find an agent', 'contact us', 'view profile',
-      'learn more', 'show more', 'read more', 'see more'
+      'team', 'group', 'partners', 'associates'
     ]);
   }
 
@@ -462,15 +491,15 @@ class PdfScraper {
   isValidNameCandidate(text) {
     if (!text || text.length < 2 || text.length > 50) return false;
 
-    // Check against blacklist
-    const blacklist = [
-      'email', 'phone', 'contact', 'website', 'agent', 'broker',
-      'view', 'more', 'info', 'details', 'profile', 'licensed',
-      'certified', 'get help', 'find an', 'learn more', 'show more'
-    ];
-
+    // Check against comprehensive blacklist (case-insensitive)
     const lowerText = text.toLowerCase();
-    if (blacklist.some(word => lowerText === word || lowerText.includes(word))) {
+    if (this.NAME_BLACKLIST.has(lowerText)) {
+      return false;
+    }
+
+    // Also check for partial matches with common UI words
+    const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login'];
+    if (uiWords.some(word => lowerText.includes(word))) {
       return false;
     }
 

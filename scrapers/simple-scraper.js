@@ -34,8 +34,43 @@ class SimpleScraper {
     // Accepts any capitalized words (including single names)
     this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
 
-    // REDUCED: Only blacklist obvious UI elements
-    this.NAME_BLACKLIST_REGEX = /^(get\s+help|find\s+an?\s+agent|contact\s+us|view\s+profile|learn\s+more|show\s+more|read\s+more|see\s+more|view\s+all|load\s+more|sign\s+in|sign\s+up|log\s+in|menu|search|filter|back\s+to|click\s+here)$/i;
+    // BLACKLIST: Common UI elements that should never be names
+    this.NAME_BLACKLIST = new Set([
+      // Authentication & Navigation
+      'sign in', 'log in', 'sign up', 'log out', 'register', 'login',
+
+      // Actions
+      'get help', 'contact us', 'about us', 'view profile', 'view all',
+      'learn more', 'read more', 'see more', 'show more', 'load more',
+      'find an agent', 'find a', 'search', 'filter', 'back to',
+      'click here', 'more info', 'details',
+
+      // Contact Labels
+      'contact', 'email', 'phone', 'call', 'text', 'message',
+      'website', 'address', 'location',
+
+      // Form field labels
+      'name', 'first name', 'last name', 'full name',
+      'your name', 'enter name', 'user name', 'username',
+
+      // Location labels
+      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island',
+      'new york', 'ny', 'nyc', 'city', 'state', 'zip',
+
+      // Menu Items
+      'menu', 'home', 'listings', 'properties', 'agents',
+      'about', 'services', 'resources', 'blog', 'news',
+
+      // Compass.com specific (from logs)
+      'compass', 'compass one', 'compass luxury', 'compass academy', 'compass plus',
+      'compass cares', 'private exclusives', 'coming soon',
+      'new development', 'recently sold', 'sales leadership',
+      'neighborhood guides', 'mortgage calculator', 'external suppliers',
+
+      // Generic descriptors
+      'agent', 'broker', 'realtor', 'licensed', 'certified',
+      'team', 'group', 'partners', 'associates'
+    ]);
     
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
@@ -474,15 +509,15 @@ class SimpleScraper {
   isValidNameCandidate(text) {
     if (!text || text.length < 2 || text.length > 50) return false;
 
-    // Check against blacklist
-    const blacklist = [
-      'email', 'phone', 'contact', 'website', 'agent', 'broker',
-      'view', 'more', 'info', 'details', 'profile', 'licensed',
-      'certified', 'get help', 'find an', 'learn more', 'show more'
-    ];
-
+    // Check against comprehensive blacklist (case-insensitive exact match)
     const lowerText = text.toLowerCase();
-    if (blacklist.some(word => lowerText === word || lowerText.includes(word))) {
+    if (this.NAME_BLACKLIST.has(lowerText)) {
+      return false;
+    }
+
+    // Also check for partial matches with common UI words
+    const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login'];
+    if (uiWords.some(word => lowerText.includes(word))) {
       return false;
     }
 
@@ -801,9 +836,10 @@ class SimpleScraper {
   }
 
   async buildContactsFromEmails(uniqueEmails, page, cardSelector) {
-    const contacts = await page.evaluate((emails, selector) => {
+    const contacts = await page.evaluate((emails, selector, blacklist) => {
       const emailArray = Array.from(emails);
       const contacts = [];
+      const blacklistSet = new Set(blacklist); // Convert array back to Set
 
       for (const email of emailArray) {
         // Find card containing this email
@@ -850,6 +886,9 @@ class SimpleScraper {
           for (const el of elements) {
             const text = el.textContent.trim();
 
+            // CRITICAL: Check blacklist FIRST (case-insensitive)
+            if (blacklistSet.has(text.toLowerCase())) continue;
+
             // Basic validation
             if (text.length < 2 || text.length > 100) continue;
 
@@ -889,7 +928,7 @@ class SimpleScraper {
       }
 
       return contacts;
-    }, Array.from(uniqueEmails), cardSelector);
+    }, Array.from(uniqueEmails), cardSelector, Array.from(this.NAME_BLACKLIST));
 
     // Add domain info to all contacts
     for (const contact of contacts) {
@@ -961,6 +1000,9 @@ class SimpleScraper {
     if (!text || text.length < 2 || text.length > 100) return null;
 
     text = text.trim();
+
+    // Check blacklist (case-insensitive)
+    if (this.NAME_BLACKLIST.has(text.toLowerCase())) return null;
 
     // Check against NAME_REGEX
     if (this.NAME_REGEX.test(text)) {
