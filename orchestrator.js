@@ -29,6 +29,7 @@ program
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
   .option('--keep', 'Keep PDF files in output/pdfs/ directory (default: delete after parsing)')
   .option('--completeness <threshold>', 'Min completeness for PDF (default: 0.7)', '0.7')
+  .option('--use-python', 'Use Python PDF scraper with coordinate-based extraction (recommended for better accuracy)')
   .parse(process.argv);
 
 const options = program.opts();
@@ -56,6 +57,54 @@ function parseHeadless(value) {
   return true;
 }
 
+// Run Python scraper subprocess
+function runPythonScraper(options) {
+  const { spawn } = require('child_process');
+
+  logger.info('Using Python PDF scraper (coordinate-based extraction)...');
+  logger.info('');
+
+  // Build Python command
+  const args = [
+    '-m', 'python_scraper.cli',
+    '--url', options.url
+  ];
+
+  if (options.limit) {
+    args.push('--limit', options.limit.toString());
+  }
+
+  if (options.output) {
+    args.push('--output', options.output === 'json' ? 'json' : 'csv');
+  }
+
+  args.push('--headless', options.headless || 'true');
+
+  if (options.keep) {
+    args.push('--keep');
+  }
+
+  // Spawn Python process
+  const pythonProcess = spawn('python', args, {
+    cwd: __dirname,
+    stdio: 'inherit'
+  });
+
+  return new Promise((resolve, reject) => {
+    pythonProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve(code);
+      } else {
+        reject(new Error(`Python scraper exited with code ${code}`));
+      }
+    });
+
+    pythonProcess.on('error', (err) => {
+      reject(new Error(`Failed to start Python scraper: ${err.message}`));
+    });
+  });
+}
+
 // Main execution
 async function main() {
   let browserManager = null;
@@ -70,10 +119,16 @@ async function main() {
     if (!validateUrl(options.url)) {
       process.exit(1);
     }
-    
+
+    // Check if using Python scraper
+    if (options.usePython) {
+      const exitCode = await runPythonScraper(options);
+      process.exit(exitCode);
+    }
+
     // Parse headless option
     const headless = parseHeadless(options.headless);
-    
+
     logger.info(`Target URL: ${options.url}`);
     if (options.limit) {
       logger.info(`Limit: ${options.limit} contacts`);
@@ -83,7 +138,7 @@ async function main() {
     logger.info(`Headless: ${headless}`);
     logger.info(`Keep PDFs: ${options.keep ? 'yes' : 'no'}`);
     logger.info('');
-    
+
     // Initialize components
     logger.info('Initializing components...');
     browserManager = new BrowserManager(logger);
