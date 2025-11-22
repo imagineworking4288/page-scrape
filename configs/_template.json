@@ -1,0 +1,28 @@
+{
+  "domain": "example.com",
+  "name": "Site Name",
+  "description": "Template for creating site-specific extraction configs",
+  "markers": {
+    "start": {
+      "type": "text",
+      "value": "TEXT_STRING",
+      "comment": "Type can be 'text' or 'coordinate'. For text, provide the string to find. For coordinate, provide {\"x\": 0, \"y\": 0}"
+    },
+    "end": {
+      "type": "text",
+      "value": "TEXT_STRING",
+      "comment": "Marks the end of the extraction region"
+    }
+  },
+  "scrollBehavior": {
+    "enabled": true,
+    "scrollDelay": 500,
+    "maxScrolls": 50,
+    "comment": "Controls page scrolling to load lazy content"
+  },
+  "parsing": {
+    "emailDomain": null,
+    "nameBeforeEmail": true,
+    "comment": "emailDomain filters emails to specific domain. nameBeforeEmail=true looks for name above email, false looks below"
+  }
+}

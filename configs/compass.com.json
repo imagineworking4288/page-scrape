@@ -1,0 +1,24 @@
+{
+  "domain": "compass.com",
+  "name": "Compass Real Estate",
+  "description": "Configuration for Compass real estate agent directory pages",
+  "markers": {
+    "start": {
+      "type": "text",
+      "value": "Agents Found"
+    },
+    "end": {
+      "type": "text",
+      "value": "Get help finding an agent"
+    }
+  },
+  "scrollBehavior": {
+    "enabled": true,
+    "scrollDelay": 500,
+    "maxScrolls": 50
+  },
+  "parsing": {
+    "emailDomain": "compass.com",
+    "nameBeforeEmail": true
+  }
+}

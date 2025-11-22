@@ -23,7 +23,7 @@ program
   .version('1.0.0')
   .requiredOption('-u, --url <url>', 'Target URL to scrape')
   .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
-  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid', 'hybrid')
+  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid|select', 'hybrid')
   .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
   .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
@@ -177,8 +177,15 @@ async function main() {
         contacts = await hybridScraper.scrape(options.url, options.limit, options.keep);
         break;
 
+      case 'select':
+        logger.info('Using select method (marker-based extraction)...');
+        const SelectScraper = require('./scrapers/select-scraper');
+        const selectScraper = new SelectScraper(browserManager, rateLimiter, logger);
+        contacts = await selectScraper.scrape(options.url, options.limit, options.keep);
+        break;
+
       default:
-        throw new Error(`Invalid method: ${options.method}. Use html, pdf, or hybrid.`);
+        throw new Error(`Invalid method: ${options.method}. Use html, pdf, hybrid, or select.`);
     }
 
     // Post-process contacts (deduplication now handled by scrapers)
