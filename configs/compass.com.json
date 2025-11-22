@@ -8,8 +8,8 @@
       "value": "Agents Found"
     },
     "end": {
-      "type": "text",
-      "value": "Get help finding an agent"
+      "type": "coordinate",
+      "value": {"x": 1810, "y": 5460}
     }
   },
   "scrollBehavior": {
