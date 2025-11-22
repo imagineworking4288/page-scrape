@@ -297,8 +297,102 @@ class SelectScraper {
         this.logger.info(`Detected container pattern: ${containerSelector}`);
       }
 
+      // Get blacklist from text parser to pass to browser context
+      const nameBlacklist = Array.from(this.textParser.NAME_BLACKLIST);
+
       // Extract contacts from containers
-      const contacts = await page.evaluate((selector, start, end, baseUrl, configSelectors, profileUrlPatterns) => {
+      const contacts = await page.evaluate((selector, start, end, baseUrl, configSelectors, profileUrlPatterns, blacklistArray) => {
+        // Recreate blacklist Set in browser context
+        const NAME_BLACKLIST = new Set(blacklistArray);
+
+        // Helper: Validate name against blacklist
+        const isValidName = (text) => {
+          if (!text || text.length < 2 || text.length > 50) return false;
+
+          // Check blacklist (case-insensitive)
+          const lowerText = text.toLowerCase();
+          if (NAME_BLACKLIST.has(lowerText)) return false;
+
+          // Check for partial matches with common UI words
+          const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login', 'view', 'profile'];
+          if (uiWords.some(word => lowerText.includes(word))) return false;
+
+          // Must start with capital letter
+          if (!text[0] || text[0] !== text[0].toUpperCase()) return false;
+
+          // Basic name pattern - at least one letter, no @ symbol
+          if (text.includes('@')) return false;
+          if (!/[a-zA-Z]/.test(text)) return false;
+
+          return true;
+        };
+
+        // Helper: Extract name from container using multiple strategies
+        const extractNameFromContainer = (container, email) => {
+          // Strategy 1: Try agent profile links
+          const profileLinkSelectors = ['a[href*="/agents/"]', 'a[href*="/profile/"]', 'a[href*="/realtor/"]', 'a[href*="/team/"]'];
+          for (const selector of profileLinkSelectors) {
+            const profileLink = container.querySelector(selector);
+            if (profileLink && !profileLink.href.includes('mailto:')) {
+              const candidateName = profileLink.textContent.trim();
+              if (isValidName(candidateName)) {
+                return candidateName;
+              }
+            }
+          }
+
+          // Strategy 2: Try heading elements
+          const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
+          for (const heading of headings) {
+            const candidateName = heading.textContent.trim();
+            if (isValidName(candidateName)) {
+              return candidateName;
+            }
+          }
+
+          // Strategy 3: Try elements with "name" in class
+          const nameElements = container.querySelectorAll('[class*="name"], [class*="Name"]');
+          for (const nameEl of nameElements) {
+            const candidateName = nameEl.textContent.trim();
+            if (isValidName(candidateName)) {
+              return candidateName;
+            }
+          }
+
+          // Strategy 4: Try strong/bold text
+          const boldElements = container.querySelectorAll('strong, b');
+          for (const boldEl of boldElements) {
+            const candidateName = boldEl.textContent.trim();
+            if (isValidName(candidateName)) {
+              return candidateName;
+            }
+          }
+
+          // Strategy 5: Text before email (case-insensitive search)
+          const textLower = container.textContent.toLowerCase();
+          const emailIndex = textLower.indexOf(email.toLowerCase());
+
+          if (emailIndex !== -1) {
+            const textBefore = container.textContent.substring(0, emailIndex);
+            const lines = textBefore.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            lines.reverse();
+
+            for (const line of lines) {
+              const words = line.split(/\s+/);
+              const capitalizedWords = words.filter(w => w.length > 0 && w[0] === w[0].toUpperCase());
+
+              if (capitalizedWords.length >= 1 && capitalizedWords.length <= 5) {
+                const candidateName = capitalizedWords.join(' ');
+                if (isValidName(candidateName)) {
+                  return candidateName;
+                }
+              }
+            }
+          }
+
+          return null;
+        };
+
         const containers = document.querySelectorAll(selector);
         const results = [];
 
@@ -378,23 +472,8 @@ class SelectScraper {
               name = nameEl.textContent.trim();
             }
           } else {
-            // Look for capitalized text before email
-            const emailIndex = container.textContent.indexOf(email);
-            if (emailIndex !== -1) {
-              const textBefore = container.textContent.substring(0, emailIndex);
-              const lines = textBefore.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-              lines.reverse();
-
-              for (const line of lines) {
-                const words = line.split(/\s+/);
-                const capitalizedWords = words.filter(w => w.length > 0 && w[0] === w[0].toUpperCase());
-
-                if (capitalizedWords.length >= 1 && capitalizedWords.length <= 5) {
-                  name = capitalizedWords.join(' ');
-                  break;
-                }
-              }
-            }
+            // Use multi-strategy name extraction
+            name = extractNameFromContainer(container, email);
           }
 
           // Extract domain
@@ -414,7 +493,7 @@ class SelectScraper {
         }
 
         return results;
-      }, containerSelector, startPos, endPos, baseUrl, config.selectors || {}, config.parsing?.profileUrlPatterns || []);
+      }, containerSelector, startPos, endPos, baseUrl, config.selectors || {}, config.parsing?.profileUrlPatterns || [], nameBlacklist);
 
       if (contacts.length === 0) {
         return null;
@@ -438,14 +517,7 @@ class SelectScraper {
       // Detect and flag shared phones
       this.detectSharedPhones(contacts);
 
-      // Validate names against blacklist
-      for (const contact of contacts) {
-        if (contact.name && !this.textParser.isValidName(contact.name)) {
-          this.logger.debug(`Removing invalid name: ${contact.name}`);
-          contact.name = null;
-        }
-      }
-
+      // Names are already validated inside the browser context
       this.logger.info(`DOM extraction found ${contacts.length} contacts`);
       return contacts;
 
@@ -508,6 +580,10 @@ class SelectScraper {
         }
 
         // Find the ancestor level where most emails share similar structure AND container has tel link
+        // Prefer higher-level (parent) containers over immediate parents to get full contact cards
+        let bestPattern = null;
+        let bestLevel = -1;
+
         for (let level = 0; level < maxLevel; level++) {
           const ancestorsAtLevel = ancestorData.map(ancestors => ancestors[level]).filter(a => a);
 
@@ -545,15 +621,31 @@ class SelectScraper {
             const commonClasses = Object.keys(classCounts).filter(cls => classCounts[cls] >= threshold);
 
             // Build selector
+            let pattern;
             if (commonClasses.length > 0) {
-              return `${mostCommonTag}.${commonClasses.join('.')}`;
+              pattern = `${mostCommonTag}.${commonClasses.join('.')}`;
             } else {
-              return mostCommonTag;
+              pattern = mostCommonTag;
+            }
+
+            // Prefer level 1 (parent of immediate parent) if it has a specific class
+            // This helps select full contact cards instead of just contact-info divs
+            // But stop at level 2 to avoid selecting the entire page container
+            if (commonClasses.length > 0 && level <= 2) {
+              // Prefer level 1 with classes over level 0
+              if (level === 1 || !bestPattern) {
+                bestPattern = pattern;
+                bestLevel = level;
+              }
+            } else if (!bestPattern && level === 0) {
+              // Fallback to level 0 if nothing better found
+              bestPattern = pattern;
+              bestLevel = level;
             }
           }
         }
 
-        return null;
+        return bestPattern;
       }, startPos, endPos);
 
       return pattern;
