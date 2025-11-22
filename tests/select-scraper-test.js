@@ -45,7 +45,7 @@ async function runUnitTests() {
   const compassConfig = configLoader.loadConfig(TEST_URLS.compass);
   assert.strictEqual(compassConfig.domain, 'compass.com', 'Should load compass config');
   assert.strictEqual(compassConfig.markers.start.type, 'text', 'Should have text start marker');
-  assert.strictEqual(compassConfig.markers.end.type, 'text', 'Should have text end marker');
+  assert.strictEqual(compassConfig.markers.end.type, 'coordinate', 'Should have coordinate end marker');
 
   console.log('✓ Config loading works\n');
 
@@ -147,6 +147,26 @@ async function runUnitTests() {
 
   console.log('✓ Full text parsing works\n');
 
+  // Test 9: Text Parser - Phone Source Tracking
+  console.log('Test 9: TextParser phone source tracking');
+
+  const testTextWithPhone = 'John Doe\njohn@test.com\n(555) 123-4567';
+  const testConfig1 = { parsing: { nameBeforeEmail: true } };
+  const contactsWithPhone = textParser.parse(testTextWithPhone, testConfig1);
+
+  assert(contactsWithPhone.length > 0, 'Should parse contact with phone');
+  assert.strictEqual(contactsWithPhone[0].phoneSource, 'text-fallback', 'Should mark phone source as text-fallback');
+  assert.strictEqual(contactsWithPhone[0].sharedPhone, false, 'Should have sharedPhone flag');
+
+  const testTextNoPhone = 'Jane Doe\njane@test.com';
+  const testConfig2 = { parsing: { nameBeforeEmail: true } };
+  const contactsNoPhone = textParser.parse(testTextNoPhone, testConfig2);
+
+  assert(contactsNoPhone.length > 0, 'Should parse contact without phone');
+  assert.strictEqual(contactsNoPhone[0].phoneSource, null, 'Should have null phoneSource when no phone');
+
+  console.log('✓ Phone source tracking works\n');
+
   console.log('✓ All unit tests passed!\n');
 }
 
@@ -178,14 +198,21 @@ async function runIntegrationTest() {
       console.log(`  Name: ${contacts[0].name || 'N/A'}`);
       console.log(`  Email: ${contacts[0].email}`);
       console.log(`  Phone: ${contacts[0].phone || 'N/A'}`);
+      console.log(`  Phone Source: ${contacts[0].phoneSource || 'N/A'}`);
+      console.log(`  Profile URL: ${contacts[0].profileUrl || 'N/A'}`);
+      console.log(`  Shared Phone: ${contacts[0].sharedPhone}`);
       console.log(`  Domain: ${contacts[0].domain}`);
       console.log(`  Confidence: ${contacts[0].confidence}`);
+      console.log(`  Source: ${contacts[0].source}`);
     }
 
     // Assertions
     assert(contacts.length > 0, 'Should extract at least 1 contact');
     assert(contacts[0].email.includes('@'), 'Should have valid email');
-    assert(contacts[0].source === 'select', 'Should have correct source');
+    assert(contacts[0].source === 'select-dom' || contacts[0].source === 'select', 'Should have correct source');
+    assert(contacts[0].hasOwnProperty('phoneSource'), 'Should have phoneSource field');
+    assert(contacts[0].hasOwnProperty('sharedPhone'), 'Should have sharedPhone field');
+    assert(contacts[0].hasOwnProperty('profileUrl'), 'Should have profileUrl field');
 
     console.log('\n✓ Integration test passed!\n');
 

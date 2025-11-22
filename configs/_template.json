@@ -14,6 +14,14 @@
       "comment": "Marks the end of the extraction region"
     }
   },
+  "selectors": {
+    "comment": "OPTIONAL performance hints for DOM extraction. Set to null to use auto-detection (recommended). Auto-detection finds contact containers universally across sites.",
+    "container": null,
+    "profileLink": null,
+    "phone": null,
+    "email": null,
+    "name": null
+  },
   "scrollBehavior": {
     "enabled": true,
     "scrollDelay": 500,
@@ -23,6 +31,7 @@
   "parsing": {
     "emailDomain": null,
     "nameBeforeEmail": true,
-    "comment": "emailDomain filters emails to specific domain. nameBeforeEmail=true looks for name above email, false looks below"
+    "profileUrlPatterns": ["/agents/", "/profile/", "/realtor/", "/team/"],
+    "comment": "emailDomain filters emails to specific domain. nameBeforeEmail=true looks for name above email (used in text fallback). profileUrlPatterns are URL fragments that indicate profile pages."
   }
 }

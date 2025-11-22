@@ -19,6 +19,7 @@
   },
   "parsing": {
     "emailDomain": "compass.com",
-    "nameBeforeEmail": true
+    "nameBeforeEmail": true,
+    "profileUrlPatterns": ["/agents/"]
   }
 }

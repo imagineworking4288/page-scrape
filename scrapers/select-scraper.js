@@ -56,22 +56,31 @@ class SelectScraper {
       this.logger.info(`Start position: y=${startPos.y}`);
       this.logger.info(`End position: y=${endPos.y}`);
 
-      // Select text range
-      this.logger.info('Selecting text range...');
-      await this.selectRange(page, startPos, endPos);
+      // Try DOM-based extraction first
+      this.logger.info('Attempting DOM-based extraction...');
+      let contacts = await this.extractContactsFromDOM(page, startPos, endPos, config);
 
-      // Extract selected text
-      const selectedText = await this.extractSelectedText(page);
+      // Fall back to text-based extraction if DOM extraction fails or returns no results
+      if (!contacts || contacts.length === 0) {
+        this.logger.warn('DOM extraction failed or returned no results, falling back to text extraction');
 
-      if (!selectedText || selectedText.length === 0) {
-        this.logger.warn('No text selected');
-        return [];
+        // Select text range
+        this.logger.info('Selecting text range...');
+        await this.selectRange(page, startPos, endPos);
+
+        // Extract selected text
+        const selectedText = await this.extractSelectedText(page);
+
+        if (!selectedText || selectedText.length === 0) {
+          this.logger.warn('No text selected');
+          return [];
+        }
+
+        this.logger.info(`Selected ${selectedText.length} characters`);
+
+        // Parse text into contacts
+        contacts = this.textParser.parse(selectedText, config);
       }
-
-      this.logger.info(`Selected ${selectedText.length} characters`);
-
-      // Parse text into contacts
-      const contacts = this.textParser.parse(selectedText, config);
 
       // Add domain classification
       for (const contact of contacts) {
@@ -258,6 +267,329 @@ class SelectScraper {
   async extractSelectedText(page) {
     // Return the text that was stored during selectRange
     return this.selectedText || '';
+  }
+
+  /**
+   * Extract contacts using DOM-based container detection
+   * @param {object} page - Puppeteer page
+   * @param {object} startPos - Start position {x, y}
+   * @param {object} endPos - End position {x, y}
+   * @param {object} config - Site configuration
+   * @returns {array} - Array of contact objects or null if detection fails
+   */
+  async extractContactsFromDOM(page, startPos, endPos, config) {
+    try {
+      // Get base URL for profile URL normalization
+      const baseUrl = await page.url();
+
+      // Detect container pattern or use manual selector from config
+      let containerSelector = config.selectors?.container;
+
+      if (!containerSelector) {
+        this.logger.info('No manual container selector, detecting pattern...');
+        containerSelector = await this.detectContainerPattern(page, startPos, endPos);
+
+        if (!containerSelector) {
+          this.logger.warn('Container pattern detection failed');
+          return null;
+        }
+
+        this.logger.info(`Detected container pattern: ${containerSelector}`);
+      }
+
+      // Extract contacts from containers
+      const contacts = await page.evaluate((selector, start, end, baseUrl, configSelectors, profileUrlPatterns) => {
+        const containers = document.querySelectorAll(selector);
+        const results = [];
+
+        for (const container of containers) {
+          // Check if container is within Y boundaries
+          const rect = container.getBoundingClientRect();
+          const y = rect.top + window.scrollY;
+
+          if (y < start.y || y > end.y) {
+            continue;
+          }
+
+          // Extract email
+          let emailLink = configSelectors?.email
+            ? container.querySelector(configSelectors.email)
+            : container.querySelector('a[href^="mailto:"]');
+
+          if (!emailLink) continue;
+
+          const email = emailLink.href.replace('mailto:', '').split('?')[0].toLowerCase();
+
+          // Extract phone from tel: link
+          let phoneLink = configSelectors?.phone
+            ? container.querySelector(configSelectors.phone)
+            : container.querySelector('a[href^="tel:"]');
+
+          let phone = null;
+          let phoneSource = null;
+
+          if (phoneLink) {
+            phone = phoneLink.href.replace('tel:', '').replace(/\D/g, '');
+            // Normalize phone
+            if (phone.length === 10) {
+              phone = `+1-${phone.substring(0, 3)}-${phone.substring(3, 6)}-${phone.substring(6)}`;
+            } else if (phone.length === 11 && phone[0] === '1') {
+              phone = `+${phone[0]}-${phone.substring(1, 4)}-${phone.substring(4, 7)}-${phone.substring(7)}`;
+            }
+            phoneSource = 'tel-link';
+          } else {
+            // Try to match phone from text content
+            const phoneRegex = /(\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})/;
+            const match = container.textContent.match(phoneRegex);
+            if (match) {
+              const digits = match[0].replace(/\D/g, '');
+              if (digits.length === 10) {
+                phone = `+1-${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6)}`;
+              } else if (digits.length === 11 && digits[0] === '1') {
+                phone = `+${digits[0]}-${digits.substring(1, 4)}-${digits.substring(4, 7)}-${digits.substring(7)}`;
+              }
+              phoneSource = 'text-match';
+            }
+          }
+
+          // Extract profile URL
+          let profileUrl = null;
+          if (configSelectors?.profileLink) {
+            const profileLink = container.querySelector(configSelectors.profileLink);
+            if (profileLink) {
+              profileUrl = new URL(profileLink.href, baseUrl).href;
+            }
+          } else if (profileUrlPatterns && profileUrlPatterns.length > 0) {
+            const links = container.querySelectorAll('a[href]');
+            for (const link of links) {
+              const href = link.getAttribute('href');
+              if (href && profileUrlPatterns.some(pattern => href.includes(pattern))) {
+                profileUrl = new URL(href, baseUrl).href;
+                break;
+              }
+            }
+          }
+
+          // Extract name
+          let name = null;
+          if (configSelectors?.name) {
+            const nameEl = container.querySelector(configSelectors.name);
+            if (nameEl) {
+              name = nameEl.textContent.trim();
+            }
+          } else {
+            // Look for capitalized text before email
+            const emailIndex = container.textContent.indexOf(email);
+            if (emailIndex !== -1) {
+              const textBefore = container.textContent.substring(0, emailIndex);
+              const lines = textBefore.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+              lines.reverse();
+
+              for (const line of lines) {
+                const words = line.split(/\s+/);
+                const capitalizedWords = words.filter(w => w.length > 0 && w[0] === w[0].toUpperCase());
+
+                if (capitalizedWords.length >= 1 && capitalizedWords.length <= 5) {
+                  name = capitalizedWords.join(' ');
+                  break;
+                }
+              }
+            }
+          }
+
+          // Extract domain
+          const domain = email.split('@')[1];
+
+          results.push({
+            name: name,
+            email: email,
+            phone: phone,
+            phoneSource: phoneSource,
+            profileUrl: profileUrl,
+            source: 'select-dom',
+            confidence: null, // Will be calculated below
+            domain: domain,
+            domainType: null // Will be set by DomainExtractor
+          });
+        }
+
+        return results;
+      }, containerSelector, startPos, endPos, baseUrl, config.selectors || {}, config.parsing?.profileUrlPatterns || []);
+
+      if (contacts.length === 0) {
+        return null;
+      }
+
+      // Calculate confidence for each contact
+      for (const contact of contacts) {
+        const hasName = !!contact.name;
+        const hasEmail = !!contact.email;
+        const hasPhone = !!contact.phone;
+
+        if (hasName && hasEmail && hasPhone) {
+          contact.confidence = 'high';
+        } else if ((hasName && hasEmail) || (hasEmail && hasPhone)) {
+          contact.confidence = 'medium';
+        } else {
+          contact.confidence = 'low';
+        }
+      }
+
+      // Detect and flag shared phones
+      this.detectSharedPhones(contacts);
+
+      // Validate names against blacklist
+      for (const contact of contacts) {
+        if (contact.name && !this.textParser.isValidName(contact.name)) {
+          this.logger.debug(`Removing invalid name: ${contact.name}`);
+          contact.name = null;
+        }
+      }
+
+      this.logger.info(`DOM extraction found ${contacts.length} contacts`);
+      return contacts;
+
+    } catch (error) {
+      this.logger.warn(`DOM extraction error: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Detect container pattern by analyzing email element ancestors
+   * @param {object} page - Puppeteer page
+   * @param {object} startPos - Start position {x, y}
+   * @param {object} endPos - End position {x, y}
+   * @returns {string|null} - CSS selector for container or null
+   */
+  async detectContainerPattern(page, startPos, endPos) {
+    try {
+      const pattern = await page.evaluate((start, end) => {
+        // Find all mailto links within Y boundaries
+        const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]'));
+        const validLinks = mailtoLinks.filter(link => {
+          const rect = link.getBoundingClientRect();
+          const y = rect.top + window.scrollY;
+          return y >= start.y && y <= end.y;
+        });
+
+        if (validLinks.length < 2) {
+          return null; // Need at least 2 contacts to detect pattern
+        }
+
+        // Analyze ancestor patterns
+        const ancestorData = [];
+        const maxLevel = 5;
+
+        for (const link of validLinks) {
+          let current = link.parentElement;
+          let level = 0;
+
+          const ancestors = [];
+
+          while (current && level < maxLevel) {
+            const hasTelLink = current.querySelector('a[href^="tel:"]') !== null;
+            const tagName = current.tagName.toLowerCase();
+            const classes = Array.from(current.classList).join(' ');
+
+            ancestors.push({
+              level: level,
+              tagName: tagName,
+              classes: classes,
+              hasTelLink: hasTelLink,
+              element: current
+            });
+
+            current = current.parentElement;
+            level++;
+          }
+
+          ancestorData.push(ancestors);
+        }
+
+        // Find the ancestor level where most emails share similar structure AND container has tel link
+        for (let level = 0; level < maxLevel; level++) {
+          const ancestorsAtLevel = ancestorData.map(ancestors => ancestors[level]).filter(a => a);
+
+          if (ancestorsAtLevel.length < validLinks.length) {
+            continue; // Not all emails have this level
+          }
+
+          // Count how many have tel links at this level
+          const withTelLink = ancestorsAtLevel.filter(a => a.hasTelLink).length;
+          const telLinkRatio = withTelLink / ancestorsAtLevel.length;
+
+          // If at least 50% have tel links at this level, consider it a container
+          if (telLinkRatio >= 0.5) {
+            // Find common tag name
+            const tagCounts = {};
+            for (const ancestor of ancestorsAtLevel) {
+              tagCounts[ancestor.tagName] = (tagCounts[ancestor.tagName] || 0) + 1;
+            }
+
+            const mostCommonTag = Object.keys(tagCounts).reduce((a, b) =>
+              tagCounts[a] > tagCounts[b] ? a : b
+            );
+
+            // Find common class patterns
+            const classCounts = {};
+            for (const ancestor of ancestorsAtLevel) {
+              const classes = ancestor.classes.split(' ').filter(c => c.length > 0);
+              for (const cls of classes) {
+                classCounts[cls] = (classCounts[cls] || 0) + 1;
+              }
+            }
+
+            // Get classes that appear in at least 80% of containers
+            const threshold = ancestorsAtLevel.length * 0.8;
+            const commonClasses = Object.keys(classCounts).filter(cls => classCounts[cls] >= threshold);
+
+            // Build selector
+            if (commonClasses.length > 0) {
+              return `${mostCommonTag}.${commonClasses.join('.')}`;
+            } else {
+              return mostCommonTag;
+            }
+          }
+        }
+
+        return null;
+      }, startPos, endPos);
+
+      return pattern;
+
+    } catch (error) {
+      this.logger.warn(`Container detection error: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Detect and flag contacts that share phone numbers
+   * @param {array} contacts - Array of contact objects
+   */
+  detectSharedPhones(contacts) {
+    // Group contacts by phone number
+    const phoneGroups = {};
+
+    for (const contact of contacts) {
+      if (contact.phone) {
+        if (!phoneGroups[contact.phone]) {
+          phoneGroups[contact.phone] = [];
+        }
+        phoneGroups[contact.phone].push(contact.email);
+      }
+    }
+
+    // Flag contacts with shared phones
+    for (const contact of contacts) {
+      if (contact.phone && phoneGroups[contact.phone].length > 1) {
+        contact.sharedPhone = true;
+        contact.sharedPhoneGroup = phoneGroups[contact.phone];
+      } else {
+        contact.sharedPhone = false;
+      }
+    }
   }
 }
 
