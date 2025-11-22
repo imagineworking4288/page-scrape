@@ -1,6 +1,5 @@
-const fs = require('fs');
-const path = require('path');
 const DomainExtractor = require('../utils/domain-extractor');
+const contactExtractor = require('../utils/contact-extractor');
 
 class SimpleScraper {
   constructor(browserManager, rateLimiter, logger) {
@@ -11,66 +10,14 @@ class SimpleScraper {
     // Initialize domain extractor
     this.domainExtractor = new DomainExtractor(logger);
 
-    // Load pdf-parse
-    try {
-      this.pdfParse = require('pdf-parse');
-      this.logger.info('pdf-parse loaded successfully');
-    } catch (error) {
-      throw new Error('pdf-parse is required. Install with: npm install pdf-parse');
-    }
-
     // Track processed emails to prevent duplicates
     this.processedEmails = new Set();
 
-    // Pre-compiled regex patterns for performance
-    this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    this.PHONE_REGEXES = [
-      /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
-      /(?:\+1[-.\s]?)?([0-9]{3})[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
-      /([0-9]{10})/g
-    ];
-
-    // SIMPLIFIED: Much more permissive name pattern
-    // Accepts any capitalized words (including single names)
-    this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
-
-    // BLACKLIST: Common UI elements that should never be names
-    this.NAME_BLACKLIST = new Set([
-      // Authentication & Navigation
-      'sign in', 'log in', 'sign up', 'log out', 'register', 'login',
-
-      // Actions
-      'get help', 'contact us', 'about us', 'view profile', 'view all',
-      'learn more', 'read more', 'see more', 'show more', 'load more',
-      'find an agent', 'find a', 'search', 'filter', 'back to',
-      'click here', 'more info', 'details',
-
-      // Contact Labels
-      'contact', 'email', 'phone', 'call', 'text', 'message',
-      'website', 'address', 'location',
-
-      // Form field labels
-      'name', 'first name', 'last name', 'full name',
-      'your name', 'enter name', 'user name', 'username',
-
-      // Location labels
-      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island',
-      'new york', 'ny', 'nyc', 'city', 'state', 'zip',
-
-      // Menu Items
-      'menu', 'home', 'listings', 'properties', 'agents',
-      'about', 'services', 'resources', 'blog', 'news',
-
-      // Compass.com specific (from logs)
-      'compass', 'compass one', 'compass luxury', 'compass academy', 'compass plus',
-      'compass cares', 'private exclusives', 'coming soon',
-      'new development', 'recently sold', 'sales leadership',
-      'neighborhood guides', 'mortgage calculator', 'external suppliers',
-
-      // Generic descriptors
-      'agent', 'broker', 'realtor', 'licensed', 'certified',
-      'team', 'group', 'partners', 'associates'
-    ]);
+    // Import shared patterns from contact-extractor
+    this.EMAIL_REGEX = contactExtractor.EMAIL_REGEX;
+    this.PHONE_REGEXES = contactExtractor.PHONE_REGEXES;
+    this.NAME_REGEX = contactExtractor.NAME_REGEX;
+    this.NAME_BLACKLIST = contactExtractor.NAME_BLACKLIST;
     
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
@@ -268,12 +215,10 @@ class SimpleScraper {
   }
 
   /**
-   * Helper to escape regex special characters
-   * @param {string} str - String to escape
-   * @returns {string} - Escaped string
+   * Helper to escape regex special characters (delegates to shared utility)
    */
   escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return contactExtractor.escapeRegex(str);
   }
 
   /**
@@ -448,142 +393,31 @@ class SimpleScraper {
   }
 
   /**
-   * Find name in context by searching for capitalized word sequences
-   * Prioritizes names closest to the email position
-   * @param {string} beforeContext - Text before the email
-   * @param {string} email - Email address for term matching
-   * @param {number} emailPos - Position of email in full document
-   * @returns {Object|null} - {name, distance, score} or null
+   * Find name in context (delegates to shared utility)
    */
   findNameInContext(beforeContext, email, emailPos) {
-    const lines = beforeContext.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-
-    // Extract email terms for scoring
-    const emailPrefix = email.split('@')[0].toLowerCase();
-    const emailTerms = emailPrefix.split(/[._-]+/).filter(t => t.length >= 2);
-
-    const candidates = [];
-
-    // Search lines from closest to email (end) to furthest (start)
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      const linePositionInContext = beforeContext.lastIndexOf(line);
-      const distanceFromEmail = beforeContext.length - linePositionInContext;
-
-      // Extract all capitalized word sequences from this line
-      const namePattern = /\b([A-Z][a-z]+(?:[\s'-][A-Z][a-z]+){0,4})\b/g;
-      let match;
-
-      while ((match = namePattern.exec(line)) !== null) {
-        const candidateName = match[1].trim();
-
-        // Validate candidate
-        if (!this.isValidNameCandidate(candidateName)) {
-          continue;
-        }
-
-        // Calculate score based on proximity and email term matching
-        const score = this.scoreNameCandidate(candidateName, emailTerms, distanceFromEmail);
-
-        candidates.push({
-          name: candidateName,
-          distance: distanceFromEmail,
-          score,
-          line
-        });
-      }
-    }
-
-    // Return highest scoring candidate
-    if (candidates.length === 0) return null;
-
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0];
+    return contactExtractor.findNameInContext(beforeContext, email, emailPos);
   }
 
   /**
-   * Validate if text is a valid name candidate
-   * @param {string} text - Candidate text
-   * @returns {boolean}
+   * Validate if text is a valid name candidate (delegates to shared utility)
    */
   isValidNameCandidate(text) {
-    if (!text || text.length < 2 || text.length > 50) return false;
-
-    // Check against comprehensive blacklist (case-insensitive exact match)
-    const lowerText = text.toLowerCase();
-    if (this.NAME_BLACKLIST.has(lowerText)) {
-      return false;
-    }
-
-    // Also check for partial matches with common UI words
-    const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login'];
-    if (uiWords.some(word => lowerText.includes(word))) {
-      return false;
-    }
-
-    // Must have 1-5 words
-    const wordCount = text.split(/\s+/).length;
-    if (wordCount < 1 || wordCount > 5) return false;
-
-    return true;
+    return contactExtractor.isValidNameCandidate(text);
   }
 
   /**
-   * Score name candidate based on proximity to email and term matching
-   * @param {string} candidateName - Name to score
-   * @param {Array} emailTerms - Terms from email prefix
-   * @param {number} distance - Character distance from email
-   * @returns {number} - Score (higher is better)
+   * Score name candidate (delegates to shared utility)
    */
   scoreNameCandidate(candidateName, emailTerms, distance) {
-    let score = 0;
-
-    // Proximity score (closer = better, max 50 points)
-    const proximityScore = Math.max(0, 50 - (distance / 2));
-    score += proximityScore;
-
-    // Email term matching score (max 40 points)
-    const nameLower = candidateName.toLowerCase();
-    const nameWords = nameLower.split(/\s+/);
-
-    let matchedTerms = 0;
-    for (const term of emailTerms) {
-      const termLower = term.toLowerCase();
-      if (nameWords.some(word => word.includes(termLower) || termLower.includes(word))) {
-        matchedTerms++;
-      }
-    }
-
-    if (emailTerms.length > 0) {
-      score += (matchedTerms / emailTerms.length) * 40;
-    }
-
-    // Completeness score (2+ words = 10 points)
-    if (nameWords.length >= 2) {
-      score += 10;
-    }
-
-    return score;
+    return contactExtractor.scoreNameCandidate(candidateName, emailTerms, distance);
   }
 
   /**
-   * Find phone number in context text
-   * @param {string} context - Text to search
-   * @returns {string|null} - Phone number or null
+   * Find phone number in context (delegates to shared utility)
    */
   findPhoneInContext(context) {
-    const phonePatterns = [
-      /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/,
-      /\+1[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/,
-      /\d{10}/
-    ];
-
-    for (const pattern of phonePatterns) {
-      const match = context.match(pattern);
-      if (match) return match[0];
-    }
-
-    return null;
+    return contactExtractor.findPhoneInContext(context);
   }
 
   /**
@@ -605,17 +439,10 @@ class SimpleScraper {
   }
 
   /**
-   * Derive name from email address (fallback method)
-   * @param {string} email - Email address
-   * @returns {string} - Derived name
+   * Derive name from email address (delegates to shared utility)
    */
   deriveNameFromEmail(email) {
-    const username = email.split('@')[0];
-    const parts = username.split(/[._-]/);
-
-    return parts
-      .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-      .join(' ');
+    return contactExtractor.extractNameFromEmail(email);
   }
 
   async scrape(url, limit = null, keepPdf = false) {
@@ -754,56 +581,7 @@ class SimpleScraper {
   }
 
   async renderAndParsePdf(page, keepPdf = false) {
-    const timestamp = new Date().toISOString()
-      .replace(/[:.]/g, '-')
-      .replace('T', '-')
-      .substring(0, 19);
-
-    const pdfDir = path.join(process.cwd(), 'output', 'pdfs');
-    const pdfPath = path.join(pdfDir, `scrape-${timestamp}.pdf`);
-
-    // Create directory if needed
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-      this.logger.info(`Created PDF directory: ${pdfDir}`);
-    }
-
-    try {
-      // Save PDF to disk (not memory)
-      await page.pdf({
-        path: pdfPath,
-        format: 'Letter',
-        printBackground: true,
-        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' },
-        timeout: 60000  // Add 60 second timeout
-      });
-
-      this.logger.info(`PDF saved: ${pdfPath}`);
-
-      // Read from disk and parse
-      const pdfBuffer = fs.readFileSync(pdfPath);
-      const data = await this.pdfParse(pdfBuffer);
-
-      // Conditional deletion based on --keep flag
-      if (!keepPdf) {
-        fs.unlinkSync(pdfPath);
-        this.logger.info(`PDF deleted: ${pdfPath}`);
-      } else {
-        this.logger.info(`PDF kept: ${pdfPath}`);
-      }
-
-      return {
-        fullText: data.text,
-        sections: data.text.split(/\n\s*\n+/).map(s => s.trim()).filter(s => s.length > 20)
-      };
-    } catch (error) {
-      // Cleanup on error
-      if (fs.existsSync(pdfPath)) {
-        fs.unlinkSync(pdfPath);
-        this.logger.warn(`Deleted PDF after error: ${pdfPath}`);
-      }
-      throw error;
-    }
+    return await contactExtractor.renderAndParsePdf(page, keepPdf, this.logger);
   }
 
   async extractUniqueEmails(page, cardSelector, limit) {
@@ -997,113 +775,18 @@ class SimpleScraper {
   }
 
   validateAndCleanName(text) {
-    if (!text || text.length < 2 || text.length > 100) return null;
-
-    text = text.trim();
-
-    // Check blacklist (case-insensitive)
-    if (this.NAME_BLACKLIST.has(text.toLowerCase())) return null;
-
-    // Check against NAME_REGEX
-    if (this.NAME_REGEX.test(text)) {
-      return text;
-    }
-
-    return null;
+    return contactExtractor.validateAndCleanName(text);
   }
 
   /**
-   * Extract name from email address as fallback
-   * Examples:
-   *   "brandon.abelard@compass.com" → "Brandon Abelard"
-   *   "eric.agosto@compass.com" → "Eric Agosto"
-   *   "seema@compass.com" → "Seema"
-   *   "j.aguilera@compass.com" → "J Aguilera"
-   *   "abramsretailstrategies@compass.com" → null (team name)
-   *   "agteam@compass.com" → null (team name)
+   * Extract name from email address (delegates to shared utility)
    */
   extractNameFromEmail(email) {
-    if (!email || typeof email !== 'string') return null;
-
-    const prefix = email.split('@')[0];
-    if (!prefix || prefix.length < 2) return null;
-
-    // Filter out non-name patterns
-    const nonNameWords = [
-      'info', 'contact', 'admin', 'support', 'team', 'sales',
-      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
-      'noreply', 'no-reply', 'webmaster', 'postmaster',
-      // Team/company indicators
-      'strategies', 'retail', 'group', 'partners', 'associates',
-      'realty', 'properties', 'homes', 'listings'
-    ];
-
-    const lowerPrefix = prefix.toLowerCase();
-    if (nonNameWords.some(word => lowerPrefix === word || lowerPrefix.includes(word))) {
-      return null;
-    }
-
-    // Reject if too long (likely team name)
-    if (prefix.length > 25) return null;
-
-    // Split on delimiters
-    const parts = prefix.split(/[._-]+/);
-    const validParts = parts.filter(p => p.length > 0 && !/^\d+$/.test(p));
-
-    if (validParts.length === 0) return null;
-
-    // Handle concatenated names (e.g., "nikkiadamo", "macevedo")
-    if (validParts.length === 1 && validParts[0].length > 8) {
-      const concatenated = validParts[0];
-
-      // Try common first name dictionary
-      const commonFirstNames = [
-        'nikki', 'michael', 'melody', 'robin', 'tamara', 'brandon',
-        'eric', 'william', 'robert', 'jennifer', 'melissa', 'amanda',
-        'christopher', 'matthew', 'daniel', 'elizabeth', 'jonathan',
-        'ioana', 'marc', 'emily', 'kayode', 'seema', 'yardena'
-      ];
-
-      for (const firstName of commonFirstNames) {
-        if (concatenated.toLowerCase().startsWith(firstName)) {
-          const lastName = concatenated.substring(firstName.length);
-          if (lastName.length >= 2) {
-            return this.toTitleCase(firstName) + ' ' + this.toTitleCase(lastName);
-          }
-        }
-      }
-
-      // Fallback: split at midpoint
-      const mid = Math.ceil(concatenated.length / 2);
-      return this.toTitleCase(concatenated.substring(0, mid)) + ' ' +
-             this.toTitleCase(concatenated.substring(mid));
-    }
-
-    // Handle single-letter initials
-    const titleCaseParts = validParts.map(part => {
-      if (part.length === 1) {
-        return part.toUpperCase() + '.'; // "m" → "M."
-      }
-      return this.toTitleCase(part);
-    });
-
-    const name = titleCaseParts.join(' ');
-
-    // Validate result
-    if (this.isValidNameForEmail(name)) {
-      return name;
-    }
-
-    // Accept single names if reasonable length
-    if (validParts.length === 1 && name.length >= 2 && name.length <= 15) {
-      return name;
-    }
-
-    return null;
+    return contactExtractor.extractNameFromEmail(email);
   }
 
   toTitleCase(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+    return contactExtractor.toTitleCase(str);
   }
 
   isValidNameForEmail(name) {

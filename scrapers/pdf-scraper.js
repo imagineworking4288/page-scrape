@@ -1,9 +1,8 @@
 // NOTE: This implementation requires pdf-parse npm package
 // Run: npm install pdf-parse
 
-const fs = require('fs');
-const path = require('path');
 const DomainExtractor = require('../utils/domain-extractor');
+const contactExtractor = require('../utils/contact-extractor');
 
 class PdfScraper {
   constructor(browserManager, rateLimiter, logger) {
@@ -14,68 +13,17 @@ class PdfScraper {
     // Initialize domain extractor
     this.domainExtractor = new DomainExtractor(logger);
 
-    // Load pdf-parse (required)
-    try {
-      this.pdfParse = require('pdf-parse');
-      this.logger.info('pdf-parse loaded successfully');
-    } catch (error) {
-      throw new Error('pdf-parse is required. Install with: npm install pdf-parse');
-    }
-
     // Track processed emails to prevent duplicates
     this.processedEmails = new Set();
-    
+
     // FIXED: Configurable Y_THRESHOLD with sensible default
     this.Y_THRESHOLD = 40; // Reduced from 100 to 40 pixels
-    
-    // Pre-compiled regex patterns for performance
-    this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    this.PHONE_REGEXES = [
-      /(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g,
-      /([0-9]{10})/g
-    ];
-    
-    // FIXED: Simplified name pattern matching simple-scraper
-    // Accepts any capitalized words (including single names)
-    this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
-    
-    // BLACKLIST: Common UI elements that should never be names
-    this.NAME_BLACKLIST = new Set([
-      // Authentication & Navigation
-      'sign in', 'log in', 'sign up', 'log out', 'register', 'login',
 
-      // Actions
-      'get help', 'contact us', 'about us', 'view profile', 'view all',
-      'learn more', 'read more', 'see more', 'show more', 'load more',
-      'find an agent', 'find a', 'search', 'filter', 'back to',
-      'click here', 'more info', 'details',
-
-      // Contact Labels
-      'contact', 'email', 'phone', 'call', 'text', 'message',
-      'website', 'address', 'location',
-
-      // Form field labels
-      'name', 'first name', 'last name', 'full name',
-      'your name', 'enter name', 'user name', 'username',
-
-      // Location labels
-      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island',
-      'new york', 'ny', 'nyc', 'city', 'state', 'zip',
-
-      // Menu Items
-      'menu', 'home', 'listings', 'properties', 'agents',
-      'about', 'services', 'resources', 'blog', 'news',
-
-      // Compass.com specific (from logs)
-      'compass', 'compass one', 'compass luxury', 'compass academy', 'compass plus',
-      'compass cares', 'private exclusives', 'coming soon',
-      'new development', 'recently sold', 'sales leadership',
-      'neighborhood guides', 'mortgage calculator', 'external suppliers',
-
-      // Generic descriptors
-      'agent', 'broker', 'realtor', 'licensed', 'certified',
-      'team', 'group', 'partners', 'associates'
-    ]);
+    // Import shared patterns from contact-extractor
+    this.EMAIL_REGEX = contactExtractor.EMAIL_REGEX;
+    this.PHONE_REGEXES = contactExtractor.PHONE_REGEXES;
+    this.NAME_REGEX = contactExtractor.NAME_REGEX;
+    this.NAME_BLACKLIST = contactExtractor.NAME_BLACKLIST;
   }
 
   /**
@@ -247,12 +195,10 @@ class PdfScraper {
   }
 
   /**
-   * Helper to escape regex special characters
-   * @param {string} str - String to escape
-   * @returns {string} - Escaped string
+   * Helper to escape regex special characters (delegates to shared utility)
    */
   escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return contactExtractor.escapeRegex(str);
   }
 
   /**
@@ -676,56 +622,7 @@ class PdfScraper {
   }
 
   async renderAndParsePdf(page, keepPdf = false) {
-    const timestamp = new Date().toISOString()
-      .replace(/[:.]/g, '-')
-      .replace('T', '-')
-      .substring(0, 19);
-
-    const pdfDir = path.join(process.cwd(), 'output', 'pdfs');
-    const pdfPath = path.join(pdfDir, `scrape-${timestamp}.pdf`);
-
-    // Create directory if needed
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-      this.logger.info(`Created PDF directory: ${pdfDir}`);
-    }
-
-    try {
-      // Save PDF to disk (not memory)
-      await page.pdf({
-        path: pdfPath,
-        format: 'Letter',
-        printBackground: true,
-        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' },
-        timeout: 60000  // Add 60 second timeout
-      });
-
-      this.logger.info(`PDF saved: ${pdfPath}`);
-
-      // Read from disk and parse
-      const pdfBuffer = fs.readFileSync(pdfPath);
-      const data = await this.pdfParse(pdfBuffer);
-
-      // Conditional deletion based on --keep flag
-      if (!keepPdf) {
-        fs.unlinkSync(pdfPath);
-        this.logger.info(`PDF deleted: ${pdfPath}`);
-      } else {
-        this.logger.info(`PDF kept: ${pdfPath}`);
-      }
-
-      return {
-        fullText: data.text,
-        sections: data.text.split(/\n\s*\n+/).map(s => s.trim()).filter(s => s.length > 20)
-      };
-    } catch (error) {
-      // Cleanup on error
-      if (fs.existsSync(pdfPath)) {
-        fs.unlinkSync(pdfPath);
-        this.logger.warn(`Deleted PDF after error: ${pdfPath}`);
-      }
-      throw error;
-    }
+    return await contactExtractor.renderAndParsePdf(page, keepPdf, this.logger);
   }
 
   extractUniqueEmailsFromText(text) {
@@ -800,87 +697,11 @@ class PdfScraper {
   }
 
   extractNameFromEmail(email) {
-    if (!email || typeof email !== 'string') return null;
-
-    const prefix = email.split('@')[0];
-    if (!prefix || prefix.length < 2) return null;
-
-    // Filter out non-name patterns
-    const nonNameWords = [
-      'info', 'contact', 'admin', 'support', 'team', 'sales',
-      'help', 'service', 'office', 'hello', 'inquiries', 'mail',
-      'noreply', 'no-reply', 'webmaster', 'postmaster',
-      // Team/company indicators
-      'strategies', 'retail', 'group', 'partners', 'associates',
-      'realty', 'properties', 'homes', 'listings'
-    ];
-
-    const lowerPrefix = prefix.toLowerCase();
-    if (nonNameWords.some(word => lowerPrefix === word || lowerPrefix.includes(word))) {
-      return null;
-    }
-
-    // Reject if too long (likely team name)
-    if (prefix.length > 25) return null;
-
-    // Split on delimiters
-    const parts = prefix.split(/[._-]+/);
-    const validParts = parts.filter(p => p.length > 0 && !/^\d+$/.test(p));
-
-    if (validParts.length === 0) return null;
-
-    // Handle concatenated names (e.g., "nikkiadamo", "macevedo")
-    if (validParts.length === 1 && validParts[0].length > 8) {
-      const concatenated = validParts[0];
-
-      // Try common first name dictionary
-      const commonFirstNames = [
-        'nikki', 'michael', 'melody', 'robin', 'tamara', 'brandon',
-        'eric', 'william', 'robert', 'jennifer', 'melissa', 'amanda',
-        'christopher', 'matthew', 'daniel', 'elizabeth', 'jonathan',
-        'ioana', 'marc', 'emily', 'kayode', 'seema', 'yardena'
-      ];
-
-      for (const firstName of commonFirstNames) {
-        if (concatenated.toLowerCase().startsWith(firstName)) {
-          const lastName = concatenated.substring(firstName.length);
-          if (lastName.length >= 2) {
-            return this.toTitleCase(firstName) + ' ' + this.toTitleCase(lastName);
-          }
-        }
-      }
-
-      // Fallback: split at midpoint
-      const mid = Math.ceil(concatenated.length / 2);
-      return this.toTitleCase(concatenated.substring(0, mid)) + ' ' +
-             this.toTitleCase(concatenated.substring(mid));
-    }
-
-    // Handle single-letter initials
-    const titleCaseParts = validParts.map(part => {
-      if (part.length === 1) {
-        return part.toUpperCase() + '.'; // "m" → "M."
-      }
-      return this.toTitleCase(part);
-    });
-
-    const name = titleCaseParts.join(' ');
-
-    // Validate result
-    if (this.isValidName(name)) {
-      return name;
-    }
-
-    // Accept single names if reasonable length
-    if (validParts.length === 1 && name.length >= 2 && name.length <= 15) {
-      return name;
-    }
-
-    return null;
+    return contactExtractor.extractNameFromEmail(email);
   }
 
   toTitleCase(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+    return contactExtractor.toTitleCase(str);
   }
 
   isValidName(name) {
@@ -1339,24 +1160,11 @@ class PdfScraper {
   }
 
   extractEmails(text) {
-    if (!text) return [];
-    const matches = text.match(this.EMAIL_REGEX);
-    return matches ? [...new Set(matches)] : [];
+    return contactExtractor.extractEmails(text);
   }
 
   extractPhones(text) {
-    if (!text) return [];
-    const phones = [];
-    
-    for (const regex of this.PHONE_REGEXES) {
-      const matches = text.match(new RegExp(regex.source, 'g'));
-      if (matches) {
-        phones.push(...matches);
-      }
-    }
-    
-    // Deduplicate
-    return [...new Set(phones)];
+    return contactExtractor.extractPhones(text);
   }
 
   /**

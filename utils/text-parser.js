@@ -3,45 +3,17 @@
  * Parses raw selected text into structured contact records.
  */
 
+const contactExtractor = require('./contact-extractor');
+
 class TextParser {
   constructor(logger) {
     this.logger = logger;
 
-    // Reuse patterns from simple-scraper.js
-    this.EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    // Import shared patterns from contact-extractor
+    this.EMAIL_REGEX = contactExtractor.EMAIL_REGEX;
     this.PHONE_REGEX = /(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
-    this.NAME_REGEX = /^[A-Z][a-zA-Z'\-\.\s]{1,98}[a-zA-Z]$/;
-
-    // Reuse blacklist from simple-scraper.js
-    this.NAME_BLACKLIST = new Set([
-      // Authentication & Navigation
-      'sign in', 'log in', 'sign up', 'log out', 'register', 'login',
-      // Actions
-      'get help', 'contact us', 'about us', 'view profile', 'view all',
-      'learn more', 'read more', 'see more', 'show more', 'load more',
-      'find an agent', 'find a', 'search', 'filter', 'back to',
-      'click here', 'more info', 'details',
-      // Contact Labels
-      'contact', 'email', 'phone', 'call', 'text', 'message',
-      'website', 'address', 'location',
-      // Form field labels
-      'name', 'first name', 'last name', 'full name',
-      'your name', 'enter name', 'user name', 'username',
-      // Location labels
-      'manhattan', 'brooklyn', 'queens', 'bronx', 'staten island',
-      'new york', 'ny', 'nyc', 'city', 'state', 'zip',
-      // Menu Items
-      'menu', 'home', 'listings', 'properties', 'agents',
-      'about', 'services', 'resources', 'blog', 'news',
-      // Compass.com specific
-      'compass', 'compass one', 'compass luxury', 'compass academy', 'compass plus',
-      'compass cares', 'private exclusives', 'coming soon',
-      'new development', 'recently sold', 'sales leadership',
-      'neighborhood guides', 'mortgage calculator', 'external suppliers',
-      // Generic descriptors
-      'agent', 'broker', 'realtor', 'licensed', 'certified',
-      'team', 'group', 'partners', 'associates'
-    ]);
+    this.NAME_REGEX = contactExtractor.NAME_REGEX;
+    this.NAME_BLACKLIST = contactExtractor.NAME_BLACKLIST;
   }
 
   /**
@@ -246,28 +218,11 @@ class TextParser {
   }
 
   /**
-   * Validate if text is a valid name
-   * @param {string} text - Candidate name
-   * @returns {boolean}
+   * Validate if text is a valid name (delegates to shared utility)
    */
   isValidName(text) {
     if (!text || text.length < 2 || text.length > 50) return false;
-
-    // Check blacklist (case-insensitive)
-    const lowerText = text.toLowerCase();
-    if (this.NAME_BLACKLIST.has(lowerText)) return false;
-
-    // Check for partial matches with common UI words
-    const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login', 'view', 'profile'];
-    if (uiWords.some(word => lowerText.includes(word))) return false;
-
-    // Must start with capital letter
-    if (!text[0] || text[0] !== text[0].toUpperCase()) return false;
-
-    // Match name pattern
-    if (!this.NAME_REGEX.test(text)) return false;
-
-    return true;
+    return contactExtractor.isValidNameCandidate(text);
   }
 
   /**
