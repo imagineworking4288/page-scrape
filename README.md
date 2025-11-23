@@ -86,6 +86,38 @@ python -m python_scraper.test_scraper \
 
 See [python_scraper/README.md](python_scraper/README.md) for detailed documentation.
 
+## Pagination Testing
+
+Test pagination patterns before scraping multiple pages:
+
+```bash
+# Comprehensive pagination analysis
+node tests/pagination-test.js --url "https://site.com/agents/" --save-cache
+
+# Quick validation (5 pages)
+node tests/pagination-test.js --url "URL" --validate-sample 5
+
+# Export results for analysis
+node tests/pagination-test.js --url "URL" --output results.json
+```
+
+See [tests/README.md](tests/README.md) for detailed documentation.
+
+### Using Pagination
+
+After validating pagination patterns:
+
+```bash
+# Scrape multiple pages
+node orchestrator.js --url "URL" --method select --paginate --max-pages 10
+
+# Start from specific page (resume)
+node orchestrator.js --url "URL" --method select --paginate --start-page 5
+
+# Discover pattern only (no scraping)
+node orchestrator.js --url "URL" --method select --paginate --discover-only
+```
+
 ## Node.js Scraper
 
 Fast HTML-first extraction with PDF fallback.
