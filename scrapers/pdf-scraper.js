@@ -558,7 +558,7 @@ class PdfScraper {
     this.logger.info(`Y_THRESHOLD set to ${threshold}px`);
   }
 
-  async scrapePdf(url, limit = null, keepPdf = false) {
+  async scrapePdf(url, limit = null, keepPdf = false, sourcePage = null, sourceUrl = null) {
     try {
       this.logger.info(`Starting PDF-primary scrape of ${url}`);
       const page = this.browserManager.getPage();
@@ -612,6 +612,18 @@ class PdfScraper {
 
       this.logger.info('═══════════════════════════════════════');
       this.logger.info('');
+
+      // Add pagination metadata if provided
+      if (sourcePage !== null || sourceUrl !== null) {
+        for (const contact of contacts) {
+          if (sourcePage !== null) {
+            contact.sourcePage = sourcePage;
+          }
+          if (sourceUrl !== null) {
+            contact.sourceUrl = sourceUrl;
+          }
+        }
+      }
 
       return contacts;
 

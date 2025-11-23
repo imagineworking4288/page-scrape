@@ -445,7 +445,7 @@ class SimpleScraper {
     return contactExtractor.extractNameFromEmail(email);
   }
 
-  async scrape(url, limit = null, keepPdf = false) {
+  async scrape(url, limit = null, keepPdf = false, sourcePage = null, sourceUrl = null) {
     try {
       this.logger.info(`Starting HTML-first scrape of ${url}`);
       const page = this.browserManager.getPage();
@@ -495,6 +495,18 @@ class SimpleScraper {
             if (this.logger && this.logger.debug) {
               this.logger.debug(`Derived name from email: ${derivedName} for ${contact.email}`);
             }
+          }
+        }
+      }
+
+      // Add pagination metadata if provided
+      if (sourcePage !== null || sourceUrl !== null) {
+        for (const contact of contacts) {
+          if (sourcePage !== null) {
+            contact.sourcePage = sourcePage;
+          }
+          if (sourceUrl !== null) {
+            contact.sourceUrl = sourceUrl;
           }
         }
       }

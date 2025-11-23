@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+require('dotenv').config(); // Load environment variables
+
 const { Command } = require('commander');
 const Table = require('cli-table3');
 const fs = require('fs');
@@ -10,6 +12,8 @@ const logger = require('./utils/logger');
 const BrowserManager = require('./utils/browser-manager');
 const RateLimiter = require('./utils/rate-limiter');
 const DomainExtractor = require('./utils/domain-extractor');
+const Paginator = require('./utils/paginator');
+const ConfigLoader = require('./utils/config-loader');
 
 // Import scrapers
 const SimpleScraper = require('./scrapers/simple-scraper');
@@ -30,6 +34,11 @@ program
   .option('--keep', 'Keep PDF files in output/pdfs/ directory (default: delete after parsing)')
   .option('--completeness <threshold>', 'Min completeness for PDF (default: 0.7)', '0.7')
   .option('--use-python', 'Use Python PDF scraper with coordinate-based extraction (recommended for better accuracy)')
+  .option('--paginate', 'Enable pagination (scrape multiple pages)')
+  .option('--max-pages <number>', 'Maximum number of pages to scrape', parseInt)
+  .option('--start-page <number>', 'Start from specific page number (for resume)', parseInt, 1)
+  .option('--min-contacts <number>', 'Minimum contacts per page to continue', parseInt)
+  .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
   .parse(process.argv);
 
 const options = program.opts();
@@ -137,6 +146,22 @@ async function main() {
     logger.info(`Output: ${options.output}`);
     logger.info(`Headless: ${headless}`);
     logger.info(`Keep PDFs: ${options.keep ? 'yes' : 'no'}`);
+
+    // Pagination settings
+    const paginationEnabled = options.paginate || (process.env.PAGINATION_ENABLED === 'true');
+    const maxPages = options.maxPages || parseInt(process.env.PAGINATION_MAX_PAGES) || 200;
+    const minContacts = options.minContacts || parseInt(process.env.PAGINATION_MIN_CONTACTS) || 1;
+    const startPage = options.startPage || 1;
+
+    if (paginationEnabled) {
+      logger.info(`Pagination: enabled`);
+      logger.info(`  Max pages: ${maxPages}`);
+      logger.info(`  Start page: ${startPage}`);
+      logger.info(`  Min contacts/page: ${minContacts}`);
+      if (options.discoverOnly) {
+        logger.info(`  Mode: discovery only`);
+      }
+    }
     logger.info('');
 
     // Initialize components
@@ -144,51 +169,184 @@ async function main() {
     browserManager = new BrowserManager(logger);
     browserManagerGlobal = browserManager; // FIXED: Assign to global for signal handlers
     const domainExtractor = new DomainExtractor(logger);
-    
+    const configLoader = new ConfigLoader(logger);
+
     // Parse delay range
     const [minDelay, maxDelay] = options.delay.split('-').map(d => parseInt(d));
     const rateLimiter = new RateLimiter(logger, {
       minDelay: minDelay || 2000,
       maxDelay: maxDelay || 5000
     });
-    
+
     // Launch browser
     await browserManager.launch(headless);
 
-    // Create scraper based on method
-    let contacts;
+    // Initialize paginator if pagination enabled
+    let paginator = null;
+    let pageUrls = [options.url];
+    let siteConfig = null;
 
+    if (paginationEnabled) {
+      paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
+
+      // Set start page if resuming
+      if (startPage > 1) {
+        paginator.setStartPage(startPage);
+      }
+
+      // Load site config for pagination settings
+      siteConfig = configLoader.loadConfig(options.url);
+
+      // Discover pagination
+      logger.info('Discovering pagination pattern...');
+      const paginationResult = await paginator.paginate(options.url, {
+        maxPages: maxPages,
+        minContacts: minContacts,
+        timeout: parseInt(process.env.PAGINATION_DISCOVERY_TIMEOUT) || 30000,
+        discoverOnly: options.discoverOnly,
+        siteConfig: siteConfig
+      });
+
+      if (paginationResult.success) {
+        pageUrls = paginationResult.urls;
+        logger.info(`Found ${pageUrls.length} page(s) to scrape`);
+
+        if (paginationResult.pattern) {
+          logger.info(`Pagination type: ${paginationResult.paginationType}`);
+          logger.info(`Pattern: ${JSON.stringify(paginationResult.pattern)}`);
+        }
+
+        if (options.discoverOnly) {
+          logger.info('Discovery complete. Exiting (--discover-only mode).');
+          await browserManager.close();
+          process.exit(0);
+        }
+      } else {
+        logger.warn(`Pagination discovery failed: ${paginationResult.error}`);
+        logger.info('Continuing with single page scrape');
+        pageUrls = [options.url];
+      }
+    }
+
+    // Scrape all pages
+    let allContacts = [];
+    let pageNumber = startPage;
+
+    // Create scraper instance
+    let scraper;
     switch (options.method) {
       case 'html':
         logger.info('Using HTML-first method (PDF fallback for missing names)...');
-        const htmlScraper = new SimpleScraper(browserManager, rateLimiter, logger);
-        contacts = await htmlScraper.scrape(options.url, options.limit, options.keep);
+        scraper = new SimpleScraper(browserManager, rateLimiter, logger);
         break;
 
       case 'pdf':
         logger.info('Using PDF-primary method (disk-based extraction)...');
-        const pdfScraper = new PdfScraper(browserManager, rateLimiter, logger);
-        contacts = await pdfScraper.scrapePdf(options.url, options.limit, options.keep);
+        scraper = new PdfScraper(browserManager, rateLimiter, logger);
         break;
 
       case 'hybrid':
         logger.info('Using hybrid method (HTML + PDF fallback, disk-based)...');
-        const hybridScraper = new SimpleScraper(browserManager, rateLimiter, logger);
-        contacts = await hybridScraper.scrape(options.url, options.limit, options.keep);
+        scraper = new SimpleScraper(browserManager, rateLimiter, logger);
         break;
 
       case 'select':
         logger.info('Using select method (marker-based extraction)...');
         const SelectScraper = require('./scrapers/select-scraper');
-        const selectScraper = new SelectScraper(browserManager, rateLimiter, logger);
-        contacts = await selectScraper.scrape(options.url, options.limit, options.keep);
+        scraper = new SelectScraper(browserManager, rateLimiter, logger);
         break;
 
       default:
         throw new Error(`Invalid method: ${options.method}. Use html, pdf, hybrid, or select.`);
     }
 
-    // Post-process contacts (deduplication now handled by scrapers)
+    // Loop through all pages
+    for (let i = 0; i < pageUrls.length; i++) {
+      const pageUrl = pageUrls[i];
+      const currentPage = pageNumber + i;
+
+      if (pageUrls.length > 1) {
+        logger.info('');
+        logger.info(`${'='.repeat(50)}`);
+        logger.info(`Scraping page ${currentPage} of ${pageUrls.length}`);
+        logger.info(`URL: ${pageUrl}`);
+        logger.info(`${'='.repeat(50)}`);
+      }
+
+      try {
+        // Scrape the page
+        let pageContacts;
+
+        if (options.method === 'pdf') {
+          pageContacts = await scraper.scrapePdf(pageUrl, options.limit, options.keep, currentPage, pageUrl);
+        } else {
+          pageContacts = await scraper.scrape(pageUrl, options.limit, options.keep, currentPage, pageUrl);
+        }
+
+        // Validate page content if paginating
+        if (paginationEnabled && pageUrls.length > 1) {
+          const page = await browserManager.getPage();
+          const validation = await paginator.validatePage(page);
+
+          // Check for duplicate content
+          if (paginator.isDuplicateContent(validation.contentHash)) {
+            logger.warn(`Page ${currentPage} has duplicate content - stopping pagination`);
+            break;
+          }
+
+          // Mark content as seen
+          paginator.markContentAsSeen(validation.contentHash);
+
+          // Check minimum contacts threshold
+          if (pageContacts.length < minContacts) {
+            logger.warn(`Page ${currentPage} has only ${pageContacts.length} contacts (minimum: ${minContacts}) - stopping pagination`);
+            break;
+          }
+
+          logger.info(`Page ${currentPage}: Found ${pageContacts.length} contacts`);
+        }
+
+        // Add to all contacts
+        allContacts = allContacts.concat(pageContacts);
+
+        // Respect rate limiting between pages
+        if (i < pageUrls.length - 1) {
+          await rateLimiter.waitBeforeRequest();
+        }
+
+      } catch (error) {
+        logger.error(`Error scraping page ${currentPage}: ${error.message}`);
+
+        // For pagination, decide whether to continue or stop
+        if (paginationEnabled && pageUrls.length > 1) {
+          logger.warn(`Skipping page ${currentPage} and continuing with next page`);
+          continue;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // Deduplicate contacts across all pages (by email)
+    const uniqueContactsMap = new Map();
+    for (const contact of allContacts) {
+      const key = contact.email || `${contact.name}_${contact.phone}`;
+      if (!uniqueContactsMap.has(key)) {
+        uniqueContactsMap.set(key, contact);
+      } else {
+        // Keep the one with more complete information
+        const existing = uniqueContactsMap.get(key);
+        const existingComplete = (existing.name ? 1 : 0) + (existing.email ? 1 : 0) + (existing.phone ? 1 : 0);
+        const newComplete = (contact.name ? 1 : 0) + (contact.email ? 1 : 0) + (contact.phone ? 1 : 0);
+        if (newComplete > existingComplete) {
+          uniqueContactsMap.set(key, contact);
+        }
+      }
+    }
+
+    const contacts = Array.from(uniqueContactsMap.values());
+
+    // Post-process contacts
     const processedContacts = contacts;
     
     // NEW: Generate domain statistics
@@ -200,7 +358,8 @@ async function main() {
     logger.info('═══════════════════════════════════════');
     logger.info('  SCRAPING COMPLETE');
     logger.info('═══════════════════════════════════════');
-    logger.logStats({
+
+    const stats = {
       'Total Contacts': processedContacts.length,
       'With Email': processedContacts.filter(c => c.email).length,
       'With Phone': processedContacts.filter(c => c.phone).length,
@@ -212,7 +371,16 @@ async function main() {
       'From HTML': processedContacts.filter(c => c.source === 'html').length,
       'From PDF': processedContacts.filter(c => c.source === 'pdf').length,
       'Merged': processedContacts.filter(c => c.source === 'merged').length
-    });
+    };
+
+    // Add pagination stats if applicable
+    if (paginationEnabled && pageUrls.length > 1) {
+      stats['Pages Scraped'] = pageUrls.length;
+      stats['Total Extracted'] = allContacts.length;
+      stats['Duplicates Removed'] = allContacts.length - processedContacts.length;
+    }
+
+    logger.logStats(stats);
     logger.info('');
     
     // NEW: Log domain statistics

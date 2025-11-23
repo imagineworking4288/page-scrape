@@ -11,6 +11,9 @@ class ConfigLoader {
   constructor(logger) {
     this.logger = logger;
     this.configDir = path.join(__dirname, '..', 'configs');
+    this.defaultConfigPath = path.join(this.configDir, '_default.json');
+    this.paginationCachePath = path.join(this.configDir, '_pagination_cache.json');
+    this.paginationCache = this.loadPaginationCache();
   }
 
   /**
@@ -38,7 +41,7 @@ class ConfigLoader {
   /**
    * Load config file for given URL
    * @param {string} url - Target URL
-   * @returns {object} - Config object or default config
+   * @returns {object} - Config object merged with defaults
    */
   loadConfig(url) {
     const domain = this.extractDomain(url);
@@ -48,13 +51,16 @@ class ConfigLoader {
     if (fs.existsSync(configPath)) {
       try {
         const configData = fs.readFileSync(configPath, 'utf8');
-        const config = JSON.parse(configData);
+        const siteConfig = JSON.parse(configData);
 
         // Validate config structure
-        this.validateConfig(config, domain);
+        this.validateConfig(siteConfig, domain);
+
+        // Merge with defaults
+        const mergedConfig = this.resolveWithDefaults(siteConfig);
 
         this.logger.info(`Loaded config for domain: ${domain}`);
-        return config;
+        return mergedConfig;
       } catch (error) {
         this.logger.error(`Failed to load config for ${domain}: ${error.message}`);
         this.logger.warn('Falling back to default config');
@@ -167,29 +173,87 @@ class ConfigLoader {
    * @returns {object} - Default config
    */
   getDefaultConfig(domain) {
+    // Try to load from _default.json first
+    if (fs.existsSync(this.defaultConfigPath)) {
+      try {
+        const configData = fs.readFileSync(this.defaultConfigPath, 'utf8');
+        const defaultConfig = JSON.parse(configData);
+
+        // Set the domain
+        defaultConfig.domain = domain;
+        defaultConfig.name = `Default config for ${domain}`;
+
+        return defaultConfig;
+      } catch (error) {
+        this.logger.error(`Failed to load _default.json: ${error.message}`);
+        // Fall through to hardcoded defaults
+      }
+    }
+
+    // Hardcoded fallback if _default.json doesn't exist
     return {
       domain: domain,
       name: `Default config for ${domain}`,
       markers: {
         start: {
-          type: 'coordinate',
-          value: { x: 0, y: 0 }
+          type: 'dynamic',
+          strategy: 'first-email'
         },
         end: {
-          type: 'coordinate',
-          value: { x: 0, y: 10000 }
+          type: 'dynamic',
+          strategy: 'viewport-height'
         }
       },
       scrollBehavior: {
-        enabled: true,
         scrollDelay: 1000,
-        maxScrolls: 50
+        maxScrolls: 50,
+        scrollAmount: 'viewport'
+      },
+      selectors: {
+        container: null,
+        profileLink: null,
+        phone: null,
+        email: null,
+        name: null
       },
       parsing: {
         emailDomain: null,
-        nameBeforeEmail: true
+        nameBeforeEmail: true,
+        profileUrlPatterns: ['/agents/', '/profile/', '/realtor/', '/team/']
+      },
+      pagination: {
+        enabled: true,
+        type: 'auto'
       }
     };
+  }
+
+  /**
+   * Merge site-specific config with defaults
+   * @param {object} siteConfig - Site-specific configuration
+   * @returns {object} - Merged configuration
+   */
+  resolveWithDefaults(siteConfig) {
+    // Get default config
+    const defaultConfig = this.getDefaultConfig(siteConfig.domain || 'unknown');
+
+    // Deep merge function
+    const deepMerge = (target, source) => {
+      const result = { ...target };
+
+      for (const key in source) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+          result[key] = deepMerge(result[key] || {}, source[key]);
+        } else {
+          result[key] = source[key];
+        }
+      }
+
+      return result;
+    };
+
+    // Merge site config over defaults
+    return deepMerge(defaultConfig, siteConfig);
   }
 
   /**
@@ -206,6 +270,81 @@ class ConfigLoader {
       this.logger.error(`Failed to list configs: ${error.message}`);
       return [];
     }
+  }
+
+  /**
+   * Load pagination cache from disk
+   * @returns {object} - Cache object
+   */
+  loadPaginationCache() {
+    try {
+      if (fs.existsSync(this.paginationCachePath)) {
+        const cacheData = fs.readFileSync(this.paginationCachePath, 'utf8');
+        return JSON.parse(cacheData);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to load pagination cache: ${error.message}`);
+    }
+    return {};
+  }
+
+  /**
+   * Save pagination cache to disk
+   */
+  savePaginationCache() {
+    try {
+      fs.writeFileSync(
+        this.paginationCachePath,
+        JSON.stringify(this.paginationCache, null, 2),
+        'utf8'
+      );
+    } catch (error) {
+      this.logger.error(`Failed to save pagination cache: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get cached pagination pattern for a domain
+   * @param {string} domain - Domain name
+   * @returns {object|null} - Cached pattern or null
+   */
+  getCachedPattern(domain) {
+    return this.paginationCache[domain] || null;
+  }
+
+  /**
+   * Save pagination pattern to cache
+   * @param {string} domain - Domain name
+   * @param {object} pattern - Pagination pattern object
+   */
+  saveCachedPattern(domain, pattern) {
+    this.paginationCache[domain] = {
+      pattern: pattern,
+      cachedAt: new Date().toISOString()
+    };
+    this.savePaginationCache();
+    this.logger.info(`Cached pagination pattern for ${domain}`);
+  }
+
+  /**
+   * Clear cached pattern for a domain
+   * @param {string} domain - Domain name
+   */
+  clearCachedPattern(domain) {
+    if (this.paginationCache[domain]) {
+      delete this.paginationCache[domain];
+      this.savePaginationCache();
+      this.logger.info(`Cleared pagination cache for ${domain}`);
+    }
+  }
+
+  /**
+   * Clear all cached patterns
+   */
+  clearAllCachedPatterns() {
+    this.paginationCache = {};
+    this.savePaginationCache();
+    this.logger.info('Cleared all pagination cache');
   }
 }
 

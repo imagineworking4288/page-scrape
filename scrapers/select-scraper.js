@@ -22,9 +22,11 @@ class SelectScraper {
    * @param {string} url - Target URL
    * @param {number|null} limit - Max contacts to return
    * @param {boolean} keepPdf - Not used for select method, kept for API compatibility
+   * @param {number|null} sourcePage - Page number (for pagination)
+   * @param {string|null} sourceUrl - Source URL (for pagination)
    * @returns {array} - Array of contact objects
    */
-  async scrape(url, limit = null, keepPdf = false) {
+  async scrape(url, limit = null, keepPdf = false, sourcePage = null, sourceUrl = null) {
     try {
       this.logger.info(`Starting select scrape of: ${url}`);
 
@@ -82,10 +84,18 @@ class SelectScraper {
         contacts = this.textParser.parse(selectedText, config);
       }
 
-      // Add domain classification
+      // Add domain classification and pagination metadata
       for (const contact of contacts) {
         const isBusiness = this.domainExtractor.isBusinessDomain(contact.domain);
         contact.domainType = isBusiness ? 'business' : 'personal';
+
+        // Add pagination metadata if provided
+        if (sourcePage !== null) {
+          contact.sourcePage = sourcePage;
+        }
+        if (sourceUrl !== null) {
+          contact.sourceUrl = sourceUrl;
+        }
       }
 
       // Apply limit if specified

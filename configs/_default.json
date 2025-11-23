@@ -1,0 +1,65 @@
+{
+  "comment": "Universal fallback configuration for all sites. Site-specific configs will override these defaults.",
+  "markers": {
+    "start": {
+      "type": "dynamic",
+      "strategy": "first-email",
+      "comment": "Dynamically find the first email on the page as the starting point"
+    },
+    "end": {
+      "type": "dynamic",
+      "strategy": "viewport-height",
+      "comment": "Use viewport height to determine the end boundary"
+    }
+  },
+  "scrollBehavior": {
+    "scrollDelay": 1000,
+    "maxScrolls": 50,
+    "scrollAmount": "viewport",
+    "comment": "Conservative scroll settings to avoid rate limiting and ensure content loads properly"
+  },
+  "selectors": {
+    "comment": "OPTIONAL performance hints for DOM extraction. Set to null to use auto-detection (recommended).",
+    "container": null,
+    "profileLink": null,
+    "phone": null,
+    "email": null,
+    "name": null
+  },
+  "parsing": {
+    "emailDomain": null,
+    "nameBeforeEmail": true,
+    "profileUrlPatterns": ["/agents/", "/profile/", "/realtor/", "/team/", "/broker/", "/member/"],
+    "comment": "profileUrlPatterns are URL fragments that indicate profile pages."
+  },
+  "pagination": {
+    "enabled": true,
+    "type": "auto",
+    "comment": "Auto-detect pagination pattern. Can be overridden with: 'parameter', 'path', 'offset', 'cursor', or 'none'",
+    "discovery": {
+      "timeout": 30000,
+      "minContactsPerPage": 1,
+      "maxPages": 200,
+      "comment": "Discovery settings for automatic pagination detection"
+    },
+    "patterns": {
+      "comment": "Optional manual patterns for pagination. Leave null for auto-detection.",
+      "urlPattern": null,
+      "nextButtonSelector": null,
+      "pageParameterName": null,
+      "offsetParameterName": null,
+      "cursorParameterName": null
+    },
+    "emptyPageIndicators": [
+      "No results found",
+      "No agents found",
+      "No listings available",
+      "0 results"
+    ],
+    "validation": {
+      "checkDuplicateContent": true,
+      "minEmailsPerPage": 1,
+      "comment": "Validation rules to detect when pagination should stop"
+    }
+  }
+}

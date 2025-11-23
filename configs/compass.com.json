@@ -21,5 +21,22 @@
     "emailDomain": "compass.com",
     "nameBeforeEmail": true,
     "profileUrlPatterns": ["/agents/"]
+  },
+  "pagination": {
+    "enabled": true,
+    "type": "auto",
+    "comment": "Compass uses URL parameter-based pagination",
+    "patterns": {
+      "pageParameterName": null,
+      "comment": "Auto-detect pagination pattern"
+    },
+    "emptyPageIndicators": [
+      "No agents found",
+      "0 Agents Found"
+    ],
+    "validation": {
+      "checkDuplicateContent": true,
+      "minEmailsPerPage": 1
+    }
   }
 }
