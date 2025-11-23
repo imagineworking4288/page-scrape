@@ -33,7 +33,8 @@ class Paginator {
       minContacts = 1,
       timeout = 30000,
       discoverOnly = false,
-      siteConfig = null
+      siteConfig = null,
+      preDiscoveredPattern = null  // NEW: Accept pre-discovered pattern
     } = options;
 
     try {
@@ -44,6 +45,25 @@ class Paginator {
       await this.rateLimiter.waitBeforeRequest();
 
       await page.goto(url, { waitUntil: 'networkidle0', timeout });
+
+      // NEW: Validate we're on the correct starting URL
+      const currentUrl = page.url();
+      const targetUrl = new URL(url);
+      const currentUrlObj = new URL(currentUrl);
+      if (currentUrlObj.origin !== targetUrl.origin || currentUrlObj.pathname !== targetUrl.pathname) {
+        this.logger.warn(`[Paginator] URL mismatch after navigation. Expected: ${url}, Got: ${currentUrl}`);
+        // Allow redirects within same domain
+        if (currentUrlObj.hostname.replace(/^www\./, '') !== targetUrl.hostname.replace(/^www\./, '')) {
+          return {
+            success: false,
+            urls: [url],
+            pattern: null,
+            totalPages: 1,
+            paginationType: 'error',
+            error: 'URL redirected to different domain'
+          };
+        }
+      }
 
       // Validate first page
       const firstPageValidation = await this.validatePage(page);
@@ -63,23 +83,29 @@ class Paginator {
       this.seenContentHashes.add(firstPageValidation.contentHash);
 
       // PRIORITY 1: Discover pagination pattern FIRST
+      // NEW: Use pre-discovered pattern if provided, otherwise discover
       let pattern;
-      try {
-        pattern = await this._discoverPaginationPattern(page, url, siteConfig);
-      } catch (error) {
-        this.logger.error(`[Paginator] Pattern detection error: ${error.message}`);
-        this.logger.error(error.stack);
+      if (preDiscoveredPattern) {
+        this.logger.info('[Paginator] Using pre-discovered pattern');
+        pattern = preDiscoveredPattern;
+      } else {
+        try {
+          pattern = await this._discoverPaginationPattern(page, url, siteConfig);
+        } catch (error) {
+          this.logger.error(`[Paginator] Pattern detection error: ${error.message}`);
+          this.logger.error(error.stack);
 
-        return {
-          success: false,
-          urls: [url],
-          pattern: null,
-          totalPages: 1,
-          paginationType: 'error',
-          confidence: 0,
-          detectionMethod: 'error',
-          error: `Pattern detection failed: ${error.message}`
-        };
+          return {
+            success: false,
+            urls: [url],
+            pattern: null,
+            totalPages: 1,
+            paginationType: 'error',
+            confidence: 0,
+            detectionMethod: 'error',
+            error: `Pattern detection failed: ${error.message}`
+          };
+        }
       }
 
       // PRIORITY 2: Check if infinite scroll ONLY if no clear pagination detected

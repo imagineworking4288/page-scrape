@@ -1,0 +1,12 @@
+{
+  "compass.com": {
+    "pattern": {
+      "type": "parameter",
+      "paramName": "page",
+      "baseUrl": "https://www.compass.com/agents/locations/manhattan-ny/21425/",
+      "currentPage": 1,
+      "maxPage": 55
+    },
+    "cachedAt": "2025-11-23T19:19:00.914Z"
+  }
+}

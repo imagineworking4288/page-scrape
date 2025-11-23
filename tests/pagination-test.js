@@ -328,6 +328,31 @@ async function main() {
     }
 
     // ═══════════════════════════════════════════════════════
+    // CRITICAL: RESET BROWSER STATE BEFORE PHASE 3
+    // ═══════════════════════════════════════════════════════
+    if (selectedPattern) {
+      logger.info('');
+      logger.info('═══════════════════════════════════════════════════════');
+      logger.info('  RESETTING BROWSER TO PAGE 1');
+      logger.info('═══════════════════════════════════════════════════════');
+      logger.info('');
+
+      try {
+        logger.info(`Navigating back to: ${options.url}`);
+        await page.goto(options.url, {
+          waitUntil: 'networkidle0',
+          timeout: options.timeout
+        });
+        await page.waitForTimeout(2000);
+        logger.info('✓ Browser reset to page 1');
+        logger.info('');
+      } catch (error) {
+        logger.error(`Failed to reset browser: ${error.message}`);
+        results.issues.push('Failed to reset browser before binary search');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════
     // PHASE 3: TRUE MAX PAGE DISCOVERY (BINARY SEARCH)
     // ═══════════════════════════════════════════════════════
     logger.info('═══════════════════════════════════════════════════════');
@@ -335,14 +360,15 @@ async function main() {
     logger.info('═══════════════════════════════════════════════════════');
     logger.info('');
 
-    // Use Paginator to get binary search results
+    // Use Paginator to get binary search results with pre-discovered pattern
     const paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
     const paginationResult = await paginator.paginate(options.url, {
       maxPages: options.maxPages,
       minContacts: options.minContacts,
       timeout: options.timeout,
       discoverOnly: false,
-      siteConfig: siteConfig
+      siteConfig: siteConfig,
+      preDiscoveredPattern: selectedPattern.pattern  // NEW: Pass the pre-discovered pattern
     });
 
     if (!paginationResult.success) {
@@ -721,29 +747,43 @@ function detectPathPattern(currentUrl) {
  */
 function selectBestPattern(detectionResults) {
   // Priority: manual > cached > navigation > auto
+
+  // Helper to ensure pattern completeness
+  const ensureCompletePattern = (pattern) => {
+    if (!pattern) return null;
+
+    // Ensure maxPage exists (required for binary search)
+    if (!pattern.maxPage && pattern.type === 'parameter') {
+      // Try to extract from visualMaxPage or default to high value
+      pattern.maxPage = detectionResults.visualMaxPage || 200;
+    }
+
+    return pattern;
+  };
+
   if (detectionResults.manual) {
-    return { pattern: detectionResults.manual, method: 'manual' };
+    return { pattern: ensureCompletePattern(detectionResults.manual), method: 'manual' };
   }
 
   if (detectionResults.cached) {
-    return { pattern: detectionResults.cached, method: 'cached' };
+    return { pattern: ensureCompletePattern(detectionResults.cached), method: 'cached' };
   }
 
   if (detectionResults.navigation) {
-    return { pattern: detectionResults.navigation, method: 'navigation' };
+    return { pattern: ensureCompletePattern(detectionResults.navigation), method: 'navigation' };
   }
 
   // Check URL-based auto detection
   if (detectionResults.autoUrl) {
-    return { pattern: detectionResults.autoUrl, method: 'auto-url' };
+    return { pattern: ensureCompletePattern(detectionResults.autoUrl), method: 'auto-url' };
   }
 
   if (detectionResults.autoPath) {
-    return { pattern: detectionResults.autoPath, method: 'auto-path' };
+    return { pattern: ensureCompletePattern(detectionResults.autoPath), method: 'auto-path' };
   }
 
   if (detectionResults.autoOffset) {
-    return { pattern: detectionResults.autoOffset, method: 'auto-offset' };
+    return { pattern: ensureCompletePattern(detectionResults.autoOffset), method: 'auto-offset' };
   }
 
   return null;
