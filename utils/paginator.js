@@ -39,24 +39,11 @@ class Paginator {
     try {
       this.logger.info(`[Paginator] Starting pagination for: ${url}`);
 
-      // Check if infinite scroll
+      // Get page and navigate
       const page = await this.browserManager.getPage();
       await this.rateLimiter.waitBeforeRequest();
 
       await page.goto(url, { waitUntil: 'networkidle0', timeout });
-
-      const isInfiniteScroll = await this._detectInfiniteScroll(page);
-      if (isInfiniteScroll) {
-        this.logger.warn('[Paginator] Infinite scroll detected - not supported yet');
-        return {
-          success: false,
-          urls: [url],
-          pattern: null,
-          totalPages: 1,
-          paginationType: 'infinite-scroll',
-          error: 'Infinite scroll not supported'
-        };
-      }
 
       // Validate first page
       const firstPageValidation = await this.validatePage(page);
@@ -75,8 +62,54 @@ class Paginator {
       // Store first page content hash
       this.seenContentHashes.add(firstPageValidation.contentHash);
 
-      // Discover pagination pattern
-      const pattern = await this._discoverPaginationPattern(page, url, siteConfig);
+      // PRIORITY 1: Discover pagination pattern FIRST
+      let pattern;
+      try {
+        pattern = await this._discoverPaginationPattern(page, url, siteConfig);
+      } catch (error) {
+        this.logger.error(`[Paginator] Pattern detection error: ${error.message}`);
+        this.logger.error(error.stack);
+
+        return {
+          success: false,
+          urls: [url],
+          pattern: null,
+          totalPages: 1,
+          paginationType: 'error',
+          confidence: 0,
+          detectionMethod: 'error',
+          error: `Pattern detection failed: ${error.message}`
+        };
+      }
+
+      // PRIORITY 2: Check if infinite scroll ONLY if no clear pagination detected
+      // Bypass infinite scroll check if:
+      // 1. Pattern discovered with high confidence (>= 80%), OR
+      // 2. Visual numeric pagination controls exist
+      const visualControls = pattern ? { hasPagination: true, controlsType: 'numeric' } : await this._detectPaginationControls(page);
+
+      const shouldCheckInfiniteScroll = !(
+        (pattern && pattern.confidence >= 80) ||
+        (visualControls?.hasPagination && visualControls?.controlsType === 'numeric')
+      );
+
+      if (shouldCheckInfiniteScroll) {
+        this.logger.debug('[Paginator] Checking for infinite scroll...');
+        const isInfiniteScroll = await this._detectInfiniteScroll(page);
+        if (isInfiniteScroll) {
+          this.logger.warn('[Paginator] Infinite scroll detected - not supported yet');
+          return {
+            success: false,
+            urls: [url],
+            pattern: null,
+            totalPages: 1,
+            paginationType: 'infinite-scroll',
+            error: 'Infinite scroll not supported'
+          };
+        }
+      } else {
+        this.logger.debug('[Paginator] Skipping infinite scroll check - clear pagination detected');
+      }
 
       if (!pattern) {
         this.logger.info('[Paginator] No pagination detected - single page');
@@ -86,6 +119,8 @@ class Paginator {
           pattern: null,
           totalPages: 1,
           paginationType: 'none',
+          confidence: 100,
+          detectionMethod: 'none',
           error: null
         };
       }
@@ -131,6 +166,12 @@ class Paginator {
 
       this.logger.info(`[Paginator] Generated ${urls.length} page URLs (true max: ${maxPageResult.trueMax})`);
 
+      // Calculate overall confidence score
+      const confidence = this._calculateOverallConfidence(pattern, maxPageResult);
+
+      this.logger.info(`[Paginator] Overall confidence: ${confidence}/100`);
+      this.logger.info('');
+
       return {
         success: true,
         urls: urls,
@@ -143,6 +184,8 @@ class Paginator {
         testedPages: maxPageResult.testedPages,
         searchPath: maxPageResult.searchPath,
         paginationType: pattern.type,
+        confidence: confidence,
+        detectionMethod: pattern.detectionMethod || 'unknown',
         error: null
       };
 
@@ -226,7 +269,7 @@ class Paginator {
    */
   async _detectInfiniteScroll(page) {
     try {
-      const hasInfiniteScroll = await page.evaluate(() => {
+      const infiniteScrollData = await page.evaluate(() => {
         // Check for common infinite scroll indicators
         const indicators = [
           () => document.querySelector('[data-infinite-scroll]') !== null,
@@ -243,10 +286,20 @@ class Paginator {
           }
         ];
 
-        return indicators.some(check => check());
+        // Count how many indicators are present
+        const indicatorCount = indicators.filter(check => check()).length;
+
+        return {
+          count: indicatorCount,
+          detected: indicatorCount >= 2  // Require at least 2 indicators
+        };
       });
 
-      return hasInfiniteScroll;
+      if (infiniteScrollData.detected) {
+        this.logger.debug(`[Paginator] Infinite scroll indicators found: ${infiniteScrollData.count}/5`);
+      }
+
+      return infiniteScrollData.detected;
     } catch (error) {
       return false;
     }
@@ -818,6 +871,37 @@ class Paginator {
   }
 
   /**
+   * Calculate overall confidence including binary search results
+   * @param {object} pattern - Pattern object
+   * @param {object} binarySearchResult - Binary search result
+   * @returns {number} - Confidence score 0-100
+   * @private
+   */
+  _calculateOverallConfidence(pattern, binarySearchResult) {
+    let confidence = 0;
+
+    // Pattern detected: +30
+    if (pattern) confidence += 30;
+
+    // Detection method quality: +20
+    if (pattern?.detectionMethod === 'manual') confidence += 20;
+    else if (pattern?.detectionMethod === 'cache') confidence += 18;
+    else if (pattern?.detectionMethod === 'navigation') confidence += 20;
+    else if (pattern?.detectionMethod === 'url-analysis') confidence += 15;
+
+    // Boundary confirmed: +25
+    if (binarySearchResult?.boundaryConfirmed) confidence += 25;
+
+    // True max found: +15
+    if (binarySearchResult?.trueMax > 0) confidence += 15;
+
+    // Not capped: +10
+    if (!binarySearchResult?.isCapped) confidence += 10;
+
+    return Math.min(100, confidence);
+  }
+
+  /**
    * Extract manual pattern from config
    * @param {string} url - Current URL
    * @param {object} patterns - Pattern configuration
@@ -1205,18 +1289,19 @@ class Paginator {
    * @private
    */
   async _findTrueMaxPage(page, pattern, visualMax, minContacts, hardCap = 200) {
-    this.logger.info('[Paginator] Starting binary search for true max page...');
+    try {
+      this.logger.info('[Paginator] Starting binary search for true max page...');
 
-    let lowerBound = 1;
-    let upperBound = visualMax || hardCap;
-    let lastValidPage = null;
-    const testedPages = [];
-    const searchPath = [];
+      let lowerBound = 1;
+      let upperBound = visualMax || hardCap;
+      let lastValidPage = null;
+      const testedPages = [];
+      const searchPath = [];
 
-    // Step 1: Test page 1 first
-    this.logger.info('[Paginator] Testing page 1...');
-    const page1Valid = await this._testPageValidity(page, pattern, 1, minContacts);
-    testedPages.push({ pageNum: 1, valid: page1Valid.hasContacts, contacts: page1Valid.contactCount });
+      // Step 1: Test page 1 first
+      this.logger.info('[Paginator] Testing page 1...');
+      const page1Valid = await this._testPageValidity(page, pattern, 1, minContacts);
+      testedPages.push({ pageNum: 1, valid: page1Valid.hasContacts, contacts: page1Valid.contactCount });
 
     if (!page1Valid.hasContacts) {
       searchPath.push('Page 1 has no contacts - no pagination');
@@ -1385,14 +1470,43 @@ class Paginator {
       };
     }
 
-    // No valid pages found
-    return {
-      trueMax: 0,
-      isCapped: false,
-      boundaryConfirmed: true,
-      testedPages,
-      searchPath
-    };
+      // No valid pages found
+      return {
+        trueMax: 0,
+        isCapped: false,
+        boundaryConfirmed: true,
+        testedPages,
+        searchPath
+      };
+
+    } catch (error) {
+      this.logger.error(`[Binary Search] Fatal error: ${error.message}`);
+      this.logger.error(error.stack);
+
+      // Fall back to visual max if available
+      if (visualMax && visualMax > 0) {
+        this.logger.warn(`[Binary Search] Falling back to visual max: ${visualMax}`);
+        return {
+          trueMax: visualMax,
+          isCapped: false,
+          boundaryConfirmed: false,
+          testedPages: [],
+          searchPath: [`Binary search failed: ${error.message}`, `Using visual max: ${visualMax}`],
+          error: error.message
+        };
+      }
+
+      // No visual max, return single page
+      this.logger.error('[Binary Search] No visual max available, defaulting to 1 page');
+      return {
+        trueMax: 1,
+        isCapped: false,
+        boundaryConfirmed: false,
+        testedPages: [],
+        searchPath: [`Binary search failed: ${error.message}`, 'Defaulting to 1 page'],
+        error: error.message
+      };
+    }
   }
 }
 

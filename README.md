@@ -91,10 +91,13 @@ See [python_scraper/README.md](python_scraper/README.md) for detailed documentat
 Test pagination patterns before scraping multiple pages:
 
 ```bash
-# Comprehensive pagination analysis
+# Comprehensive pagination analysis (pattern detection + validation)
 node tests/pagination-test.js --url "https://site.com/agents/" --save-cache
 
-# Quick validation (5 pages)
+# Integration test (full workflow: discover + scrape 5 pages)
+node tests/pagination-integration-test.js --url "URL" --max-pages 5
+
+# Quick validation
 node tests/pagination-test.js --url "URL" --validate-sample 5
 
 # Export results for analysis

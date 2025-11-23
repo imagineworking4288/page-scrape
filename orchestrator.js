@@ -198,7 +198,13 @@ async function main() {
       siteConfig = configLoader.loadConfig(options.url);
 
       // Discover pagination
-      logger.info('Discovering pagination pattern...');
+      logger.info('');
+      logger.info('═══════════════════════════════════════════════════════════════');
+      logger.info('  PAGINATION DISCOVERY');
+      logger.info('═══════════════════════════════════════════════════════════════');
+      logger.info('');
+
+      const discoveryStart = Date.now();
       const paginationResult = await paginator.paginate(options.url, {
         maxPages: maxPages,
         minContacts: minContacts,
@@ -206,24 +212,60 @@ async function main() {
         discoverOnly: options.discoverOnly,
         siteConfig: siteConfig
       });
+      const discoveryTime = ((Date.now() - discoveryStart) / 1000).toFixed(1);
 
-      if (paginationResult.success) {
+      logger.info('');
+      logger.info('─────────────────────────────────────────────────────────────────');
+      logger.info('  DISCOVERY RESULTS');
+      logger.info('─────────────────────────────────────────────────────────────────');
+      logger.info('');
+
+      if (paginationResult.success && paginationResult.urls.length > 1) {
         pageUrls = paginationResult.urls;
-        logger.info(`Found ${pageUrls.length} page(s) to scrape`);
 
-        if (paginationResult.pattern) {
-          logger.info(`Pagination type: ${paginationResult.paginationType}`);
-          logger.info(`Pattern: ${JSON.stringify(paginationResult.pattern)}`);
+        logger.info('✓ Pagination discovered successfully');
+        logger.info('');
+        logger.logStats({
+          'Pattern Type': paginationResult.paginationType || 'N/A',
+          'Detection Method': paginationResult.detectionMethod || 'N/A',
+          'Total Pages': paginationResult.totalPages,
+          'Visual Max': paginationResult.visualMaxPage || 'N/A',
+          'True Max': paginationResult.trueMaxPage || 'N/A',
+          'Boundary Confirmed': paginationResult.boundaryConfirmed ? 'YES' : 'NO',
+          'Confidence': `${paginationResult.confidence || 0}/100`,
+          'Discovery Time': `${discoveryTime}s`
+        });
+        logger.info('');
+
+        // Auto-cache high confidence patterns
+        if (paginationResult.pattern && paginationResult.confidence >= 70) {
+          const domain = new URL(options.url).hostname.replace(/^www\./, '');
+          try {
+            configLoader.saveCachedPattern(domain, paginationResult.pattern);
+            logger.info('✓ Pattern cached for future use');
+            logger.info('');
+          } catch (e) {
+            logger.warn(`Failed to cache pattern: ${e.message}`);
+          }
         }
 
         if (options.discoverOnly) {
-          logger.info('Discovery complete. Exiting (--discover-only mode).');
+          logger.info('═══════════════════════════════════════════════════════════════');
+          logger.info('Discovery complete. Exiting (--discover-only mode)');
+          logger.info('═══════════════════════════════════════════════════════════════');
           await browserManager.close();
           process.exit(0);
         }
+      } else if (!paginationResult.success) {
+        logger.warn('✗ Pagination discovery failed');
+        logger.warn(`Error: ${paginationResult.error || 'Unknown error'}`);
+        logger.warn('Falling back to single page scraping');
+        logger.info('');
+        pageUrls = [options.url];
       } else {
-        logger.warn(`Pagination discovery failed: ${paginationResult.error}`);
-        logger.info('Continuing with single page scrape');
+        logger.info('ℹ No pagination detected');
+        logger.info('Site appears to be a single page');
+        logger.info('');
         pageUrls = [options.url];
       }
     }
