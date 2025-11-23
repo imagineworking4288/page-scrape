@@ -134,7 +134,13 @@ async function main() {
       warnings: [],
       issues: [],
       wasCached: false,
-      savedToCache: false
+      savedToCache: false,
+      visualMaxPage: null,
+      trueMaxPage: null,
+      boundaryConfirmed: false,
+      hardCapped: false,
+      binarySearchTestedPages: 0,
+      searchPath: []
     };
 
     // ═══════════════════════════════════════════════════════
@@ -170,6 +176,42 @@ async function main() {
     }
 
     // ═══════════════════════════════════════════════════════
+    // PHASE 1.5: VISUAL PAGINATION DETECTION
+    // ═══════════════════════════════════════════════════════
+    logger.info('═══════════════════════════════════════════════════════');
+    logger.info('  PHASE 1.5: VISUAL PAGINATION DETECTION');
+    logger.info('═══════════════════════════════════════════════════════');
+    logger.info('');
+
+    // Detect visual pagination controls
+    const visualControls = await detectVisualPaginationControls(page);
+
+    logger.info(`Controls detected: ${visualControls.hasPagination ? 'YES' : 'NO'}`);
+    if (visualControls.hasPagination) {
+      logger.info(`Controls type: ${visualControls.controlsType}`);
+      logger.info(`Current page: ${visualControls.currentPage || 'Unknown'}`);
+      logger.info(`Max page: ${visualControls.maxPage || 'Unknown'}`);
+      logger.info(`Next button: ${visualControls.nextButton ? 'YES' : 'NO'}`);
+      logger.info(`Prev button: ${visualControls.prevButton ? 'YES' : 'NO'}`);
+      logger.info(`Page numbers visible: ${visualControls.pageNumbers.length > 0 ? visualControls.pageNumbers.join(', ') : 'NO'}`);
+    } else {
+      logger.info('No visual pagination controls found in DOM');
+    }
+    logger.info('');
+
+    // Store visual detection results
+    results.visualDetection = {
+      hasPagination: visualControls.hasPagination,
+      controlsType: visualControls.controlsType,
+      currentPage: visualControls.currentPage,
+      maxPage: visualControls.maxPage,
+      hasNextButton: !!visualControls.nextButton,
+      hasPrevButton: !!visualControls.prevButton,
+      pageNumbersVisible: visualControls.pageNumbers.length,
+      pageNumbers: visualControls.pageNumbers
+    };
+
+    // ═══════════════════════════════════════════════════════
     // PHASE 2: PATTERN DETECTION
     // ═══════════════════════════════════════════════════════
     logger.info('═══════════════════════════════════════════════════════');
@@ -180,6 +222,8 @@ async function main() {
     const detectionResults = {
       manual: null,
       cached: null,
+      visual: visualControls.hasPagination ? visualControls : null,
+      navigation: null,
       autoUrl: null,
       autoOffset: null,
       autoPath: null,
@@ -187,7 +231,7 @@ async function main() {
     };
 
     // A. Check manual config
-    logger.info('[1/4] Checking manual configuration...');
+    logger.info('[1/5] Checking manual configuration...');
     const siteConfig = configLoader.loadConfig(options.url);
     if (siteConfig && siteConfig.pagination && siteConfig.pagination.patterns) {
       detectionResults.manual = extractManualPattern(options.url, siteConfig.pagination.patterns);
@@ -201,7 +245,7 @@ async function main() {
     }
 
     // B. Check cache
-    logger.info('[2/4] Checking cached patterns...');
+    logger.info('[2/5] Checking cached patterns...');
     const cachedPattern = configLoader.getCachedPattern(domain);
     if (cachedPattern && cachedPattern.pattern) {
       detectionResults.cached = cachedPattern.pattern;
@@ -212,22 +256,41 @@ async function main() {
       logger.info('  ✗ No cached pattern');
     }
 
-    // C. Auto-detect URL parameters
-    logger.info('[3/4] Auto-detecting URL parameter patterns...');
-    detectionResults.autoUrl = await detectUrlParameterPattern(page, options.url);
-    if (detectionResults.autoUrl) {
-      logger.info(`  ✓ URL parameter pattern: ${detectionResults.autoUrl.paramName}`);
+    // C. Visual detection (already done in Phase 1.5)
+    logger.info('[3/5] Visual pagination controls detection...');
+    if (visualControls.hasPagination) {
+      logger.info(`  ✓ Visual controls detected: ${visualControls.controlsType}`);
     } else {
-      logger.info('  ✗ No URL parameter pattern detected');
+      logger.info('  ✗ No visual pagination controls');
     }
 
-    // D. Auto-detect path patterns
-    logger.info('[4/4] Auto-detecting path-based patterns...');
+    // D. Navigation-based detection (click next and observe)
+    logger.info('[4/5] Navigation-based pattern discovery...');
+    if (visualControls.hasPagination && visualControls.nextButton) {
+      try {
+        detectionResults.navigation = await discoverPatternByNavigation(page, options.url, visualControls);
+        if (detectionResults.navigation) {
+          logger.info(`  ✓ Pattern discovered by navigation: ${detectionResults.navigation.type}`);
+        } else {
+          logger.info('  ✗ Failed to discover pattern by navigation');
+        }
+      } catch (error) {
+        logger.info(`  ✗ Navigation discovery failed: ${error.message}`);
+      }
+    } else {
+      logger.info('  ⊘ Skipped (no next button found)');
+    }
+
+    // E. URL pattern analysis (fallback)
+    logger.info('[5/5] URL pattern analysis...');
+    detectionResults.autoUrl = await detectUrlParameterPattern(page, options.url);
     detectionResults.autoPath = detectPathPattern(options.url);
-    if (detectionResults.autoPath) {
+    if (detectionResults.autoUrl) {
+      logger.info(`  ✓ URL parameter pattern: ${detectionResults.autoUrl.paramName}`);
+    } else if (detectionResults.autoPath) {
       logger.info(`  ✓ Path pattern: ${detectionResults.autoPath.urlPattern}`);
     } else {
-      logger.info('  ✗ No path pattern detected');
+      logger.info('  ✗ No URL pattern detected');
     }
 
     logger.info('');
@@ -241,6 +304,21 @@ async function main() {
       results.detectionMethod = selectedPattern.method;
 
       logger.info(`✓ Selected pattern: ${selectedPattern.pattern.type} (via ${selectedPattern.method})`);
+
+      // Calculate and display confidence score
+      const confidence = calculatePatternConfidence(selectedPattern.pattern, selectedPattern.method, visualControls);
+      results.confidence = confidence;
+
+      // Determine reliability level
+      if (confidence >= 80) {
+        results.reliability = 'high';
+      } else if (confidence >= 50) {
+        results.reliability = 'medium';
+      } else {
+        results.reliability = 'low';
+      }
+
+      logger.info(`Confidence score: ${confidence}/100 (${results.reliability.toUpperCase()})`);
       logger.info('');
     } else {
       logger.warn('✗ No pagination pattern detected');
@@ -250,17 +328,67 @@ async function main() {
     }
 
     // ═══════════════════════════════════════════════════════
-    // PHASE 3: URL GENERATION
+    // PHASE 3: TRUE MAX PAGE DISCOVERY (BINARY SEARCH)
     // ═══════════════════════════════════════════════════════
     logger.info('═══════════════════════════════════════════════════════');
-    logger.info('  PHASE 3: URL GENERATION');
+    logger.info('  PHASE 3: TRUE MAX PAGE DISCOVERY (BINARY SEARCH)');
     logger.info('═══════════════════════════════════════════════════════');
     logger.info('');
 
-    const generatedUrls = generatePageUrls(options.url, results.pattern, options.maxPages);
+    // Use Paginator to get binary search results
+    const paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
+    const paginationResult = await paginator.paginate(options.url, {
+      maxPages: options.maxPages,
+      minContacts: options.minContacts,
+      timeout: options.timeout,
+      discoverOnly: false,
+      siteConfig: siteConfig
+    });
+
+    if (!paginationResult.success) {
+      logger.error('✗ Pagination failed: ' + paginationResult.error);
+      results.issues.push('Pagination failed: ' + paginationResult.error);
+      await finalize(browserManager, results, startTime);
+      return;
+    }
+
+    results.visualMaxPage = paginationResult.visualMaxPage;
+    results.trueMaxPage = paginationResult.trueMaxPage;
+    results.boundaryConfirmed = paginationResult.boundaryConfirmed;
+    results.hardCapped = paginationResult.isCapped;
+    results.binarySearchTestedPages = paginationResult.testedPages?.length || 0;
+    results.searchPath = paginationResult.searchPath || [];
+
+    logger.info(`Visual max page: ${paginationResult.visualMaxPage || 'N/A'}`);
+    logger.info(`True max page: ${paginationResult.trueMaxPage}`);
+    logger.info(`Pages tested: ${paginationResult.testedPages?.length || 0}`);
+    logger.info(`Boundary confirmed: ${paginationResult.boundaryConfirmed ? 'YES' : 'NO'}`);
+    logger.info(`Hard capped: ${paginationResult.isCapped ? 'YES (at ' + options.maxPages + ')' : 'NO'}`);
+    logger.info('');
+
+    if (paginationResult.searchPath && paginationResult.searchPath.length > 0) {
+      logger.info('Binary search path:');
+      paginationResult.searchPath.forEach((step, i) => {
+        logger.info(`  ${i + 1}. ${step}`);
+      });
+      logger.info('');
+    }
+
+    if (paginationResult.testedPages && paginationResult.testedPages.length > 0) {
+      logger.info('Pages tested during search:');
+      paginationResult.testedPages
+        .sort((a, b) => a.pageNum - b.pageNum)
+        .forEach(p => {
+          const status = p.valid ? '✓' : '✗';
+          logger.info(`  ${status} Page ${p.pageNum}: ${p.contacts} contacts`);
+        });
+      logger.info('');
+    }
+
+    const generatedUrls = paginationResult.urls;
     results.totalPagesFound = generatedUrls.length;
 
-    logger.info(`Generated ${generatedUrls.length} page URLs`);
+    logger.info(`Generated ${generatedUrls.length} page URLs (based on true max: ${paginationResult.trueMaxPage})`);
     logger.info(`Pattern type: ${results.pattern.type}`);
     if (results.pattern.paramName) {
       logger.info(`Parameter name: ${results.pattern.paramName}`);
@@ -274,82 +402,92 @@ async function main() {
     results.sampleUrls.last5 = generatedUrls.slice(-5);
 
     // ═══════════════════════════════════════════════════════
-    // PHASE 4: VALIDATION
+    // PHASE 4: SPOT CHECK VALIDATION
     // ═══════════════════════════════════════════════════════
     logger.info('═══════════════════════════════════════════════════════');
-    logger.info('  PHASE 4: URL VALIDATION');
+    logger.info('  PHASE 4: SPOT CHECK VALIDATION');
     logger.info('═══════════════════════════════════════════════════════');
     logger.info('');
 
-    // Select strategic sample
-    const urlsToValidate = selectStrategicSample(generatedUrls, options.validateSample);
-    logger.info(`Validating ${urlsToValidate.length} strategic URLs...`);
-    logger.info('');
+    if (paginationResult.trueMaxPage > 0) {
+      logger.info('Performing spot checks on generated URLs...');
+      logger.info('');
 
-    const validationResults = [];
-    const seenHashes = new Set();
-    let totalContacts = 0;
-    let totalLoadTime = 0;
+      // Test first, middle, and last pages as sanity check
+      const spotCheckPages = [
+        1,
+        Math.floor(paginationResult.trueMaxPage / 2),
+        paginationResult.trueMaxPage
+      ].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
 
-    for (let i = 0; i < urlsToValidate.length; i++) {
-      const testUrl = urlsToValidate[i];
-      const pageNum = generatedUrls.indexOf(testUrl) + 1;
+      const validationResults = [];
+      let totalContacts = 0;
+      let totalLoadTime = 0;
 
-      logger.info(`[${i + 1}/${urlsToValidate.length}] Testing page ${pageNum}: ${testUrl}`);
+      for (let i = 0; i < spotCheckPages.length; i++) {
+        const pageNum = spotCheckPages[i];
+        const testUrl = generatedUrls[pageNum - 1];
 
-      const validation = await validatePageUrl(
-        page,
-        testUrl,
-        pageNum,
-        options.timeout,
-        rateLimiter
-      );
+        logger.info(`[${i + 1}/${spotCheckPages.length}] Testing page ${pageNum}: ${testUrl}`);
 
-      validationResults.push(validation);
+        try {
+          await page.goto(testUrl, { waitUntil: 'networkidle0', timeout: options.timeout });
+          const startTime = Date.now();
+          await page.waitForTimeout(1000);
+          const loadTime = Date.now() - startTime;
 
-      // Track metrics
-      if (validation.success) {
-        results.validationSummary.successfulLoads++;
-        totalContacts += validation.contactCount;
-        totalLoadTime += validation.loadTime;
+          const validation = await analyzePageContent(page);
 
-        if (seenHashes.has(validation.contentHash)) {
-          results.duplicatePages++;
-          results.validationSummary.duplicatesDetected++;
-          logger.warn(`  ⚠ Duplicate content detected!`);
-        } else {
-          results.uniquePages++;
-          seenHashes.add(validation.contentHash);
+          validationResults.push({
+            success: true,
+            pageNum: pageNum,
+            contactCount: validation.contactEstimate,
+            loadTime: loadTime
+          });
+
+          results.validationSummary.successfulLoads++;
+          totalContacts += validation.contactEstimate;
+          totalLoadTime += loadTime;
+
+          if (validation.contactEstimate === 0) {
+            results.emptyPages++;
+            logger.warn(`  ⚠ Empty page (no contacts)`);
+          } else {
+            results.uniquePages++;
+            logger.info(`  ✓ Loaded | Contacts: ${validation.contactEstimate} | Time: ${loadTime}ms`);
+          }
+
+        } catch (error) {
+          logger.error(`  ✗ Failed: ${error.message}`);
+          results.validationSummary.failedLoads++;
+          validationResults.push({
+            success: false,
+            pageNum: pageNum,
+            error: error.message
+          });
         }
 
-        if (validation.isEmpty) {
-          results.emptyPages++;
-          logger.warn(`  ⚠ Empty page (no contacts)`);
+        // Rate limit between requests
+        if (i < spotCheckPages.length - 1) {
+          await rateLimiter.waitBeforeRequest();
         }
-
-        logger.info(`  ✓ Loaded: ${validation.statusCode} | Contacts: ${validation.contactCount} | Time: ${validation.loadTime}ms`);
-      } else {
-        results.validationSummary.failedLoads++;
-        logger.error(`  ✗ Failed: ${validation.error}`);
       }
 
-      // Rate limit between requests
-      if (i < urlsToValidate.length - 1) {
-        await rateLimiter.waitBeforeRequest();
+      logger.info('');
+
+      // Calculate averages
+      results.actualPagesValidated = validationResults.length;
+      results.validationSummary.totalValidated = validationResults.length;
+
+      if (results.validationSummary.successfulLoads > 0) {
+        results.validationSummary.averageContactsPerPage =
+          Math.round(totalContacts / results.validationSummary.successfulLoads);
+        results.validationSummary.averageLoadTime =
+          Math.round(totalLoadTime / results.validationSummary.successfulLoads);
       }
-    }
-
-    logger.info('');
-
-    // Calculate averages
-    results.actualPagesValidated = validationResults.length;
-    results.validationSummary.totalValidated = validationResults.length;
-
-    if (results.validationSummary.successfulLoads > 0) {
-      results.validationSummary.averageContactsPerPage =
-        Math.round(totalContacts / results.validationSummary.successfulLoads);
-      results.validationSummary.averageLoadTime =
-        Math.round(totalLoadTime / results.validationSummary.successfulLoads);
+    } else {
+      logger.warn('No pages to validate (true max = 0)');
+      logger.info('');
     }
 
     // ═══════════════════════════════════════════════════════
@@ -360,7 +498,13 @@ async function main() {
     logger.info('═══════════════════════════════════════════════════════');
     logger.info('');
 
-    const confidence = calculateConfidence(results, detectionResults, validationResults);
+    const binarySearchInfo = {
+      boundaryConfirmed: results.boundaryConfirmed,
+      trueMaxFound: !!results.trueMaxPage,
+      visualMaxAccurate: results.visualMaxPage === results.trueMaxPage
+    };
+
+    const confidence = calculateConfidence(results, detectionResults, [], binarySearchInfo);
     results.confidence = confidence.score;
     results.reliability = confidence.reliability;
 
@@ -576,28 +720,30 @@ function detectPathPattern(currentUrl) {
  * Select best pattern from detection results
  */
 function selectBestPattern(detectionResults) {
-  // Priority: manual > cached > auto
+  // Priority: manual > cached > navigation > auto
   if (detectionResults.manual) {
     return { pattern: detectionResults.manual, method: 'manual' };
   }
 
   if (detectionResults.cached) {
-    return { pattern: detectionResults.cached, method: 'cache' };
+    return { pattern: detectionResults.cached, method: 'cached' };
   }
 
-  // Check if multiple auto methods agree
-  const autoPatterns = [
-    detectionResults.autoUrl,
-    detectionResults.autoPath,
-    detectionResults.autoOffset
-  ].filter(p => p !== null);
-
-  if (autoPatterns.length > 1) {
-    return { pattern: autoPatterns[0], method: 'multiple' };
+  if (detectionResults.navigation) {
+    return { pattern: detectionResults.navigation, method: 'navigation' };
   }
 
-  if (autoPatterns.length === 1) {
-    return { pattern: autoPatterns[0], method: 'auto' };
+  // Check URL-based auto detection
+  if (detectionResults.autoUrl) {
+    return { pattern: detectionResults.autoUrl, method: 'auto-url' };
+  }
+
+  if (detectionResults.autoPath) {
+    return { pattern: detectionResults.autoPath, method: 'auto-path' };
+  }
+
+  if (detectionResults.autoOffset) {
+    return { pattern: detectionResults.autoOffset, method: 'auto-offset' };
   }
 
   return null;
@@ -757,55 +903,69 @@ async function validatePageUrl(page, url, pageNum, timeout, rateLimiter) {
 /**
  * Calculate confidence score
  */
-function calculateConfidence(results, detectionResults, validationResults) {
+function calculateConfidence(results, detectionResults, validationResults, binarySearchInfo = {}) {
   const breakdown = [];
   let score = 0;
 
-  // Pattern detected (+20)
+  // Pattern detected (+15, reduced from 20)
   if (results.patternDetected) {
-    breakdown.push({ description: 'Pattern detected', possible: 20, earned: 20 });
-    score += 20;
+    breakdown.push({ description: 'Pattern detected', possible: 15, earned: 15 });
+    score += 15;
   } else {
-    breakdown.push({ description: 'Pattern detected', possible: 20, earned: 0 });
+    breakdown.push({ description: 'Pattern detected', possible: 15, earned: 0 });
   }
 
-  // Multiple methods agree (+10)
-  const autoMethods = [
-    detectionResults.autoUrl,
-    detectionResults.autoPath,
-    detectionResults.autoOffset
-  ].filter(p => p !== null);
+  // Visual controls detected (+15)
+  if (results.visualDetection?.hasPagination) {
+    breakdown.push({ description: 'Visual controls detected', possible: 15, earned: 15 });
+    score += 15;
+  } else {
+    breakdown.push({ description: 'Visual controls detected', possible: 15, earned: 0 });
+  }
 
-  if (autoMethods.length > 1) {
-    breakdown.push({ description: 'Multiple detection methods agree', possible: 10, earned: 10 });
+  // Boundary confirmed with 2 consecutive empty pages (+15)
+  if (binarySearchInfo.boundaryConfirmed) {
+    breakdown.push({
+      description: 'Boundary confirmed (2 consecutive empty pages)',
+      possible: 15,
+      earned: 15
+    });
+    score += 15;
+  } else {
+    breakdown.push({
+      description: 'Boundary confirmed (2 consecutive empty pages)',
+      possible: 15,
+      earned: 0
+    });
+  }
+
+  // True max page discovered (+10)
+  if (binarySearchInfo.trueMaxFound) {
+    breakdown.push({ description: 'True max page discovered', possible: 10, earned: 10 });
     score += 10;
   } else {
-    breakdown.push({ description: 'Multiple detection methods agree', possible: 10, earned: 0 });
+    breakdown.push({ description: 'True max page discovered', possible: 10, earned: 0 });
   }
 
-  // All validated pages loaded (+15)
+  // Visual max matched true max (+5 bonus)
+  if (binarySearchInfo.visualMaxAccurate && binarySearchInfo.trueMaxFound) {
+    breakdown.push({ description: 'Visual max matched true max', possible: 5, earned: 5 });
+    score += 5;
+  } else if (binarySearchInfo.trueMaxFound) {
+    breakdown.push({ description: 'Visual max matched true max', possible: 5, earned: 0 });
+  }
+
+  // All validated pages loaded (+10, reduced from 15)
   const loadSuccessRate = results.validationSummary.totalValidated > 0
     ? results.validationSummary.successfulLoads / results.validationSummary.totalValidated
     : 0;
-  const loadScore = Math.round(15 * loadSuccessRate);
+  const loadScore = Math.round(10 * loadSuccessRate);
   breakdown.push({
-    description: `Page load success (${Math.round(loadSuccessRate * 100)}%)`,
-    possible: 15,
+    description: `Spot checks passed (${Math.round(loadSuccessRate * 100)}%)`,
+    possible: 10,
     earned: loadScore
   });
   score += loadScore;
-
-  // No content duplicates (+15)
-  const duplicateRate = results.validationSummary.totalValidated > 0
-    ? 1 - (results.duplicatePages / results.validationSummary.totalValidated)
-    : 0;
-  const duplicateScore = Math.round(15 * duplicateRate);
-  breakdown.push({
-    description: `No duplicate content (${Math.round(duplicateRate * 100)}%)`,
-    possible: 15,
-    earned: duplicateScore
-  });
-  score += duplicateScore;
 
   // Contact count consistent (+10)
   const avgContacts = results.validationSummary.averageContactsPerPage;
@@ -829,24 +989,24 @@ function calculateConfidence(results, detectionResults, validationResults) {
   });
   score += patternScore;
 
-  // Cached or manual (+10)
-  const isCachedOrManual = results.detectionMethod === 'cache' || results.detectionMethod === 'manual';
-  const cacheScore = isCachedOrManual ? 10 : 0;
+  // Cached or manual (+5, reduced from 10)
+  const isCachedOrManual = results.detectionMethod === 'cached' || results.detectionMethod === 'manual';
+  const cacheScore = isCachedOrManual ? 5 : 0;
   breakdown.push({
     description: 'Cached or manual configuration',
-    possible: 10,
+    possible: 5,
     earned: cacheScore
   });
   score += cacheScore;
 
-  // No empty pages (+10)
+  // No empty pages in spot checks (+5, reduced from 10)
   const emptyRate = results.validationSummary.totalValidated > 0
     ? 1 - (results.emptyPages / results.validationSummary.totalValidated)
     : 0;
-  const emptyScore = Math.round(10 * emptyRate);
+  const emptyScore = Math.round(5 * emptyRate);
   breakdown.push({
     description: `No empty pages (${Math.round(emptyRate * 100)}%)`,
-    possible: 10,
+    possible: 5,
     earned: emptyScore
   });
   score += emptyScore;
@@ -866,6 +1026,318 @@ function calculateConfidence(results, detectionResults, validationResults) {
     reliability: reliability,
     breakdown: breakdown
   };
+}
+
+/**
+ * Detect visual pagination controls on the page
+ */
+async function detectVisualPaginationControls(page) {
+  try {
+    const controls = await page.evaluate(() => {
+      // Container selectors
+      const containerSelectors = [
+        'nav[aria-label*="pagination" i]',
+        'nav[role="navigation"]',
+        '.pagination',
+        '[class*="paginat"]',
+        '[class*="Paginat"]',
+        'ul.pagination',
+        'div.pagination'
+      ];
+
+      // Next button selectors
+      const nextSelectors = [
+        'a[rel="next"]:not(.disabled):not([aria-disabled="true"])',
+        'a[aria-label*="next" i]:not([aria-disabled="true"])',
+        'button[aria-label*="next" i]:not([disabled])',
+        'a[class*="next"]:not(.disabled)',
+        'button[class*="next"]:not(.disabled)',
+        'a:has(svg[data-icon="chevron-right"])',
+        'a[class*="Next"]:not(.disabled)',
+        'button[class*="Next"]:not(.disabled)'
+      ];
+
+      // Previous button selectors
+      const prevSelectors = [
+        'a[rel="prev"]:not(.disabled):not([aria-disabled="true"])',
+        'a[aria-label*="prev" i]:not([aria-disabled="true"])',
+        'button[aria-label*="prev" i]:not([disabled])',
+        'a[class*="prev"]:not(.disabled)',
+        'button[class*="prev"]:not(.disabled)',
+        'a[class*="Prev"]:not(.disabled)',
+        'button[class*="Prev"]:not(.disabled)'
+      ];
+
+      // Page number selectors
+      const pageNumberSelectors = [
+        '.pagination a[href*="page"]',
+        '.pagination button[aria-label*="page" i]',
+        '[class*="paginat"] a[href*="page"]',
+        '[class*="paginat"] button',
+        'a[aria-label*="page" i]',
+        'button[aria-label*="page" i]'
+      ];
+
+      // Current page selectors
+      const currentPageSelectors = [
+        '.pagination .active',
+        '.pagination .current',
+        '[class*="paginat"] [class*="active"]',
+        '[class*="paginat"] [class*="current"]',
+        '[aria-current="page"]'
+      ];
+
+      // Find pagination container
+      let container = null;
+      for (const selector of containerSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          container = el;
+          break;
+        }
+      }
+
+      // Find next button
+      let nextButton = null;
+      for (const selector of nextSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          nextButton = true;
+          break;
+        }
+      }
+
+      // Find prev button
+      let prevButton = null;
+      for (const selector of prevSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          prevButton = true;
+          break;
+        }
+      }
+
+      // Extract page numbers
+      const pageNumbers = [];
+      for (const selector of pageNumberSelectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const el of elements) {
+          const text = el.textContent.trim();
+          const num = parseInt(text);
+          if (!isNaN(num) && num > 0 && num < 10000) {
+            pageNumbers.push(num);
+          }
+        }
+      }
+
+      // Find current page
+      let currentPage = null;
+      for (const selector of currentPageSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          const text = el.textContent.trim();
+          const num = parseInt(text);
+          if (!isNaN(num) && num > 0) {
+            currentPage = num;
+            break;
+          }
+        }
+      }
+
+      // Determine control type
+      let controlsType = 'none';
+      if (pageNumbers.length > 0) {
+        controlsType = 'numeric';
+      } else if (nextButton || prevButton) {
+        controlsType = 'next-prev';
+      }
+
+      return {
+        hasPagination: !!container || !!nextButton || pageNumbers.length > 0,
+        maxPage: pageNumbers.length > 0 ? Math.max(...pageNumbers) : null,
+        nextButton,
+        prevButton,
+        pageNumbers: [...new Set(pageNumbers)].sort((a, b) => a - b),
+        controlsType,
+        currentPage
+      };
+    });
+
+    return controls;
+  } catch (error) {
+    logger.error(`[Visual Detection] Error: ${error.message}`);
+    return {
+      hasPagination: false,
+      maxPage: null,
+      nextButton: null,
+      prevButton: null,
+      pageNumbers: [],
+      controlsType: 'none',
+      currentPage: null
+    };
+  }
+}
+
+/**
+ * Discover pagination pattern by clicking next and observing URL changes
+ */
+async function discoverPatternByNavigation(page, currentUrl, visualControls) {
+  if (!visualControls.nextButton) {
+    return null;
+  }
+
+  try {
+    const url1 = currentUrl;
+
+    // Click next button
+    const clicked = await page.evaluate(() => {
+      const nextSelectors = [
+        'a[rel="next"]:not(.disabled):not([aria-disabled="true"])',
+        'a[aria-label*="next" i]:not([aria-disabled="true"])',
+        'button[aria-label*="next" i]:not([disabled])',
+        'a[class*="next"]:not(.disabled)',
+        'button[class*="next"]:not(.disabled)',
+        'a[class*="Next"]:not(.disabled)',
+        'button[class*="Next"]:not(.disabled)'
+      ];
+
+      for (const selector of nextSelectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (!clicked) {
+      return null;
+    }
+
+    // Wait for navigation
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }),
+        page.waitForTimeout(5000)
+      ]);
+    } catch (e) {
+      // Navigation might fail for AJAX pagination
+    }
+
+    await page.waitForTimeout(1000);
+
+    // Get new URL
+    const url2 = page.url();
+
+    // Check if URL changed
+    if (url1 === url2) {
+      logger.warn('[Navigation Discovery] URL did not change - possible AJAX pagination');
+      // Navigate back
+      await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+      return null;
+    }
+
+    // Compare URLs to find pattern
+    const urlObj1 = new URL(url1);
+    const urlObj2 = new URL(url2);
+
+    // Check for parameter changes
+    const params1 = urlObj1.searchParams;
+    const params2 = urlObj2.searchParams;
+
+    const pageParams = ['page', 'p', 'pg', 'pageNum', 'pageNumber', 'pn', 'pageNo', 'paging'];
+    for (const param of pageParams) {
+      const val1 = params1.get(param);
+      const val2 = params2.get(param);
+      if (val2 && val2 !== val1) {
+        const num1 = parseInt(val1 || '1');
+        const num2 = parseInt(val2);
+        if (!isNaN(num2) && num2 === num1 + 1) {
+          // Navigate back
+          await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+          return {
+            type: 'parameter',
+            paramName: param,
+            baseUrl: `${urlObj2.origin}${urlObj2.pathname}`,
+            currentPage: num1,
+            maxPage: visualControls.maxPage
+          };
+        }
+      }
+    }
+
+    // Check for path changes
+    if (urlObj1.pathname !== urlObj2.pathname) {
+      const pathMatch = urlObj2.pathname.match(/\/(?:page|p)\/(\d+)/i);
+      if (pathMatch) {
+        // Navigate back
+        await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+        return {
+          type: 'path',
+          urlPattern: urlObj2.pathname.replace(/\/(\d+)/, '/{page}'),
+          baseUrl: urlObj2.origin,
+          currentPage: parseInt(pathMatch[1]) - 1,
+          maxPage: visualControls.maxPage
+        };
+      }
+    }
+
+    // Navigate back
+    await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+    return null;
+
+  } catch (error) {
+    logger.error(`[Navigation Discovery] Error: ${error.message}`);
+    try {
+      await page.goto(currentUrl, { waitUntil: 'networkidle0', timeout: 10000 });
+    } catch (e) {
+      // Ignore
+    }
+    return null;
+  }
+}
+
+/**
+ * Calculate pattern confidence score (0-100)
+ */
+function calculatePatternConfidence(pattern, detectionMethod, visualControls) {
+  let confidence = 0;
+
+  // Detection method scoring
+  if (detectionMethod === 'manual') {
+    confidence += 40;
+  } else if (detectionMethod === 'cached') {
+    confidence += 35;
+  } else if (detectionMethod === 'navigation') {
+    confidence += 30;
+  } else if (detectionMethod === 'auto-url' || detectionMethod === 'auto-path') {
+    confidence += 15;
+  }
+
+  // Pattern type scoring
+  if (pattern.type === 'parameter' || pattern.type === 'path') {
+    confidence += 20;
+  } else if (pattern.type === 'offset') {
+    confidence += 15;
+  }
+
+  // Visual controls found
+  if (visualControls?.hasPagination) {
+    confidence += 20;
+  }
+
+  // Max page known
+  if (pattern.maxPage || visualControls?.maxPage) {
+    confidence += 15;
+  }
+
+  // Has next button
+  if (visualControls?.nextButton) {
+    confidence += 10;
+  }
+
+  return Math.min(100, confidence);
 }
 
 /**
@@ -893,8 +1365,20 @@ async function finalize(browserManager, results, startTime) {
     ['Detection Method', results.detectionMethod || 'N/A'],
     ['Pattern Detected', results.patternDetected ? 'YES' : 'NO'],
     ['', ''],
+    ['Visual Controls Detected', results.visualDetection?.hasPagination ? 'YES' : 'NO'],
+    ['Controls Type', results.visualDetection?.controlsType || 'N/A'],
+    ['Max Page (Visual)', results.visualDetection?.maxPage || 'Unknown'],
+    ['Has Next Button', results.visualDetection?.hasNextButton ? 'YES' : 'NO'],
+    ['Has Prev Button', results.visualDetection?.hasPrevButton ? 'YES' : 'NO'],
+    ['', ''],
+    ['Visual Max Page', results.visualMaxPage || 'N/A'],
+    ['True Max Page', results.trueMaxPage || 'N/A'],
+    ['Boundary Confirmed', results.boundaryConfirmed ? 'YES' : 'NO'],
+    ['Hard Capped at ' + options.maxPages, results.hardCapped ? 'YES' : 'NO'],
+    ['Pages Tested (Binary Search)', results.binarySearchTestedPages],
+    ['', ''],
     ['Total Pages Found', results.totalPagesFound],
-    ['Pages Validated', results.actualPagesValidated],
+    ['Pages Validated (Spot Check)', results.actualPagesValidated],
     ['Unique Pages', results.uniquePages],
     ['Duplicate Pages', results.duplicatePages],
     ['Empty Pages', results.emptyPages],
