@@ -270,6 +270,12 @@ async function main() {
       }
     }
 
+    // Reset paginator state before scraping
+    if (paginationEnabled && paginator) {
+      paginator.resetSeenContent();
+      logger.info('✓ Paginator state reset for scraping');
+    }
+
     // Scrape all pages
     let allContacts = [];
     let pageNumber = startPage;
@@ -325,13 +331,16 @@ async function main() {
           pageContacts = await scraper.scrape(pageUrl, options.limit, options.keep, currentPage, pageUrl);
         }
 
-        // Validate page content if paginating
+        // Add to all contacts FIRST (before any break conditions)
+        allContacts = allContacts.concat(pageContacts);
+
+        // Validate page content if paginating (for pagination continuation decision)
         if (paginationEnabled && pageUrls.length > 1) {
           const page = await browserManager.getPage();
           const validation = await paginator.validatePage(page);
 
-          // Check for duplicate content
-          if (paginator.isDuplicateContent(validation.contentHash)) {
+          // Skip duplicate check for first page (already validated during discovery)
+          if (i > 0 && paginator.isDuplicateContent(validation.contentHash)) {
             logger.warn(`Page ${currentPage} has duplicate content - stopping pagination`);
             break;
           }
@@ -347,9 +356,6 @@ async function main() {
 
           logger.info(`Page ${currentPage}: Found ${pageContacts.length} contacts`);
         }
-
-        // Add to all contacts
-        allContacts = allContacts.concat(pageContacts);
 
         // Respect rate limiting between pages
         if (i < pageUrls.length - 1) {
