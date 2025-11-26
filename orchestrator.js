@@ -14,6 +14,7 @@ const RateLimiter = require('./utils/rate-limiter');
 const DomainExtractor = require('./utils/domain-extractor');
 const Paginator = require('./utils/paginator');
 const ConfigLoader = require('./utils/config-loader');
+const GoogleSheetsExporter = require('./utils/google-sheets-exporter');
 
 // Import scrapers
 const SimpleScraper = require('./scrapers/simple-scraper');
@@ -39,6 +40,7 @@ program
   .option('--start-page <number>', 'Start from specific page number (for resume)', parseInt, 1)
   .option('--min-contacts <number>', 'Minimum contacts per page to continue', parseInt)
   .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
+  .option('--no-export', 'Skip Google Sheets export (only output JSON)')
   .parse(process.argv);
 
 const options = program.opts();
@@ -542,13 +544,34 @@ async function main() {
     };
     
     fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2));
-    
+
     logger.info(`Contacts saved to: ${outputFile}`);
     logger.info('');
-    
+
+    // Google Sheets export
+    if (options.export !== false) {
+      const sheetsExporter = new GoogleSheetsExporter(logger);
+
+      if (sheetsExporter.isConfigured()) {
+        try {
+          logger.info('Exporting to Google Sheets...');
+          const sheetName = await sheetsExporter.exportFromJson(outputFile);
+          if (sheetName) {
+            logger.info(`Exported to Google Sheets: "${sheetName}"`);
+          }
+        } catch (error) {
+          logger.warn(`Google Sheets export failed: ${error.message}`);
+          logger.warn('Continuing without export. JSON file was saved successfully.');
+        }
+      } else {
+        logger.debug('Google Sheets not configured. Skipping export.');
+        logger.debug('Set GOOGLE_SHEETS_CLIENT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, and GOOGLE_SHEETS_SPREADSHEET_ID in .env to enable.');
+      }
+    }
+
     // Close browser
     await browserManager.close();
-    
+
     logger.info('Scraping completed successfully');
     process.exit(0);
     

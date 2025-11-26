@@ -23,6 +23,7 @@
     "cli-table3": "^0.6.3",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
+    "googleapis": "^128.0.0",
     "pdf-parse": "^1.1.4",
     "puppeteer": "^21.5.2",
     "puppeteer-extra": "^3.3.6",
