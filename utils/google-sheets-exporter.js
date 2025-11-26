@@ -35,10 +35,10 @@ const EXPORT_COLUMNS = {
   email:      { header: 'Email',       enabled: true },
   phone:      { header: 'Phone',       enabled: true },
   domain:     { header: 'Domain',      enabled: true },
-  domainType: { header: 'Type',        enabled: true },
-  confidence: { header: 'Confidence',  enabled: true },
+  domainType: { header: 'Type',        enabled: false },
+  confidence: { header: 'Confidence',  enabled: false },
   source:     { header: 'Source',      enabled: false },
-  profileUrl: { header: 'Profile URL', enabled: false },
+  profileUrl: { header: 'Profile URL', enabled: true },
   sourcePage: { header: 'Page',        enabled: false },
   sourceUrl:  { header: 'Source URL',  enabled: false },
 };
