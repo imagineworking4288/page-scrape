@@ -3,12 +3,12 @@
  */
 
 const assert = require('assert');
-const ConfigLoader = require('../utils/config-loader');
-const TextParser = require('../utils/text-parser');
-const logger = require('../utils/logger');
-const BrowserManager = require('../utils/browser-manager');
-const RateLimiter = require('../utils/rate-limiter');
-const SelectScraper = require('../scrapers/select-scraper');
+const ConfigLoader = require('../src/utils/config-loader');
+const TextParser = require('../src/utils/text-parser');
+const logger = require('../src/utils/logger');
+const BrowserManager = require('../src/utils/browser-manager');
+const RateLimiter = require('../src/utils/rate-limiter');
+const SelectScraper = require('../src/scrapers/select-scraper');
 
 // Test URLs
 const TEST_URLS = {

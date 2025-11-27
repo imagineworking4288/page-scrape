@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-const SimpleScraper = require('../scrapers/simple-scraper');
-const DomainExtractor = require('../utils/domain-extractor');
+const SimpleScraper = require('../src/scrapers/simple-scraper');
+const DomainExtractor = require('../src/utils/domain-extractor');
 const { Command } = require('commander');
 
 // Real imports for live testing
-const logger = require('../utils/logger');
-const BrowserManager = require('../utils/browser-manager');
-const RateLimiter = require('../utils/rate-limiter');
+const logger = require('../src/utils/logger');
+const BrowserManager = require('../src/utils/browser-manager');
+const RateLimiter = require('../src/utils/rate-limiter');
 
 // Mock logger for unit tests (silent logger to avoid console clutter during tests)
 class MockLogger {

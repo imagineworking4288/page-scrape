@@ -1,0 +1,44 @@
+=== IMPORT PATH ANALYSIS FOR CLEANUP ===
+Generated: $(date)
+
+=== FILES IMPORTING FROM ../scrapers/ ===
+tests/pagination-integration-test.js:const SelectScraper = require('../scrapers/select-scraper');
+tests/pdf-scraper-test.js:const PdfScraper = require('../scrapers/pdf-scraper');
+tests/refactoring-tests.js:const BaseScraper = require('../scrapers/base-scraper');
+tests/refactoring-tests.js:const SimpleScraper = require('../scrapers/simple-scraper');
+tests/refactoring-tests.js:const PdfScraper = require('../scrapers/pdf-scraper');
+tests/refactoring-tests.js:const SelectScraper = require('../scrapers/select-scraper');
+tests/scraper-test.js:const SimpleScraper = require('../scrapers/simple-scraper');
+tests/select-scraper-test.js:const SelectScraper = require('../scrapers/select-scraper');
+
+=== FILES IMPORTING FROM ../utils/ (root-level duplicates) ===
+scrapers/base-scraper.js - DUPLICATE, use src/ version
+scrapers/pdf-scraper.js - DUPLICATE, use src/ version
+scrapers/select-scraper.js - DUPLICATE, use src/ version
+scrapers/simple-scraper.js - DUPLICATE, use src/ version
+src/scrapers/base-scraper.js - needs path update
+src/scrapers/pdf-scraper.js - needs path update
+src/scrapers/select-scraper.js - needs path update
+src/scrapers/simple-scraper.js - needs path update
+src/tools/config-generator.js - needs path update
+src/tools/site-tester.js - needs path update
+tests/pagination-integration-test.js - needs path update
+tests/pagination-test.js - needs path update
+tests/pdf-scraper-test.js - needs path update
+tests/refactoring-tests.js - needs path update
+tests/scraper-test.js - needs path update
+tests/select-scraper-test.js - needs path update
+tests/test-utils.js - needs path update
+
+=== DIRECTORIES TO DELETE AFTER UPDATE ===
+Documentation/
+scrapers/
+tools/
+utils/
+
+=== ACTION PLAN ===
+1. Update tests/*.js: ../scrapers/ → ../src/scrapers/
+2. Update tests/*.js: ../utils/ → ../src/utils/
+3. Update src/scrapers/*.js: ../utils/ → ../utils/
+4. Update src/tools/*.js: ../utils/ → ../utils/
+5. Delete duplicate root directories

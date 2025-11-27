@@ -5,9 +5,9 @@
  * Provides mock objects and test setup helpers.
  */
 
-const BrowserManager = require('../utils/browser-manager');
-const RateLimiter = require('../utils/rate-limiter');
-const logger = require('../utils/logger');
+const BrowserManager = require('../src/utils/browser-manager');
+const RateLimiter = require('../src/utils/rate-limiter');
+const logger = require('../src/utils/logger');
 
 /**
  * Mock logger that captures messages without output

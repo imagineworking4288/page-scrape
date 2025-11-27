@@ -48,7 +48,7 @@ function testBaseScraper() {
   console.log('\n📦 BaseScraper Tests');
   console.log('─'.repeat(40));
 
-  const BaseScraper = require('../scrapers/base-scraper');
+  const BaseScraper = require('../src/scrapers/base-scraper');
 
   test('BaseScraper can be instantiated', () => {
     const logger = new MockLogger();
@@ -103,10 +103,10 @@ function testScraperInheritance() {
   console.log('\n📦 Scraper Inheritance Tests');
   console.log('─'.repeat(40));
 
-  const BaseScraper = require('../scrapers/base-scraper');
-  const SimpleScraper = require('../scrapers/simple-scraper');
-  const PdfScraper = require('../scrapers/pdf-scraper');
-  const SelectScraper = require('../scrapers/select-scraper');
+  const BaseScraper = require('../src/scrapers/base-scraper');
+  const SimpleScraper = require('../src/scrapers/simple-scraper');
+  const PdfScraper = require('../src/scrapers/pdf-scraper');
+  const SelectScraper = require('../src/scrapers/select-scraper');
 
   test('SimpleScraper extends BaseScraper', () => {
     const scraper = new SimpleScraper(new MockBrowserManager(), new MockRateLimiter(), new MockLogger());
@@ -145,7 +145,7 @@ function testPaginationModules() {
   console.log('\n📦 Pagination Module Tests');
   console.log('─'.repeat(40));
 
-  const { PatternDetector, BinarySearcher, UrlGenerator } = require('../utils/pagination');
+  const { PatternDetector, BinarySearcher, UrlGenerator } = require('../src/features/pagination');
 
   test('PatternDetector can be instantiated', () => {
     const detector = new PatternDetector(new MockLogger());
@@ -209,7 +209,7 @@ function testPaginatorIntegration() {
   console.log('\n📦 Paginator Integration Tests');
   console.log('─'.repeat(40));
 
-  const Paginator = require('../utils/paginator');
+  const Paginator = require('../src/features/pagination/paginator');
 
   test('Paginator initializes sub-modules', () => {
     const paginator = new Paginator(
@@ -258,7 +258,7 @@ function testWorkflows() {
   console.log('\n📦 Workflow Tests');
   console.log('─'.repeat(40));
 
-  const { ScrapingWorkflow, ExportWorkflow } = require('../utils/workflows');
+  const { ScrapingWorkflow, ExportWorkflow } = require('../src/features/workflows');
 
   test('ScrapingWorkflow can be instantiated', () => {
     const workflow = new ScrapingWorkflow({ logger: new MockLogger() });
@@ -316,7 +316,7 @@ function testConstants() {
   console.log('\n📦 Constants Tests');
   console.log('─'.repeat(40));
 
-  const constants = require('../utils/constants');
+  const constants = require('../src/utils/constants');
 
   test('Constants has timeout values', () => {
     TestSetup.assertTruthy(constants.DEFAULT_TIMEOUT, 'Should have DEFAULT_TIMEOUT');
