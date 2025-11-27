@@ -7,18 +7,18 @@ const Table = require('cli-table3');
 const fs = require('fs');
 const path = require('path');
 
-// Import utilities
-const logger = require('./utils/logger');
-const BrowserManager = require('./utils/browser-manager');
-const RateLimiter = require('./utils/rate-limiter');
-const DomainExtractor = require('./utils/domain-extractor');
-const Paginator = require('./utils/paginator');
-const ConfigLoader = require('./utils/config-loader');
-const GoogleSheetsExporter = require('./utils/google-sheets-exporter');
+// Import utilities from src/
+const logger = require('./src/utils/logger');
+const BrowserManager = require('./src/utils/browser-manager');
+const RateLimiter = require('./src/utils/rate-limiter');
+const DomainExtractor = require('./src/utils/domain-extractor');
+const Paginator = require('./src/features/pagination/paginator');
+const ConfigLoader = require('./src/utils/config-loader');
+const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 
-// Import scrapers
-const SimpleScraper = require('./scrapers/simple-scraper');
-const PdfScraper = require('./scrapers/pdf-scraper');
+// Import scrapers from src/
+const SimpleScraper = require('./src/scrapers/simple-scraper');
+const PdfScraper = require('./src/scrapers/pdf-scraper');
 
 // CLI setup
 const program = new Command();
@@ -40,6 +40,10 @@ program
   .option('--start-page <number>', 'Start from specific page number (for resume)', parseInt, 1)
   .option('--min-contacts <number>', 'Minimum contacts per page to continue', parseInt)
   .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
+  .option('--infinite-scroll', 'Enable infinite scroll mode for pages that load content on scroll')
+  .option('--card-selector <selector>', 'CSS selector for contact cards (for infinite scroll)')
+  .option('--max-scroll <number>', 'Maximum scroll attempts for infinite scroll', parseInt, 50)
+  .option('--scroll-delay <ms>', 'Delay between scrolls in ms', parseInt, 1500)
   .option('--no-export', 'Skip Google Sheets export (only output JSON)')
   .parse(process.argv);
 
@@ -282,6 +286,30 @@ async function main() {
     let allContacts = [];
     let pageNumber = startPage;
 
+    // Check for infinite scroll mode
+    if (options.infiniteScroll) {
+      logger.info('');
+      logger.info('Using infinite scroll mode...');
+      logger.info(`Card selector: ${options.cardSelector || 'auto-detect'}`);
+      logger.info(`Max scroll attempts: ${options.maxScroll}`);
+      logger.info(`Scroll delay: ${options.scrollDelay}ms`);
+      logger.info('');
+
+      const scraper = new SimpleScraper(browserManager, rateLimiter, logger);
+      const contacts = await scraper.scrapeInfiniteScroll(options.url, {
+        cardSelector: options.cardSelector || null,
+        maxItems: options.limit || Infinity,
+        maxScrollAttempts: options.maxScroll || 50,
+        scrollDelay: options.scrollDelay || 1500,
+        keepPdf: options.keep || false
+      });
+
+      allContacts = contacts;
+
+      // Skip the pagination loop since we used infinite scroll
+      pageUrls = []; // Empty to skip loop below
+    }
+
     // Create scraper instance
     let scraper;
     switch (options.method) {
@@ -302,7 +330,7 @@ async function main() {
 
       case 'select':
         logger.info('Using select method (marker-based extraction)...');
-        const SelectScraper = require('./scrapers/select-scraper');
+        const SelectScraper = require('./src/scrapers/select-scraper');
         scraper = new SelectScraper(browserManager, rateLimiter, logger);
         break;
 

@@ -72,6 +72,12 @@ echo     --start-page ^<number^>        Resume from specific page (default: 1)
 echo     --min-contacts ^<number^>      Min contacts per page to continue
 echo     --discover-only              Detect pagination pattern without scraping
 echo.
+echo   INFINITE SCROLL:
+echo     --infinite-scroll            Enable infinite scroll mode
+echo     --card-selector ^<sel^>        CSS selector for contact cards
+echo     --max-scroll ^<number^>        Max scroll attempts (default: 50)
+echo     --scroll-delay ^<ms^>          Delay between scrolls (default: 1500)
+echo.
 echo   OUTPUT:
 echo     -o, --output ^<format^>        json ^| csv ^| sqlite ^| all (default: json)
 echo     --no-export                  Skip Google Sheets export
@@ -109,6 +115,12 @@ echo   node orchestrator.js --url "https://www.compass.com/agents/locations/manh
 echo.
 echo   # Debug mode (visible browser, keep files)
 echo   node orchestrator.js --url "URL" --method hybrid --headless false --keep
+echo.
+echo   # Infinite scroll (e.g., Sullivan ^& Cromwell lawyers)
+echo   node orchestrator.js --url "URL" --infinite-scroll --max-scroll 30 --scroll-delay 2000
+echo.
+echo   # Infinite scroll test
+echo   node tests/infinite-scroll-test.js
 echo.
 color 0A
 echo --------------------------------------------------------------------------------
@@ -205,27 +217,36 @@ echo.
 echo --------------------------------------------------------------------------------
 echo [PROJECT STRUCTURE]
 echo --------------------------------------------------------------------------------
-echo   orchestrator.js           - Main CLI entry point
-echo   tools/
-echo     site-tester.js          - Diagnostic tool for URL testing
-echo     config-generator.js     - Visual config generation tool
-echo   scrapers/
-echo     base-scraper.js         - Base class for all scrapers
-echo     simple-scraper.js       - HTML/DOM-based extraction
-echo     pdf-scraper.js          - PDF parsing with coordinate detection
-echo     select-scraper.js       - Config-driven marker-based extraction
-echo   utils/
-echo     paginator.js            - Pagination detection and binary search
-echo     pagination/             - Modular pagination components
-echo     workflows/              - Scraping and export workflows
-echo     browser-manager.js      - Puppeteer with stealth configuration
-echo     domain-extractor.js     - Email domain classification
-echo     google-sheets-exporter.js - Sheets API integration
-echo     config-loader.js        - Site configuration management
-echo     constants.js            - Centralized configuration values
-echo   configs/                   - Site-specific JSON configurations
-echo   tests/                     - Pagination and integration tests
-echo   output/                    - JSON output files
+echo   orchestrator.js             - Main CLI entry point
+echo   src/
+echo     scrapers/                 - Extraction methods
+echo       base-scraper.js         - Base class with shared utilities
+echo       simple-scraper.js       - HTML/DOM-based extraction
+echo       pdf-scraper.js          - PDF parsing with coordinate detection
+echo       select-scraper.js       - Config-driven marker-based extraction
+echo     features/
+echo       pagination/             - Pagination detection and URL generation
+echo         paginator.js          - Main pagination orchestrator
+echo         pattern-detector.js   - Visual pagination control detection
+echo         binary-searcher.js    - Binary search for max page
+echo         url-generator.js      - URL generation from patterns
+echo       infinite-scroll/        - Infinite scroll handling
+echo         infinite-scroll-handler.js - Scroll and collect handler
+echo       workflows/              - Complete scraping workflows
+echo         scraping-workflow.js  - Multi-page scraping orchestration
+echo         export-workflow.js    - Output formatting and export
+echo     utils/                    - Core utilities
+echo       browser-manager.js      - Puppeteer with stealth/CSP bypass
+echo       domain-extractor.js     - Email domain classification
+echo       google-sheets-exporter.js - Sheets API integration
+echo       config-loader.js        - Site configuration management
+echo       constants.js            - Centralized configuration values
+echo     tools/                    - Developer tools
+echo       site-tester.js          - Diagnostic tool for URL testing
+echo       config-generator.js     - Visual config generation tool
+echo   configs/                     - Site-specific JSON configurations
+echo   tests/                       - Test suites (pagination, infinite-scroll)
+echo   output/                      - JSON output files
 echo.
 echo ================================================================================
 echo [QUICK START]
