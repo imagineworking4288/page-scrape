@@ -174,11 +174,41 @@ echo.
 echo   OUTPUT: Terminal report + JSON file in output/diagnostics/
 echo.
 echo --------------------------------------------------------------------------------
+echo [CONFIG GENERATOR - VISUAL TOOL]
+echo --------------------------------------------------------------------------------
+echo   Interactive tool to generate site-specific configs by clicking on elements.
+echo   Automatically detects infinite scroll (e.g., Sullivan ^& Cromwell) or
+echo   traditional pagination. Creates configs for the SELECT scraping method.
+echo.
+echo   USAGE:
+echo     node tools/config-generator.js --url "URL"               Generate config
+echo     node tools/config-generator.js --url "URL" --no-test     Skip validation
+echo     node tools/config-generator.js --url "URL" --verbose     Detailed logs
+echo.
+echo   OPTIONS:
+echo     -u, --url ^<url^>           Target URL to configure (required)
+echo     -o, --output ^<dir^>        Config output directory (default: configs)
+echo     -t, --timeout ^<ms^>        Page load timeout (default: 30000)
+echo     --no-test                 Skip testing config after generation
+echo     --verbose                 Show detailed logs
+echo.
+echo   WORKFLOW:
+echo     1. Browser opens in visible mode with control panel
+echo     2. Click on a contact card (the repeating container)
+echo     3. Click on name, email, phone fields within a card
+echo     4. Tool auto-detects infinite scroll vs traditional pagination
+echo     5. Config saved to configs/^<domain^>.json
+echo.
+echo   INFINITE SCROLL: Detected by scrolling and checking if new cards load
+echo   OUTPUT: JSON config file ready for --method select scraping
+echo.
+echo --------------------------------------------------------------------------------
 echo [PROJECT STRUCTURE]
 echo --------------------------------------------------------------------------------
 echo   orchestrator.js           - Main CLI entry point
 echo   tools/
 echo     site-tester.js          - Diagnostic tool for URL testing
+echo     config-generator.js     - Visual config generation tool
 echo   scrapers/
 echo     base-scraper.js         - Base class for all scrapers
 echo     simple-scraper.js       - HTML/DOM-based extraction
@@ -202,11 +232,17 @@ echo [QUICK START]
 echo ================================================================================
 color 0E
 echo.
-echo   DIAGNOSE: node tools/site-tester.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/"
+echo   GENERATE CONFIG (visual):
+echo     node tools/config-generator.js --url "https://www.sullcrom.com/lawyers"
 echo.
-echo   TEST:     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --limit 5
+echo   DIAGNOSE SITE:
+echo     node tools/site-tester.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/"
 echo.
-echo   FULL:     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
+echo   TEST SCRAPE:
+echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --limit 5
+echo.
+echo   FULL SCRAPE:
+echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
 echo.
 color 0A
 echo ================================================================================
