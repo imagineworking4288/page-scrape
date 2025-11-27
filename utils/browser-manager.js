@@ -32,7 +32,7 @@ class BrowserManager {
       }
 
       this.logger.info('Launching browser with stealth configuration...');
-      
+
       this.browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         args: [
@@ -42,26 +42,60 @@ class BrowserManager {
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
           '--window-size=1920,1080',
-          '--disable-blink-features=AutomationControlled'
+          '--disable-blink-features=AutomationControlled',
+          // CSP bypass flags for script injection on restricted sites
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process'
         ]
       });
 
       this.page = await this.browser.newPage();
-      
+
+      // Bypass Content Security Policy restrictions
+      await this.page.setBypassCSP(true);
+
+      // Filter out CSP error spam from console
+      this.setupConsoleFiltering(this.page);
+
       const userAgent = this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
       await this.page.setUserAgent(userAgent);
-      
+
       await this.page.setViewport({ width: 1920, height: 1080 });
-      
+
       this.initialMemory = process.memoryUsage().heapUsed;
-      
+
       this.logger.info('Browser launched successfully');
       this.logger.info(`Headless mode: ${headless}`);
+      this.logger.info('CSP bypass enabled');
       return true;
     } catch (error) {
       this.logger.error(`Failed to launch browser: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Setup console message filtering to suppress CSP errors
+   * @param {Object} page - Puppeteer page
+   */
+  setupConsoleFiltering(page) {
+    page.on('console', (msg) => {
+      const text = msg.text();
+      // Filter out CSP-related error messages
+      if (text.includes('Content Security Policy') ||
+          text.includes('unsafe-eval') ||
+          text.includes('Refused to evaluate') ||
+          text.includes('script-src')) {
+        return; // Suppress CSP errors
+      }
+      // Log other messages at appropriate level
+      const type = msg.type();
+      if (type === 'error') {
+        this.logger.debug(`[Browser Console Error] ${text}`);
+      } else if (type === 'warning') {
+        this.logger.debug(`[Browser Console Warning] ${text}`);
+      }
+    });
   }
 
   async navigate(url, timeout = 30000) {
@@ -128,20 +162,24 @@ class BrowserManager {
   async checkMemoryAndRecycle() {
     const currentMemory = process.memoryUsage().heapUsed;
     const memoryGrowthMB = (currentMemory - this.initialMemory) / 1024 / 1024;
-    
+
     if (this.navigationCount >= 50 || memoryGrowthMB >= 1024) {
       this.logger.info(`Recycling page - Navigations: ${this.navigationCount}, Memory growth: ${memoryGrowthMB.toFixed(2)}MB`);
-      
+
       await this.page.close();
       this.page = await this.browser.newPage();
-      
+
+      // Re-apply CSP bypass on recycled page
+      await this.page.setBypassCSP(true);
+      this.setupConsoleFiltering(this.page);
+
       const userAgent = this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
       await this.page.setUserAgent(userAgent);
       await this.page.setViewport({ width: 1920, height: 1080 });
-      
+
       this.navigationCount = 0;
       this.initialMemory = process.memoryUsage().heapUsed;
-      
+
       if (global.gc) {
         global.gc();
         this.logger.debug('Forced garbage collection');
