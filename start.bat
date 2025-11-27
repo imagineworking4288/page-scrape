@@ -152,19 +152,47 @@ echo   Rate limited            - Increase --delay, reduce --max-pages
 echo   Empty pages detected    - Normal at end; binary search confirms boundaries
 echo.
 echo --------------------------------------------------------------------------------
+echo [SITE TESTER - DIAGNOSTIC TOOL]
+echo --------------------------------------------------------------------------------
+echo   Tests a URL to determine scraping feasibility before full scrape.
+echo   Identifies pagination, tests all methods, recommends best approach.
+echo.
+echo   USAGE:
+echo     node tools/site-tester.js --url "URL"                  Test all methods
+echo     node tools/site-tester.js --url "URL" --methods html   Test HTML only
+echo     node tools/site-tester.js --url "URL" --skip pdf       Skip PDF method
+echo     node tools/site-tester.js --url "URL" --no-pagination  Skip pagination
+echo.
+echo   OPTIONS:
+echo     -u, --url ^<url^>           Target URL to test (required)
+echo     -m, --methods ^<list^>      Methods to test: html,pdf,select
+echo     -s, --skip ^<list^>         Methods to skip
+echo     --no-pagination           Skip pagination detection
+echo     --headless ^<bool^>         Show browser (default: true)
+echo     --verbose                 Detailed output
+echo.
+echo   OUTPUT: Terminal report + JSON file in output/diagnostics/
+echo.
+echo --------------------------------------------------------------------------------
 echo [PROJECT STRUCTURE]
 echo --------------------------------------------------------------------------------
 echo   orchestrator.js           - Main CLI entry point
+echo   tools/
+echo     site-tester.js          - Diagnostic tool for URL testing
 echo   scrapers/
+echo     base-scraper.js         - Base class for all scrapers
 echo     simple-scraper.js       - HTML/DOM-based extraction
 echo     pdf-scraper.js          - PDF parsing with coordinate detection
 echo     select-scraper.js       - Config-driven marker-based extraction
 echo   utils/
 echo     paginator.js            - Pagination detection and binary search
+echo     pagination/             - Modular pagination components
+echo     workflows/              - Scraping and export workflows
 echo     browser-manager.js      - Puppeteer with stealth configuration
 echo     domain-extractor.js     - Email domain classification
 echo     google-sheets-exporter.js - Sheets API integration
 echo     config-loader.js        - Site configuration management
+echo     constants.js            - Centralized configuration values
 echo   configs/                   - Site-specific JSON configurations
 echo   tests/                     - Pagination and integration tests
 echo   output/                    - JSON output files
@@ -174,9 +202,11 @@ echo [QUICK START]
 echo ================================================================================
 color 0E
 echo.
-echo   TEST:  node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --limit 5
+echo   DIAGNOSE: node tools/site-tester.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/"
 echo.
-echo   FULL:  node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
+echo   TEST:     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --limit 5
+echo.
+echo   FULL:     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
 echo.
 color 0A
 echo ================================================================================
