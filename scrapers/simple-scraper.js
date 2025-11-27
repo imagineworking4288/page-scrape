@@ -1,24 +1,16 @@
-const DomainExtractor = require('../utils/domain-extractor');
+const BaseScraper = require('./base-scraper');
 const contactExtractor = require('../utils/contact-extractor');
 
-class SimpleScraper {
+class SimpleScraper extends BaseScraper {
   constructor(browserManager, rateLimiter, logger) {
-    this.browserManager = browserManager;
-    this.rateLimiter = rateLimiter;
-    this.logger = logger;
+    super(browserManager, rateLimiter, logger);
 
-    // Initialize domain extractor
-    this.domainExtractor = new DomainExtractor(logger);
-
-    // Track processed emails to prevent duplicates
-    this.processedEmails = new Set();
-
-    // Import shared patterns from contact-extractor
+    // Import shared patterns from contact-extractor (for browser context serialization)
     this.EMAIL_REGEX = contactExtractor.EMAIL_REGEX;
     this.PHONE_REGEXES = contactExtractor.PHONE_REGEXES;
     this.NAME_REGEX = contactExtractor.NAME_REGEX;
     this.NAME_BLACKLIST = contactExtractor.NAME_BLACKLIST;
-    
+
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
       // Compass.com specific selectors (prioritized)
@@ -214,12 +206,7 @@ class SimpleScraper {
     return Math.min(100, score);
   }
 
-  /**
-   * Helper to escape regex special characters (delegates to shared utility)
-   */
-  escapeRegex(str) {
-    return contactExtractor.escapeRegex(str);
-  }
+  // escapeRegex inherited from BaseScraper
 
   /**
    * Extract all names and emails from full text with positions
@@ -392,33 +379,8 @@ class SimpleScraper {
     return contacts;
   }
 
-  /**
-   * Find name in context (delegates to shared utility)
-   */
-  findNameInContext(beforeContext, email, emailPos) {
-    return contactExtractor.findNameInContext(beforeContext, email, emailPos);
-  }
-
-  /**
-   * Validate if text is a valid name candidate (delegates to shared utility)
-   */
-  isValidNameCandidate(text) {
-    return contactExtractor.isValidNameCandidate(text);
-  }
-
-  /**
-   * Score name candidate (delegates to shared utility)
-   */
-  scoreNameCandidate(candidateName, emailTerms, distance) {
-    return contactExtractor.scoreNameCandidate(candidateName, emailTerms, distance);
-  }
-
-  /**
-   * Find phone number in context (delegates to shared utility)
-   */
-  findPhoneInContext(context) {
-    return contactExtractor.findPhoneInContext(context);
-  }
+  // findNameInContext, isValidNameCandidate, scoreNameCandidate, findPhoneInContext
+  // are inherited from BaseScraper
 
   /**
    * Calculate confidence based on name and phone findings
@@ -438,12 +400,7 @@ class SimpleScraper {
     }
   }
 
-  /**
-   * Derive name from email address (delegates to shared utility)
-   */
-  deriveNameFromEmail(email) {
-    return contactExtractor.extractNameFromEmail(email);
-  }
+  // deriveNameFromEmail is available as extractNameFromEmail inherited from BaseScraper
 
   async scrape(url, limit = null, keepPdf = false, sourcePage = null, sourceUrl = null) {
     try {
@@ -592,9 +549,7 @@ class SimpleScraper {
     }
   }
 
-  async renderAndParsePdf(page, keepPdf = false) {
-    return await contactExtractor.renderAndParsePdf(page, keepPdf, this.logger);
-  }
+  // renderAndParsePdf inherited from BaseScraper
 
   async extractUniqueEmails(page, cardSelector, limit) {
     const emails = await page.evaluate((selector) => {
@@ -786,20 +741,7 @@ class SimpleScraper {
     return null;
   }
 
-  validateAndCleanName(text) {
-    return contactExtractor.validateAndCleanName(text);
-  }
-
-  /**
-   * Extract name from email address (delegates to shared utility)
-   */
-  extractNameFromEmail(email) {
-    return contactExtractor.extractNameFromEmail(email);
-  }
-
-  toTitleCase(str) {
-    return contactExtractor.toTitleCase(str);
-  }
+  // validateAndCleanName, extractNameFromEmail, toTitleCase inherited from BaseScraper
 
   isValidNameForEmail(name) {
     const words = name.split(/\s+/);
@@ -1049,32 +991,7 @@ class SimpleScraper {
     }
   }
 
-  /**
-   * NEW METHOD: Add domain information to contact object
-   * Extracts domain from email and adds domain fields
-   * 
-   * @param {Object} contact - Contact object (modified in place)
-   */
-  addDomainInfo(contact) {
-    if (!contact.email) {
-      contact.domain = null;
-      contact.domainType = null;
-      return;
-    }
-    
-    // Extract and normalize domain
-    const domain = this.domainExtractor.extractAndNormalize(contact.email);
-    
-    if (!domain) {
-      contact.domain = null;
-      contact.domainType = null;
-      return;
-    }
-    
-    // Add domain fields
-    contact.domain = domain;
-    contact.domainType = this.domainExtractor.isBusinessDomain(domain) ? 'business' : 'personal';
-  }
+  // addDomainInfo inherited from BaseScraper
 
   // Helper to validate email
   isValidEmail(email) {

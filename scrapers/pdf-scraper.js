@@ -1,20 +1,12 @@
 // NOTE: This implementation requires pdf-parse npm package
 // Run: npm install pdf-parse
 
-const DomainExtractor = require('../utils/domain-extractor');
+const BaseScraper = require('./base-scraper');
 const contactExtractor = require('../utils/contact-extractor');
 
-class PdfScraper {
+class PdfScraper extends BaseScraper {
   constructor(browserManager, rateLimiter, logger) {
-    this.browserManager = browserManager;
-    this.rateLimiter = rateLimiter;
-    this.logger = logger;
-
-    // Initialize domain extractor
-    this.domainExtractor = new DomainExtractor(logger);
-
-    // Track processed emails to prevent duplicates
-    this.processedEmails = new Set();
+    super(browserManager, rateLimiter, logger);
 
     // FIXED: Configurable Y_THRESHOLD with sensible default
     this.Y_THRESHOLD = 40; // Reduced from 100 to 40 pixels
@@ -192,13 +184,6 @@ class PdfScraper {
     }
 
     return Math.min(100, score);
-  }
-
-  /**
-   * Helper to escape regex special characters (delegates to shared utility)
-   */
-  escapeRegex(str) {
-    return contactExtractor.escapeRegex(str);
   }
 
   /**
@@ -633,10 +618,6 @@ class PdfScraper {
     }
   }
 
-  async renderAndParsePdf(page, keepPdf = false) {
-    return await contactExtractor.renderAndParsePdf(page, keepPdf, this.logger);
-  }
-
   extractUniqueEmailsFromText(text) {
     const emails = new Set();
     const matches = text.match(this.EMAIL_REGEX);
@@ -706,14 +687,6 @@ class PdfScraper {
     }
 
     return phones.length > 0 ? phones[0] : null;
-  }
-
-  extractNameFromEmail(email) {
-    return contactExtractor.extractNameFromEmail(email);
-  }
-
-  toTitleCase(str) {
-    return contactExtractor.toTitleCase(str);
   }
 
   isValidName(name) {
@@ -1142,41 +1115,6 @@ class PdfScraper {
     this.addDomainInfo(contact);
     
     return contact;
-  }
-
-  /**
-   * NEW METHOD: Add domain information to contact object
-   * Extracts domain from email and adds domain fields
-   * 
-   * @param {Object} contact - Contact object (modified in place)
-   */
-  addDomainInfo(contact) {
-    if (!contact.email) {
-      contact.domain = null;
-      contact.domainType = null;
-      return;
-    }
-    
-    // Extract and normalize domain
-    const domain = this.domainExtractor.extractAndNormalize(contact.email);
-    
-    if (!domain) {
-      contact.domain = null;
-      contact.domainType = null;
-      return;
-    }
-    
-    // Add domain fields
-    contact.domain = domain;
-    contact.domainType = this.domainExtractor.isBusinessDomain(domain) ? 'business' : 'personal';
-  }
-
-  extractEmails(text) {
-    return contactExtractor.extractEmails(text);
-  }
-
-  extractPhones(text) {
-    return contactExtractor.extractPhones(text);
   }
 
   /**

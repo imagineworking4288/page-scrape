@@ -3,18 +3,15 @@
  * Extracts contacts by selecting text between defined boundaries.
  */
 
+const BaseScraper = require('./base-scraper');
 const ConfigLoader = require('../utils/config-loader');
 const TextParser = require('../utils/text-parser');
-const DomainExtractor = require('../utils/domain-extractor');
 
-class SelectScraper {
+class SelectScraper extends BaseScraper {
   constructor(browserManager, rateLimiter, logger) {
-    this.browserManager = browserManager;
-    this.rateLimiter = rateLimiter;
-    this.logger = logger;
+    super(browserManager, rateLimiter, logger);
     this.configLoader = new ConfigLoader(logger);
     this.textParser = new TextParser(logger);
-    this.domainExtractor = new DomainExtractor(logger);
   }
 
   /**

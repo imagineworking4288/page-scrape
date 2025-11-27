@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { URL } = require('url');
+const { PatternDetector, BinarySearcher, UrlGenerator } = require('./pagination');
 
 /**
  * Paginator - Handles automatic pagination detection and URL generation for scraping
@@ -10,6 +11,11 @@ const { URL } = require('url');
  * - Detects duplicate/empty pages
  * - Supports infinite scroll detection
  * - Caches discovered patterns
+ *
+ * Delegates to specialized modules:
+ * - PatternDetector: Discovers pagination patterns
+ * - BinarySearcher: Finds true max page using binary search
+ * - UrlGenerator: Generates page URLs from patterns
  */
 class Paginator {
   constructor(browserManager, rateLimiter, logger, configLoader) {
@@ -19,6 +25,11 @@ class Paginator {
     this.configLoader = configLoader;
     this.startPage = 1;
     this.seenContentHashes = new Set();
+
+    // Initialize sub-modules
+    this.patternDetector = new PatternDetector(logger, configLoader);
+    this.binarySearcher = new BinarySearcher(logger, rateLimiter);
+    this.urlGenerator = new UrlGenerator(logger);
   }
 
   /**
@@ -346,6 +357,7 @@ class Paginator {
 
   /**
    * Discover pagination pattern from current page (VISUAL-FIRST APPROACH)
+   * Delegates to PatternDetector module
    * @param {object} page - Puppeteer page object
    * @param {string} currentUrl - Current page URL
    * @param {object} siteConfig - Site-specific configuration
@@ -353,247 +365,18 @@ class Paginator {
    * @private
    */
   async _discoverPaginationPattern(page, currentUrl, siteConfig = null) {
-    try {
-      this.logger.info('[Paginator] Starting pattern discovery...');
-
-      // PRIORITY 1: Check manual config
-      if (siteConfig?.pagination?.patterns) {
-        const manualPattern = this._extractManualPattern(currentUrl, siteConfig.pagination.patterns);
-        if (manualPattern) {
-          this.logger.info('[Paginator] Using manual pattern from config');
-          manualPattern.detectionMethod = 'manual';
-          return manualPattern;
-        }
-      }
-
-      // PRIORITY 2: Check cache
-      const domain = new URL(currentUrl).hostname.replace(/^www\./, '');
-      const cachedPattern = this.configLoader?.getCachedPattern?.(domain);
-      if (cachedPattern?.pattern) {
-        this.logger.info('[Paginator] Using cached pattern');
-        return cachedPattern.pattern;
-      }
-
-      // PRIORITY 3: Visual detection + navigation
-      this.logger.info('[Paginator] Attempting visual detection...');
-      const controls = await this._detectPaginationControls(page);
-
-      if (controls.hasPagination) {
-        this.logger.info(`[Paginator] Found pagination controls: type=${controls.controlsType}, maxPage=${controls.maxPage}`);
-
-        // Try to discover pattern by clicking next
-        const navPattern = await this._discoverPatternByNavigation(page, currentUrl);
-        if (navPattern) {
-          navPattern.maxPage = controls.maxPage;
-          navPattern.currentPage = controls.currentPage;
-          navPattern.detectionMethod = 'navigation';
-          const confidence = this._calculatePatternConfidence(navPattern, controls);
-          navPattern.confidence = confidence;
-          this.logger.info(`[Paginator] Discovered pattern by navigation: ${navPattern.type} (confidence: ${confidence})`);
-          return navPattern;
-        }
-      } else {
-        this.logger.info('[Paginator] No visual pagination controls found');
-      }
-
-      // PRIORITY 4: URL pattern detection (fallback)
-      this.logger.info('[Paginator] Falling back to URL pattern detection...');
-      const urlPattern = await this._autoDetectPattern(page, currentUrl);
-      if (urlPattern) {
-        urlPattern.detectionMethod = 'url-analysis';
-        const confidence = this._calculatePatternConfidence(urlPattern, controls);
-        urlPattern.confidence = confidence;
-        this.logger.info(`[Paginator] Detected URL pattern: ${urlPattern.type} (confidence: ${confidence})`);
-        return urlPattern;
-      }
-
-      this.logger.info('[Paginator] No pagination pattern detected');
-      return null;
-
-    } catch (error) {
-      this.logger.error(`[Paginator] Pattern discovery error: ${error.message}`);
-      return null;
-    }
+    return await this.patternDetector.discoverPattern(page, currentUrl, siteConfig);
   }
 
   /**
    * Detect visual pagination controls in the DOM
+   * Delegates to PatternDetector module
    * @param {object} page - Puppeteer page object
    * @returns {Promise<object>} - {hasPagination, maxPage, nextButton, prevButton, pageNumbers, controlsType, currentPage}
    * @private
    */
   async _detectPaginationControls(page) {
-    try {
-      const controls = await page.evaluate(() => {
-        // Container selectors
-        const containerSelectors = [
-          'nav[aria-label*="pagination" i]',
-          'nav[role="navigation"]',
-          '.pagination',
-          '[class*="paginat"]',
-          '[class*="Paginat"]',
-          'ul.pagination',
-          'div.pagination'
-        ];
-
-        // Next button selectors
-        const nextSelectors = [
-          'a[rel="next"]:not(.disabled):not([aria-disabled="true"])',
-          'a[aria-label*="next" i]:not([aria-disabled="true"])',
-          'button[aria-label*="next" i]:not([disabled])',
-          'a[class*="next"]:not(.disabled)',
-          'button[class*="next"]:not(.disabled)',
-          'a:has(svg[data-icon="chevron-right"])',
-          'a[class*="Next"]:not(.disabled)',
-          'button[class*="Next"]:not(.disabled)'
-        ];
-
-        // Prev button selectors
-        const prevSelectors = [
-          'a[rel="prev"]:not(.disabled)',
-          'a[aria-label*="prev" i]:not([aria-disabled="true"])',
-          'a[aria-label*="previous" i]:not([aria-disabled="true"])',
-          'button[aria-label*="prev" i]:not([disabled])',
-          'a[class*="prev"]:not(.disabled)',
-          'button[class*="prev"]:not(.disabled)'
-        ];
-
-        // Page number selectors
-        const pageNumberSelectors = [
-          'a[aria-label*="page" i]',
-          '.page-link',
-          '[class*="page-number"]',
-          '[data-page]',
-          'button[data-page]',
-          'a.page',
-          '[class*="PageNumber"]'
-        ];
-
-        // Current page indicators
-        const currentPageSelectors = [
-          '.active[data-page]',
-          '[aria-current="page"]',
-          '.current',
-          '[class*="active"][data-page]',
-          '.selected[data-page]'
-        ];
-
-        // Find pagination container
-        let container = null;
-        for (const selector of containerSelectors) {
-          const el = document.querySelector(selector);
-          if (el) {
-            container = el;
-            break;
-          }
-        }
-
-        // Find next button
-        let nextButton = null;
-        for (const selector of nextSelectors) {
-          const el = document.querySelector(selector);
-          if (el && el.offsetParent !== null) { // visible check
-            nextButton = { selector, text: el.textContent.trim() };
-            break;
-          }
-        }
-
-        // Find prev button
-        let prevButton = null;
-        for (const selector of prevSelectors) {
-          const el = document.querySelector(selector);
-          if (el && el.offsetParent !== null) {
-            prevButton = { selector, text: el.textContent.trim() };
-            break;
-          }
-        }
-
-        // Extract page numbers
-        const pageNumbers = [];
-        for (const selector of pageNumberSelectors) {
-          const elements = document.querySelectorAll(selector);
-          for (const el of elements) {
-            const text = el.textContent.trim();
-            const num = parseInt(text);
-            if (!isNaN(num) && num > 0 && num < 10000) {
-              pageNumbers.push(num);
-            }
-            // Also check data-page attribute
-            const dataPage = el.getAttribute('data-page');
-            if (dataPage) {
-              const num = parseInt(dataPage);
-              if (!isNaN(num) && num > 0 && num < 10000) {
-                pageNumbers.push(num);
-              }
-            }
-          }
-        }
-
-        // Find current page
-        let currentPage = null;
-        for (const selector of currentPageSelectors) {
-          const el = document.querySelector(selector);
-          if (el) {
-            const text = el.textContent.trim();
-            const num = parseInt(text);
-            if (!isNaN(num) && num > 0) {
-              currentPage = num;
-              break;
-            }
-            const dataPage = el.getAttribute('data-page');
-            if (dataPage) {
-              const num = parseInt(dataPage);
-              if (!isNaN(num) && num > 0) {
-                currentPage = num;
-                break;
-              }
-            }
-          }
-        }
-
-        // Determine control type
-        let controlsType = 'none';
-        if (pageNumbers.length > 0) {
-          controlsType = 'numeric';
-        } else if (nextButton || prevButton) {
-          controlsType = 'next-prev';
-        }
-
-        // Find max page
-        const maxPage = pageNumbers.length > 0 ? Math.max(...pageNumbers) : null;
-
-        return {
-          hasPagination: !!container || !!nextButton || pageNumbers.length > 0,
-          maxPage,
-          nextButton,
-          prevButton,
-          pageNumbers: [...new Set(pageNumbers)].sort((a, b) => a - b),
-          controlsType,
-          currentPage
-        };
-      });
-
-      // Try to extract max page from text
-      if (!controls.maxPage) {
-        const maxPageFromText = await this._extractMaxPage(page);
-        if (maxPageFromText) {
-          controls.maxPage = maxPageFromText;
-        }
-      }
-
-      return controls;
-    } catch (error) {
-      this.logger.error(`[Paginator] Error detecting pagination controls: ${error.message}`);
-      return {
-        hasPagination: false,
-        maxPage: null,
-        nextButton: null,
-        prevButton: null,
-        pageNumbers: [],
-        controlsType: 'none',
-        currentPage: null
-      };
-    }
+    return await this.patternDetector.detectPaginationControls(page);
   }
 
   /**
@@ -1230,31 +1013,14 @@ class Paginator {
 
   /**
    * Generate URL for a single page number
+   * Delegates to UrlGenerator module
    * @param {object} pattern - Pagination pattern
    * @param {number} pageNum - Page number
    * @returns {string} - Generated URL
    * @private
    */
   _generateSinglePageUrl(pattern, pageNum) {
-    switch (pattern.type) {
-      case 'parameter':
-        const url = new URL(pattern.baseUrl);
-        url.searchParams.set(pattern.paramName, pageNum.toString());
-        return url.toString();
-
-      case 'path':
-        const path = pattern.urlPattern.replace('{page}', pageNum.toString());
-        return `${pattern.baseUrl}${path}`;
-
-      case 'offset':
-        const offsetUrl = new URL(pattern.baseUrl);
-        const offset = (pageNum - 1) * pattern.itemsPerPage;
-        offsetUrl.searchParams.set(pattern.paramName, offset.toString());
-        return offsetUrl.toString();
-
-      default:
-        throw new Error(`Unknown pattern type: ${pattern.type}`);
-    }
+    return this.urlGenerator.generatePageUrl(pattern, pageNum);
   }
 
   /**
@@ -1306,6 +1072,7 @@ class Paginator {
 
   /**
    * Find the true maximum page using binary search
+   * Delegates to BinarySearcher module
    * @param {object} page - Puppeteer page object
    * @param {object} pattern - Pagination pattern object
    * @param {number|null} visualMax - Max page from visual detection (hint)
@@ -1315,224 +1082,15 @@ class Paginator {
    * @private
    */
   async _findTrueMaxPage(page, pattern, visualMax, minContacts, hardCap = 200) {
-    try {
-      this.logger.info('[Paginator] Starting binary search for true max page...');
-
-      let lowerBound = 1;
-      let upperBound = visualMax || hardCap;
-      let lastValidPage = null;
-      const testedPages = [];
-      const searchPath = [];
-
-      // Step 1: Test page 1 first
-      this.logger.info('[Paginator] Testing page 1...');
-      const page1Valid = await this._testPageValidity(page, pattern, 1, minContacts);
-      testedPages.push({ pageNum: 1, valid: page1Valid.hasContacts, contacts: page1Valid.contactCount });
-
-    if (!page1Valid.hasContacts) {
-      searchPath.push('Page 1 has no contacts - no pagination');
-      this.logger.warn('[Paginator] Page 1 has no contacts');
-      return {
-        trueMax: 0,
-        isCapped: false,
-        testedPages,
-        searchPath,
-        boundaryConfirmed: true
-      };
-    }
-
-    lastValidPage = 1;
-    searchPath.push(`Page 1 valid (${page1Valid.contactCount} contacts)`);
-
-    // Step 2: Test visual max if available
-    if (visualMax && visualMax > 1) {
-      this.logger.info(`[Paginator] Testing visual max page: ${visualMax}`);
-      const visualMaxValid = await this._testPageValidity(page, pattern, visualMax, minContacts);
-      testedPages.push({ pageNum: visualMax, valid: visualMaxValid.hasContacts, contacts: visualMaxValid.contactCount });
-
-      await this.rateLimiter.waitBeforeRequest();
-
-      if (visualMaxValid.hasContacts) {
-        // Visual max is valid, search forward from here
-        lowerBound = visualMax;
-        lastValidPage = visualMax;
-        searchPath.push(`Visual max ${visualMax} valid (${visualMaxValid.contactCount} contacts), searching forward`);
-        this.logger.info(`[Paginator] Visual max ${visualMax} is valid, searching forward...`);
-      } else {
-        // Visual max is invalid, search backward
-        upperBound = visualMax - 1;
-        searchPath.push(`Visual max ${visualMax} invalid, searching backward`);
-        this.logger.info(`[Paginator] Visual max ${visualMax} is invalid, searching backward...`);
-      }
-    }
-
-    // Step 3: Binary search loop
-    let iterations = 0;
-    const maxIterations = 20; // Safety limit
-
-    while (lowerBound <= upperBound && upperBound <= hardCap && iterations < maxIterations) {
-      iterations++;
-
-      // Calculate midpoint
-      const mid = Math.floor((lowerBound + upperBound) / 2);
-
-      // Skip if already tested
-      if (testedPages.some(p => p.pageNum === mid)) {
-        // Adjust bounds slightly to avoid infinite loop
-        if (mid === lowerBound) {
-          lowerBound++;
-        } else if (mid === upperBound) {
-          upperBound--;
-        } else {
-          lowerBound = mid + 1;
-        }
-        continue;
-      }
-
-      this.logger.info(`[Paginator] Binary search iteration ${iterations}: testing page ${mid} (bounds: ${lowerBound}-${upperBound})`);
-
-      // Test midpoint
-      const midValid = await this._testPageValidity(page, pattern, mid, minContacts);
-      testedPages.push({ pageNum: mid, valid: midValid.hasContacts, contacts: midValid.contactCount });
-
-      await this.rateLimiter.waitBeforeRequest();
-
-      if (midValid.hasContacts) {
-        // Page is valid, search higher
-        lastValidPage = mid;
-        lowerBound = mid + 1;
-        searchPath.push(`Page ${mid} valid (${midValid.contactCount} contacts), search higher`);
-        this.logger.info(`[Paginator] Page ${mid} valid, continuing search higher...`);
-      } else {
-        // Page is empty, search lower
-        upperBound = mid - 1;
-        searchPath.push(`Page ${mid} empty, search lower`);
-        this.logger.info(`[Paginator] Page ${mid} empty, searching lower...`);
-      }
-    }
-
-    // Step 4: Confirm boundary with 2 consecutive empty pages
-    if (lastValidPage) {
-      this.logger.info(`[Paginator] Confirming boundary at page ${lastValidPage}...`);
-
-      // Test next page
-      const next1 = await this._testPageValidity(page, pattern, lastValidPage + 1, minContacts);
-      testedPages.push({ pageNum: lastValidPage + 1, valid: next1.hasContacts, contacts: next1.contactCount });
-
-      await this.rateLimiter.waitBeforeRequest();
-
-      if (next1.hasContacts) {
-        // Found another valid page, extend search
-        this.logger.info(`[Paginator] Page ${lastValidPage + 1} is valid, extending search...`);
-        lastValidPage = lastValidPage + 1;
-        searchPath.push(`Page ${lastValidPage} valid (${next1.contactCount} contacts), extending search`);
-
-        // Test one more page forward
-        const next2 = await this._testPageValidity(page, pattern, lastValidPage + 1, minContacts);
-        testedPages.push({ pageNum: lastValidPage + 1, valid: next2.hasContacts, contacts: next2.contactCount });
-
-        await this.rateLimiter.waitBeforeRequest();
-
-        if (next2.hasContacts) {
-          // Continue forward search - recursively call with new lower bound
-          this.logger.info(`[Paginator] Page ${lastValidPage + 1} also valid, continuing forward...`);
-          searchPath.push(`Page ${lastValidPage + 1} valid (${next2.contactCount} contacts), continuing search`);
-
-          // Update lower bound and continue searching
-          const forwardResult = await this._findTrueMaxPage(
-            page,
-            pattern,
-            lastValidPage + 2,
-            minContacts,
-            hardCap
-          );
-
-          // Merge results
-          return {
-            trueMax: forwardResult.trueMax,
-            isCapped: forwardResult.isCapped,
-            testedPages: [...testedPages, ...forwardResult.testedPages],
-            searchPath: [...searchPath, ...forwardResult.searchPath],
-            boundaryConfirmed: forwardResult.boundaryConfirmed
-          };
-        }
-      }
-
-      // Test second consecutive page
-      const next2 = await this._testPageValidity(page, pattern, lastValidPage + 2, minContacts);
-      testedPages.push({ pageNum: lastValidPage + 2, valid: next2.hasContacts, contacts: next2.contactCount });
-
-      await this.rateLimiter.waitBeforeRequest();
-
-      const isBoundaryConfirmed = !next1.hasContacts && !next2.hasContacts;
-
-      if (isBoundaryConfirmed) {
-        searchPath.push(`Boundary confirmed: pages ${lastValidPage + 1} and ${lastValidPage + 2} both empty`);
-        this.logger.info(`[Paginator] Boundary confirmed at page ${lastValidPage}`);
-      } else {
-        searchPath.push(`Boundary not fully confirmed (only 1 consecutive empty page)`);
-        this.logger.warn(`[Paginator] Boundary not fully confirmed at page ${lastValidPage}`);
-      }
-
-      return {
-        trueMax: lastValidPage,
-        isCapped: lastValidPage >= hardCap,
-        boundaryConfirmed: isBoundaryConfirmed,
-        testedPages,
-        searchPath
-      };
-    }
-
-    // Step 5: Handle hard cap
-    if (lastValidPage >= hardCap) {
-      this.logger.warn(`[Paginator] Reached hard cap of ${hardCap} pages`);
-      searchPath.push(`Reached hard cap at ${hardCap} pages`);
-      return {
-        trueMax: hardCap,
-        isCapped: true,
-        boundaryConfirmed: false,
-        testedPages,
-        searchPath
-      };
-    }
-
-      // No valid pages found
-      return {
-        trueMax: 0,
-        isCapped: false,
-        boundaryConfirmed: true,
-        testedPages,
-        searchPath
-      };
-
-    } catch (error) {
-      this.logger.error(`[Binary Search] Fatal error: ${error.message}`);
-      this.logger.error(error.stack);
-
-      // Fall back to visual max if available
-      if (visualMax && visualMax > 0) {
-        this.logger.warn(`[Binary Search] Falling back to visual max: ${visualMax}`);
-        return {
-          trueMax: visualMax,
-          isCapped: false,
-          boundaryConfirmed: false,
-          testedPages: [],
-          searchPath: [`Binary search failed: ${error.message}`, `Using visual max: ${visualMax}`],
-          error: error.message
-        };
-      }
-
-      // No visual max, return single page
-      this.logger.error('[Binary Search] No visual max available, defaulting to 1 page');
-      return {
-        trueMax: 1,
-        isCapped: false,
-        boundaryConfirmed: false,
-        testedPages: [],
-        searchPath: [`Binary search failed: ${error.message}`, 'Defaulting to 1 page'],
-        error: error.message
-      };
-    }
+    const urlGeneratorFn = this.urlGenerator.createGenerator(pattern);
+    return await this.binarySearcher.findTrueMaxPage(
+      page,
+      pattern,
+      urlGeneratorFn,
+      visualMax,
+      minContacts,
+      hardCap
+    );
   }
 }
 
