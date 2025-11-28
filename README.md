@@ -86,6 +86,64 @@ python -m python_scraper.test_scraper \
 
 See [python_scraper/README.md](python_scraper/README.md) for detailed documentation.
 
+## Infinite Scroll Support
+
+The scraper now supports sites that use infinite scroll to load content dynamically.
+
+### Configuration
+
+Add this to your site config:
+
+```json
+{
+  "infiniteScroll": {
+    "enabled": true,
+    "scrollDelay": 2000,
+    "maxScrollAttempts": 50,
+    "noNewContentThreshold": 3,
+    "scrollStrategy": "viewport"
+  }
+}
+```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | false | Enable infinite scroll mode |
+| `scrollDelay` | 1500 | Wait time (ms) after each scroll |
+| `maxScrollAttempts` | 50 | Maximum scroll iterations |
+| `noNewContentThreshold` | 3 | Scrolls without new content before stopping |
+| `scrollStrategy` | "viewport" | "viewport", "bottom", or "fixed" |
+| `networkIdleTimeout` | 5000 | Max time (ms) to wait for network idle |
+
+### Known Working Sites
+- Sullivan & Cromwell (sullcrom.com)
+
+### Troubleshooting Infinite Scroll
+
+**Problem**: Scraper stops too early
+- Increase `noNewContentThreshold` to 5
+- Increase `scrollDelay` to 3000ms
+
+**Problem**: Scraper runs too long
+- Decrease `maxScrollAttempts` to 30
+- Use `--limit` flag to stop after N contacts
+
+**Problem**: Duplicate contacts
+- Check that email extraction is working correctly
+- Verify `emailMatchStrategy` is set to "proximity"
+
+### Testing Infinite Scroll
+
+```bash
+# Run basic unit tests
+node tests/infinite-scroll-basic.test.js
+
+# Run integration test with Sullivan & Cromwell
+node tests/infinite-scroll-test.js
+```
+
 ## Pagination Testing
 
 Test pagination patterns before scraping multiple pages:

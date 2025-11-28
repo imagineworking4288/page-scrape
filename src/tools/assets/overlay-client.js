@@ -22,7 +22,8 @@
     },
     cardCount: 0,
     isListening: false,
-    hoveredElement: null
+    hoveredElement: null,
+    backendReady: false
   };
 
   // Field sequence for selection
@@ -32,11 +33,92 @@
   // DOM elements
   let highlightBox;
 
+  // Heartbeat monitoring
+  let heartbeatInterval;
+  let lastPingSuccess = Date.now();
+
+  /**
+   * Wait for backend initialization
+   * @returns {Promise<boolean>}
+   */
+  async function waitForInitialization() {
+    const maxAttempts = 50; // 5 seconds total (50 * 100ms)
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        if (typeof __configGen_initialize === 'function') {
+          const result = await __configGen_initialize();
+          if (result && result.ready) {
+            console.log('[ConfigGen] Backend initialized successfully');
+            state.backendReady = true;
+            return true;
+          }
+        }
+      } catch (err) {
+        // Function not ready yet, continue waiting
+      }
+
+      attempts++;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Failed to initialize
+    console.error('[ConfigGen] Failed to connect to backend after 5 seconds');
+    showError('Failed to connect to backend. Please refresh and try again.');
+    return false;
+  }
+
+  /**
+   * Start heartbeat monitoring
+   */
+  function startHeartbeat() {
+    heartbeatInterval = setInterval(async () => {
+      try {
+        if (typeof __configGen_ping === 'function') {
+          const result = await __configGen_ping();
+          if (result && result.alive) {
+            lastPingSuccess = Date.now();
+          }
+        }
+      } catch (err) {
+        // Check if we've been disconnected for >10 seconds
+        if (Date.now() - lastPingSuccess > 10000) {
+          showError('Connection lost. Please restart the config generator.');
+          clearInterval(heartbeatInterval);
+        }
+      }
+    }, 5000); // Ping every 5 seconds
+  }
+
+  /**
+   * Show error message in overlay
+   */
+  function showError(message) {
+    const phaseEl = document.getElementById('currentPhase');
+    if (phaseEl) {
+      phaseEl.textContent = 'Error: ' + message;
+      phaseEl.style.color = '#ff6b6b';
+    }
+    console.error('[ConfigGen] ' + message);
+  }
+
   /**
    * Initialize the overlay
    */
-  function init() {
+  async function init() {
     highlightBox = document.getElementById('highlightBox');
+    updatePhase('Connecting to backend...');
+
+    // Wait for backend initialization
+    const initialized = await waitForInitialization();
+    if (!initialized) {
+      return;
+    }
+
+    // Start heartbeat monitoring
+    startHeartbeat();
+
     updatePhase('Ready to start');
   }
 

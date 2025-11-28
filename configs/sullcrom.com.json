@@ -1,0 +1,35 @@
+{
+  "domain": "sullcrom.com",
+  "name": "Sullivan & Cromwell Lawyers",
+  "baseUrl": "https://www.sullcrom.com/lawyers",
+  "testUrl": "https://www.sullcrom.com/LawyerListing?custom_is_office=27567",
+  "selectors": {
+    "container": ".attorney-card, [class*=\"attorney\"], .lawyer-card, [class*=\"lawyer-listing\"], .person-card",
+    "name": "h3, h2, .name, [class*=\"name\"], .attorney-name",
+    "email": "a[href^='mailto:']",
+    "phone": "a[href^='tel:']",
+    "profileLink": "a[href*='/lawyer/'], a[href*='/Lawyers/']"
+  },
+  "infiniteScroll": {
+    "enabled": true,
+    "scrollDelay": 2000,
+    "maxScrollAttempts": 50,
+    "noNewContentThreshold": 3,
+    "scrollStrategy": "viewport",
+    "networkIdleTimeout": 5000
+  },
+  "extraction": {
+    "method": "hybrid",
+    "emailMatchStrategy": "proximity",
+    "comment": "Use hybrid extraction with proximity-based email matching for best results"
+  },
+  "pagination": {
+    "enabled": false,
+    "type": "infinite-scroll",
+    "comment": "This site uses infinite scroll instead of traditional pagination"
+  },
+  "parsing": {
+    "emailDomain": "sullcrom.com",
+    "nameBeforeEmail": true
+  }
+}
