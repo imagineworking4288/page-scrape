@@ -61,5 +61,15 @@
       "minEmailsPerPage": 1,
       "comment": "Validation rules to detect when pagination should stop"
     }
+  },
+  "infiniteScroll": {
+    "enabled": false,
+    "scrollDelay": 1500,
+    "maxScrollAttempts": 50,
+    "noNewContentThreshold": 3,
+    "scrollStrategy": "viewport",
+    "networkIdleTimeout": 5000,
+    "minCardIncrement": 1,
+    "comment": "Settings for infinite scroll detection and extraction. Set enabled: true to use infinite scroll mode."
   }
 }

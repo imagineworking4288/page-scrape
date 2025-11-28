@@ -121,6 +121,7 @@ class InteractiveSession {
 
   /**
    * Inject overlay UI into the page
+   * Uses page.evaluate() for CSP bypass instead of addScriptTag/addStyleTag
    */
   async injectOverlay() {
     this.logger.info('Injecting overlay UI...');
@@ -142,35 +143,68 @@ class InteractiveSession {
     const overlayHTML = fs.readFileSync(overlayHTMLPath, 'utf8');
     const overlayJS = fs.readFileSync(overlayJSPath, 'utf8');
 
-    // Extract just the body content from the HTML (it has inline styles)
-    // Parse out the panel and highlight box divs
+    // Extract CSS (everything between <style> tags)
+    const cssMatch = overlayHTML.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    const css = cssMatch ? cssMatch[1] : '';
+
+    // Extract HTML body content (everything in <body>)
     const bodyMatch = overlayHTML.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-    const bodyContent = bodyMatch ? bodyMatch[1] : overlayHTML;
+    const html = bodyMatch ? bodyMatch[1] : overlayHTML;
 
-    // Extract and inject the inline CSS from the HTML
-    const styleMatch = overlayHTML.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-    if (styleMatch) {
-      await this.page.addStyleTag({ content: styleMatch[1] });
+    // Inject via page.evaluate (bypasses CSP restrictions)
+    // This runs in page context, not as external resource
+    await this.page.evaluate((cssStr, htmlStr, jsStr) => {
+      // Inject CSS inline
+      const styleEl = document.createElement('style');
+      styleEl.id = 'config-generator-styles';
+      styleEl.textContent = cssStr;
+      document.head.appendChild(styleEl);
+
+      // Inject HTML container
+      const containerDiv = document.createElement('div');
+      containerDiv.id = 'config-generator-overlay-root';
+      containerDiv.innerHTML = htmlStr;
+      document.body.appendChild(containerDiv);
+
+      // Execute JS inline (create and execute in page context)
+      // Wrap in try-catch to capture any initialization errors
+      try {
+        const fn = new Function(jsStr);
+        fn();
+      } catch (err) {
+        console.error('[ConfigGen] Failed to initialize overlay script:', err);
+      }
+    }, css, html, overlayJS);
+
+    // Wait for overlay to initialize
+    try {
+      await this.page.waitForSelector('#controlPanel', { timeout: 5000 });
+      this.logger.info('Overlay UI injected successfully');
+    } catch (error) {
+      this.logger.warn(`Overlay selector check timed out: ${error.message}`);
+      // Continue anyway - overlay might still work
     }
-
-    // Inject HTML content (panel and highlight box)
-    await this.page.evaluate((html) => {
-      const container = document.createElement('div');
-      container.id = 'config-generator-overlay-root';
-      container.innerHTML = html;
-      document.body.appendChild(container);
-    }, bodyContent);
-
-    // Inject JS
-    await this.page.addScriptTag({ content: overlayJS });
-
-    this.logger.info('Overlay UI injected');
   }
 
   /**
    * Expose backend functions for browser-to-Node communication
    */
   async exposeBackendFunctions() {
+    // Initialization handshake - MUST be first
+    await this.page.exposeFunction('__configGen_initialize', async () => {
+      this.logger.info('Backend initialization handshake received');
+      return {
+        ready: true,
+        timestamp: Date.now(),
+        version: '1.0.0'
+      };
+    });
+
+    // Heartbeat/ping function for connection monitoring
+    await this.page.exposeFunction('__configGen_ping', async () => {
+      return { alive: true, timestamp: Date.now() };
+    });
+
     // Set selection mode
     await this.page.exposeFunction('__configGen_setMode', async (mode) => {
       this.currentStep = mode;
@@ -716,6 +750,7 @@ class InteractiveSession {
 
   /**
    * Detect if page uses infinite scroll
+   * Uses robust multi-scroll testing with ScrollDetector
    * @returns {Promise<Object>} - Detection results
    */
   async detectInfiniteScroll() {
@@ -723,100 +758,118 @@ class InteractiveSession {
       return { detected: false, confidence: 'none' };
     }
 
+    this.logger.info('Testing for infinite scroll...');
+
+    // Import ScrollDetector for robust content load detection
+    const { ScrollDetector } = require('../../features/infinite-scroll');
+
+    const containerSelector = this.selections.cardSelector;
+
     // Get initial state
-    const initialData = await this.page.evaluate((selector) => {
-      const cards = document.querySelectorAll(selector);
-      const scrollHeight = document.documentElement.scrollHeight;
-      const windowHeight = window.innerHeight;
+    const initialCardCount = await this.page.$$eval(containerSelector, els => els.length)
+      .catch(() => 0);
+    const initialHeight = await this.page.evaluate(() => document.body.scrollHeight);
 
-      return {
-        cardCount: cards.length,
-        scrollHeight: scrollHeight,
-        windowHeight: windowHeight
-      };
-    }, this.selections.cardSelector);
+    this.logger.info(`Initial: ${initialCardCount} cards, ${initialHeight}px height`);
 
-    this.logger.info(`Initial state: ${initialData.cardCount} cards, scroll height: ${initialData.scrollHeight}px`);
-
-    // Scroll to bottom
-    await this.page.evaluate(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+    // Initialize scroll detector with conservative settings
+    const scrollDetector = new ScrollDetector(this.page, this.logger, {
+      scrollDelay: 2000,
+      networkIdleTimeout: 5000
     });
 
-    // Wait for potential new content to load
-    await this.page.waitForTimeout(3000);
+    // Perform 3-5 test scrolls to get reliable detection
+    const scrollResults = [];
+    let noNewContentCount = 0;
+    const maxTestScrolls = 5;
 
-    // Check if new cards appeared
-    const afterScrollData = await this.page.evaluate((selector) => {
-      const cards = document.querySelectorAll(selector);
-      const scrollHeight = document.documentElement.scrollHeight;
+    for (let i = 0; i < maxTestScrolls; i++) {
+      const beforeCount = await this.page.$$eval(containerSelector, els => els.length)
+        .catch(() => 0);
+      const beforeHeight = await this.page.evaluate(() => document.body.scrollHeight);
 
-      return {
-        cardCount: cards.length,
-        scrollHeight: scrollHeight
-      };
-    }, this.selections.cardSelector);
-
-    this.logger.info(`After scroll: ${afterScrollData.cardCount} cards, scroll height: ${afterScrollData.scrollHeight}px`);
-
-    const cardCountIncreased = afterScrollData.cardCount > initialData.cardCount;
-    const scrollHeightIncreased = afterScrollData.scrollHeight > initialData.scrollHeight;
-
-    if (cardCountIncreased || scrollHeightIncreased) {
-      // Likely infinite scroll - test again to confirm
-      this.logger.info('Possible infinite scroll detected, testing again...');
-
-      const beforeSecondScroll = afterScrollData.cardCount;
-
-      // Scroll again
+      // Scroll to bottom
       await this.page.evaluate(() => {
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
       });
 
-      await this.page.waitForTimeout(3000);
+      // Wait for content to load using ScrollDetector
+      await scrollDetector.waitForContentLoad({ previousHeight: beforeHeight });
 
-      const afterSecondScroll = await this.page.evaluate((selector) => {
-        return document.querySelectorAll(selector).length;
-      }, this.selections.cardSelector);
+      const afterCount = await this.page.$$eval(containerSelector, els => els.length)
+        .catch(() => 0);
+      const afterHeight = await this.page.evaluate(() => document.body.scrollHeight);
 
-      this.logger.info(`Second scroll: ${afterSecondScroll} cards`);
+      const newCards = afterCount - beforeCount;
+      const heightIncrease = afterHeight - beforeHeight;
 
-      // Scroll back to top for review
-      await this.page.evaluate(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollResults.push({
+        scrollNum: i + 1,
+        beforeCount,
+        afterCount,
+        newCards,
+        beforeHeight,
+        afterHeight,
+        heightIncrease
       });
 
-      if (afterSecondScroll > beforeSecondScroll) {
-        // Confirmed infinite scroll
-        return {
-          detected: true,
-          confidence: 'high',
-          initialCards: initialData.cardCount,
-          cardsAfterFirstScroll: afterScrollData.cardCount,
-          cardsAfterSecondScroll: afterSecondScroll
-        };
+      this.logger.info(
+        `Scroll ${i + 1}: ${beforeCount} -> ${afterCount} cards (+${newCards}), ` +
+        `height: ${beforeHeight} -> ${afterHeight}px (+${heightIncrease})`
+      );
+
+      // Check for new content
+      if (newCards > 0 || heightIncrease > 100) {
+        noNewContentCount = 0;
       } else {
-        // Only loaded once - maybe finite scroll or lazy loading
-        return {
-          detected: true,
-          confidence: 'medium',
-          initialCards: initialData.cardCount,
-          cardsAfterFirstScroll: afterScrollData.cardCount,
-          note: 'Content loaded once but did not continue loading'
-        };
+        noNewContentCount++;
+      }
+
+      // If we've had 2 scrolls with no new content, we've reached the end
+      if (noNewContentCount >= 2) {
+        this.logger.info('Reached end of content, stopping detection');
+        break;
       }
     }
 
     // Scroll back to top
-    await this.page.evaluate(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
+    await this.page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    await this.sleep(500);
 
-    // No infinite scroll
+    // Analyze results
+    const scrollsWithNewContent = scrollResults.filter(r => r.newCards > 0).length;
+    const totalNewCards = scrollResults.reduce((sum, r) => sum + r.newCards, 0);
+    const finalCardCount = scrollResults.length > 0 ?
+      scrollResults[scrollResults.length - 1].afterCount :
+      initialCardCount;
+
+    // Determine detection result
+    const detected = scrollsWithNewContent > 0;
+    const confidence = scrollsWithNewContent >= 2 ? 'high' :
+                       scrollsWithNewContent === 1 ? 'medium' : 'low';
+
+    this.logger.info(
+      `Infinite scroll detection: ${detected ? 'YES' : 'NO'} ` +
+      `(confidence: ${confidence}, ${scrollsWithNewContent}/${scrollResults.length} scrolls with new content)`
+    );
+
     return {
-      detected: false,
-      confidence: 'none'
+      detected,
+      confidence,
+      scrollResults,
+      totalNewCards,
+      initialCards: initialCardCount,
+      finalCards: finalCardCount,
+      scrollsWithNewContent
     };
+  }
+
+  /**
+   * Sleep helper
+   * @param {number} ms - Milliseconds to sleep
+   */
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
