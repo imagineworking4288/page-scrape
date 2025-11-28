@@ -2,9 +2,10 @@
  * InfiniteScrollScraper
  *
  * Specialized scraper for dynamically loading pages that use infinite scroll.
- * Implements fallback chain: HTML (during scroll) -> Select -> PDF
+ * EXTENDS SimpleScraper to reuse universal extraction methods.
  *
  * Features:
+ * - Inherits all SimpleScraper extraction methods (universal extraction)
  * - Scroll management with configurable delays
  * - Content extraction during scrolling for efficiency
  * - Load More button detection and clicking
@@ -12,10 +13,10 @@
  * - Comprehensive deduplication via ContentTracker
  */
 
-const BaseScraper = require('./base-scraper');
-const { InfiniteScrollHandler, ContentTracker, ScrollDetector } = require('../features/infinite-scroll');
+const SimpleScraper = require('./simple-scraper');
+const { ContentTracker, ScrollDetector } = require('../features/infinite-scroll');
 
-class InfiniteScrollScraper extends BaseScraper {
+class InfiniteScrollScraper extends SimpleScraper {
   /**
    * Create an InfiniteScrollScraper
    * @param {Object} browserManager - Browser manager instance
@@ -59,8 +60,8 @@ class InfiniteScrollScraper extends BaseScraper {
       'a:contains("Load More")'
     ];
 
-    // Common card selectors for auto-detection
-    this.defaultCardSelectors = [
+    // Additional card selectors specific to infinite scroll sites
+    this.infiniteScrollCardSelectors = [
       '[data-testid*="card"]',
       '[data-testid*="profile"]',
       '[data-testid*="contact"]',
@@ -68,7 +69,7 @@ class InfiniteScrollScraper extends BaseScraper {
       '.lawyer-card',
       '[class*="attorney"]',
       '[class*="lawyer"]',
-      '.card',
+      '.person-card',
       '.profile-card',
       '.contact-card',
       'article.card',
@@ -78,7 +79,7 @@ class InfiniteScrollScraper extends BaseScraper {
 
     // Tracking
     this.contentTracker = new ContentTracker();
-    this.scrollHandler = null;
+    this.scrollDetector = null;
   }
 
   /**
@@ -90,7 +91,7 @@ class InfiniteScrollScraper extends BaseScraper {
   async scrape(url, siteConfig = {}) {
     try {
       this.logger.info('═══════════════════════════════════════');
-      this.logger.info('  INFINITE SCROLL SCRAPER');
+      this.logger.info('  INFINITE SCROLL SCRAPER (Universal)');
       this.logger.info('═══════════════════════════════════════');
       this.logger.info(`URL: ${url}`);
 
@@ -102,19 +103,22 @@ class InfiniteScrollScraper extends BaseScraper {
       await this.browserManager.navigate(url);
       await this.sleep(3000); // Initial render time
 
-      // Detect card selector if not provided
-      const cardSelector = await this.detectCardSelector(page);
+      // Detect card selector if not provided (use combined selectors)
+      const cardSelector = await this.detectCardSelectorForInfiniteScroll(page);
       this.logger.info(`Card selector: ${cardSelector || 'full page'}`);
 
-      // Get selectors from config
-      const selectors = this.getSelectors(siteConfig);
+      // Initialize scroll detector
+      this.scrollDetector = new ScrollDetector(page, this.logger, {
+        scrollDelay: this.scrollDelay,
+        networkIdleTimeout: this.networkIdleTimeout
+      });
 
       // Phase 1: Extract during infinite scroll
       this.logger.info('');
       this.logger.info('Phase 1: Infinite scroll extraction');
       this.logger.info('───────────────────────────────────');
 
-      const scrollResult = await this.scrollAndExtract(page, cardSelector, selectors);
+      const scrollResult = await this.scrollAndExtract(page, cardSelector, siteConfig);
       let contacts = scrollResult.contacts;
       let completeness = this.calculateCompleteness(contacts);
 
@@ -132,6 +136,27 @@ class InfiniteScrollScraper extends BaseScraper {
           contacts = fallbackResult.contacts;
           completeness = fallbackResult.completeness;
           this.logger.info(`Fallback improved results: ${contacts.length} contacts (${(completeness * 100).toFixed(0)}%)`);
+        }
+      }
+
+      // Phase 3: Fill missing names from PDF or email derivation
+      const contactsNeedingNames = contacts.filter(c => !c.name && c.email);
+      if (contactsNeedingNames.length > 0) {
+        this.logger.info('');
+        this.logger.info(`Phase 3: Fill missing names (${contactsNeedingNames.length} contacts)`);
+        this.logger.info('───────────────────────────────────');
+
+        // Try PDF first
+        await this.fillNamesFromPdf(contacts, page, false);
+
+        // Then email derivation for remaining
+        const stillMissingNames = contacts.filter(c => !c.name && c.email);
+        for (const contact of stillMissingNames) {
+          const derivedName = this.extractNameFromEmail(contact.email);
+          if (derivedName) {
+            contact.name = derivedName;
+            contact.source = (contact.source || 'infinite-scroll') + '+email';
+          }
         }
       }
 
@@ -183,30 +208,26 @@ class InfiniteScrollScraper extends BaseScraper {
   }
 
   /**
-   * Get selectors from site config
-   * @param {Object} siteConfig - Site configuration
-   * @returns {Object} - Selector configuration
-   */
-  getSelectors(siteConfig) {
-    return {
-      container: siteConfig?.selectors?.container || this.cardSelector,
-      name: siteConfig?.selectors?.name || 'h2, h3, .name, [class*="name"]',
-      email: siteConfig?.selectors?.email || 'a[href^="mailto:"]',
-      phone: siteConfig?.selectors?.phone || 'a[href^="tel:"], .phone, [class*="phone"]'
-    };
-  }
-
-  /**
-   * Detect card selector if not provided
+   * Detect card selector for infinite scroll pages
+   * Uses combined selectors from SimpleScraper and infinite scroll specific ones
    * @param {Object} page - Puppeteer page
    * @returns {Promise<string|null>} - Detected card selector
    */
-  async detectCardSelector(page) {
+  async detectCardSelectorForInfiniteScroll(page) {
     if (this.cardSelector) return this.cardSelector;
 
     this.logger.info('Auto-detecting card selector...');
 
-    for (const selector of this.defaultCardSelectors) {
+    // Combine selectors, prioritizing infinite scroll specific ones
+    const allSelectors = [
+      ...this.infiniteScrollCardSelectors,
+      ...this.CARD_SELECTORS
+    ];
+
+    // Remove duplicates
+    const uniqueSelectors = [...new Set(allSelectors)];
+
+    for (const selector of uniqueSelectors) {
       try {
         const count = await page.$$eval(selector, els => els.length);
         if (count >= 3) {
@@ -228,44 +249,13 @@ class InfiniteScrollScraper extends BaseScraper {
   }
 
   /**
-   * Check if elements with selector have similar structure
-   * @param {Object} page - Puppeteer page
-   * @param {string} selector - CSS selector
-   * @returns {Promise<boolean>}
-   */
-  async checkStructuralSimilarity(page, selector) {
-    try {
-      return await page.evaluate((sel) => {
-        const elements = Array.from(document.querySelectorAll(sel));
-        if (elements.length < 3) return false;
-
-        const samples = elements.slice(0, 3);
-        const structures = samples.map(el => ({
-          childCount: el.children.length,
-          textLength: el.textContent.trim().length,
-          hasLinks: el.querySelectorAll('a').length > 0
-        }));
-
-        // Check variance in child counts
-        const childCounts = structures.map(s => s.childCount);
-        const avgChildCount = childCounts.reduce((a, b) => a + b, 0) / childCounts.length;
-        const childCountValid = childCounts.every(c => Math.abs(c - avgChildCount) <= 3);
-
-        return childCountValid;
-      }, selector);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /**
-   * Perform infinite scroll and extract contacts
+   * Perform infinite scroll and extract contacts using universal extraction
    * @param {Object} page - Puppeteer page
    * @param {string} cardSelector - CSS selector for cards
-   * @param {Object} selectors - Extraction selectors
+   * @param {Object} siteConfig - Site configuration
    * @returns {Promise<Object>} - { contacts, stats }
    */
-  async scrollAndExtract(page, cardSelector, selectors) {
+  async scrollAndExtract(page, cardSelector, siteConfig) {
     this.contentTracker.clear();
     const allContacts = [];
     let scrollAttempts = 0;
@@ -277,12 +267,15 @@ class InfiniteScrollScraper extends BaseScraper {
     this.logger.info(`Initial state: ${previousCardCount} cards, height ${previousHeight}px`);
 
     while (scrollAttempts < this.maxScrollAttempts) {
-      // Extract current visible contacts
-      const currentContacts = await this.extractContactsFromPage(page, cardSelector, selectors);
+      // Use SimpleScraper's universal extraction method
+      const currentContacts = await this.extractContactsUniversal(page, cardSelector, {});
       let newItemsFound = 0;
 
       for (const contact of currentContacts) {
+        // Use ContentTracker to dedupe
         if (this.contentTracker.checkAndMark(contact)) {
+          // Mark source as infinite-scroll
+          contact.source = 'infinite-scroll-html';
           allContacts.push(contact);
           newItemsFound++;
         }
@@ -313,7 +306,7 @@ class InfiniteScrollScraper extends BaseScraper {
       await this.performScroll(page);
 
       // Wait for content to load
-      await this.waitForContentLoad(page);
+      await this.waitForContentLoad(page, previousHeight);
 
       // Check if page changed
       const currentHeight = await page.evaluate(() => document.body.scrollHeight);
@@ -341,86 +334,6 @@ class InfiniteScrollScraper extends BaseScraper {
         duplicatesSkipped: stats.duplicatesSkipped
       }
     };
-  }
-
-  /**
-   * Extract contacts from current page state
-   * @param {Object} page - Puppeteer page
-   * @param {string} cardSelector - CSS selector for cards
-   * @param {Object} selectors - Extraction selectors
-   * @returns {Promise<Array>} - Array of contacts
-   */
-  async extractContactsFromPage(page, cardSelector, selectors) {
-    try {
-      const contacts = await page.evaluate((cardSel, sels) => {
-        const results = [];
-        const cards = cardSel ? document.querySelectorAll(cardSel) : [document.body];
-
-        for (const card of cards) {
-          // Extract email
-          let email = null;
-          const emailLink = card.querySelector(sels.email || 'a[href^="mailto:"]');
-          if (emailLink) {
-            email = emailLink.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
-          }
-
-          // Skip if no email (email-first strategy)
-          if (!email) continue;
-
-          // Extract name
-          let name = null;
-          const nameSelectors = (sels.name || 'h2, h3, .name').split(',').map(s => s.trim());
-          for (const nameSel of nameSelectors) {
-            try {
-              const nameEl = card.querySelector(nameSel);
-              if (nameEl) {
-                const text = nameEl.textContent.trim();
-                // Basic name validation
-                if (text.length >= 2 && text.length <= 100 && /^[A-Z]/.test(text)) {
-                  name = text;
-                  break;
-                }
-              }
-            } catch (e) {}
-          }
-
-          // Extract phone
-          let phone = null;
-          const phoneSelectors = (sels.phone || 'a[href^="tel:"]').split(',').map(s => s.trim());
-          for (const phoneSel of phoneSelectors) {
-            try {
-              const phoneEl = card.querySelector(phoneSel);
-              if (phoneEl) {
-                phone = phoneEl.href ?
-                  phoneEl.href.replace('tel:', '').trim() :
-                  phoneEl.textContent.trim();
-                if (phone) break;
-              }
-            } catch (e) {}
-          }
-
-          results.push({
-            name,
-            email,
-            phone,
-            source: 'infinite-scroll-html'
-          });
-        }
-
-        return results;
-      }, cardSelector, selectors);
-
-      // Add domain info and confidence
-      for (const contact of contacts) {
-        this.addDomainInfo(contact);
-        contact.confidence = this.calculateConfidence(contact.name, contact.email, contact.phone);
-      }
-
-      return contacts;
-    } catch (error) {
-      this.logger.warn(`Extraction error: ${error.message}`);
-      return [];
-    }
   }
 
   /**
@@ -453,7 +366,7 @@ class InfiniteScrollScraper extends BaseScraper {
   }
 
   /**
-   * Perform scroll action
+   * Perform scroll action with human-like behavior
    * @param {Object} page - Puppeteer page
    */
   async performScroll(page) {
@@ -491,20 +404,23 @@ class InfiniteScrollScraper extends BaseScraper {
   /**
    * Wait for content to load after scroll
    * @param {Object} page - Puppeteer page
+   * @param {number} previousHeight - Previous page height
    */
-  async waitForContentLoad(page) {
-    try {
-      // Try network idle first
-      await Promise.race([
-        page.waitForNetworkIdle({ idleTime: 500, timeout: this.networkIdleTimeout }),
-        this.sleep(this.networkIdleTimeout)
-      ]);
-    } catch (e) {
-      // Timeout is fine
+  async waitForContentLoad(page, previousHeight) {
+    if (this.scrollDetector) {
+      await this.scrollDetector.waitForContentLoad({ previousHeight });
+    } else {
+      // Fallback: simple timeout-based wait
+      try {
+        await Promise.race([
+          page.waitForNetworkIdle({ idleTime: 500, timeout: this.networkIdleTimeout }),
+          this.sleep(this.networkIdleTimeout)
+        ]);
+      } catch (e) {
+        // Timeout is fine
+      }
+      await this.sleep(this.scrollDelay);
     }
-
-    // Always add minimum delay
-    await this.sleep(this.scrollDelay);
   }
 
   /**
@@ -610,15 +526,13 @@ class InfiniteScrollScraper extends BaseScraper {
         return domain && this.domainExtractor.isBusinessDomain(domain);
       }));
 
-      // Use email-anchor extraction
-      const contacts = this.extractByEmailAnchor ?
-        this.extractByEmailAnchor(pdfData.fullText, uniqueEmails) :
-        Array.from(uniqueEmails).map(email => ({
-          name: this.extractNameFromEmail(email),
-          email,
-          phone: null,
-          source: 'infinite-scroll-pdf'
-        }));
+      // Use email-anchor extraction from SimpleScraper
+      const contacts = this.extractByEmailAnchor(pdfData.fullText, uniqueEmails);
+
+      // Mark source
+      for (const contact of contacts) {
+        contact.source = 'infinite-scroll-pdf';
+      }
 
       return {
         contacts,
@@ -697,50 +611,6 @@ class InfiniteScrollScraper extends BaseScraper {
     }
 
     return score / contacts.length;
-  }
-
-  /**
-   * Extract contacts by email anchor (fallback method)
-   * Imported from SimpleScraper for consistency
-   * @param {string} fullText - Full text to search
-   * @param {Set} uniqueEmails - Set of unique emails
-   * @returns {Array} - Array of contacts
-   */
-  extractByEmailAnchor(fullText, uniqueEmails) {
-    const contacts = [];
-    const processedEmails = new Set();
-
-    for (const email of uniqueEmails) {
-      if (processedEmails.has(email.toLowerCase())) continue;
-      processedEmails.add(email.toLowerCase());
-
-      const emailPos = fullText.toLowerCase().indexOf(email.toLowerCase());
-      if (emailPos === -1) continue;
-
-      // Extract context
-      const beforeStart = Math.max(0, emailPos - 200);
-      const beforeContext = fullText.substring(beforeStart, emailPos);
-      const afterEnd = Math.min(fullText.length, emailPos + email.length + 100);
-      const afterContext = fullText.substring(emailPos + email.length, afterEnd);
-
-      // Find name in before context
-      const nameResult = this.findNameInContext(beforeContext, email, emailPos);
-      const phone = this.findPhoneInContext(afterContext);
-
-      contacts.push({
-        name: nameResult ? nameResult.name : this.extractNameFromEmail(email),
-        email,
-        phone,
-        source: nameResult ? 'pdf-anchor' : 'pdf-derived',
-        confidence: this.calculateConfidence(
-          nameResult ? nameResult.name : null,
-          email,
-          phone
-        )
-      });
-    }
-
-    return contacts;
   }
 
   /**

@@ -29,13 +29,23 @@
   "parsing": {
     "emailDomain": null,
     "nameBeforeEmail": true,
-    "profileUrlPatterns": ["/agents/", "/profile/", "/realtor/", "/team/", "/broker/", "/member/"],
+    "profileUrlPatterns": ["/agents/", "/profile/", "/realtor/", "/team/", "/broker/", "/member/", "/lawyer/", "/Lawyers/", "/attorney/", "/people/"],
+    "filterPersonalEmails": true,
     "comment": "profileUrlPatterns are URL fragments that indicate profile pages."
+  },
+  "extraction": {
+    "method": "universal",
+    "strategies": {
+      "email": ["mailto", "text", "data-attr", "obfuscated", "encoded-href"],
+      "phone": ["tel", "text", "data-attr", "class-hint"],
+      "name": ["heading", "class", "profile-link", "emphasis"]
+    },
+    "comment": "Universal extraction uses multiple strategies in priority order"
   },
   "pagination": {
     "enabled": true,
     "type": "auto",
-    "comment": "Auto-detect pagination pattern. Can be overridden with: 'parameter', 'path', 'offset', 'cursor', or 'none'",
+    "comment": "Auto-detect pagination pattern. Can be overridden with: 'parameter', 'path', 'offset', 'cursor', 'infinite-scroll', or 'none'",
     "discovery": {
       "timeout": 30000,
       "minContactsPerPage": 1,
@@ -54,6 +64,8 @@
       "No results found",
       "No agents found",
       "No listings available",
+      "No attorneys found",
+      "No lawyers found",
       "0 results"
     ],
     "validation": {
@@ -70,6 +82,20 @@
     "scrollStrategy": "viewport",
     "networkIdleTimeout": 5000,
     "minCardIncrement": 1,
+    "extractionMethod": "universal",
     "comment": "Settings for infinite scroll detection and extraction. Set enabled: true to use infinite scroll mode."
+  },
+  "fallback": {
+    "enabled": true,
+    "methods": ["select", "pdf"],
+    "completenessThreshold": 0.3,
+    "comment": "Enable fallback chain when initial extraction has low completeness"
+  },
+  "validation": {
+    "requireEmail": true,
+    "requireName": false,
+    "minConfidence": "low",
+    "filterBusinessEmailsOnly": true,
+    "comment": "Validation rules for extracted contacts"
   }
 }

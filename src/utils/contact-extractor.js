@@ -447,6 +447,316 @@ function calculateConfidence(name, email, phone) {
 }
 
 // ===========================
+// DOM ELEMENT EXTRACTION (UNIVERSAL)
+// ===========================
+
+/**
+ * Extract emails from a DOM element using multiple strategies
+ * Works with both mailto links AND plain text emails
+ * @param {Object} element - DOM element (in browser context)
+ * @param {Object} options - Extraction options
+ * @returns {Array<string>} - Array of email addresses
+ */
+function extractEmailsFromElementCode() {
+  // This function returns code to be executed in browser context
+  return `
+    function extractEmailsFromElement(element, options = {}) {
+      const emails = [];
+      const seen = new Set();
+
+      // Strategy 1: mailto: links (most reliable)
+      const mailtoLinks = element.querySelectorAll('a[href^="mailto:"]');
+      mailtoLinks.forEach(link => {
+        const email = link.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+        if (email && !seen.has(email)) {
+          seen.add(email);
+          emails.push({ email, source: 'mailto', confidence: 'high' });
+        }
+      });
+
+      // Strategy 2: Plain text email regex in text content
+      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+      const textContent = element.textContent || '';
+      const textMatches = textContent.match(emailRegex) || [];
+      textMatches.forEach(email => {
+        const lowerEmail = email.toLowerCase();
+        if (!seen.has(lowerEmail)) {
+          seen.add(lowerEmail);
+          emails.push({ email: lowerEmail, source: 'text', confidence: 'medium' });
+        }
+      });
+
+      // Strategy 3: data-email attributes
+      const dataEmailEls = element.querySelectorAll('[data-email], [data-mail]');
+      dataEmailEls.forEach(el => {
+        const email = (el.dataset.email || el.dataset.mail || '').toLowerCase().trim();
+        if (email && emailRegex.test(email) && !seen.has(email)) {
+          seen.add(email);
+          emails.push({ email, source: 'data-attr', confidence: 'high' });
+        }
+      });
+
+      // Strategy 4: Obfuscated emails (common patterns)
+      // Pattern: "name [at] domain [dot] com" or "name(at)domain(dot)com"
+      const obfuscatedRegex = /([a-zA-Z0-9._%+-]+)\\s*[\\[\\(]?(?:at|AT|@)[\\]\\)]?\\s*([a-zA-Z0-9.-]+)\\s*[\\[\\(]?(?:dot|DOT|\\.)[\\]\\)]?\\s*([a-zA-Z]{2,})/g;
+      let obfMatch;
+      while ((obfMatch = obfuscatedRegex.exec(textContent)) !== null) {
+        const email = (obfMatch[1] + '@' + obfMatch[2] + '.' + obfMatch[3]).toLowerCase();
+        if (!seen.has(email)) {
+          seen.add(email);
+          emails.push({ email, source: 'obfuscated', confidence: 'medium' });
+        }
+      }
+
+      // Strategy 5: href with encoded email
+      const allLinks = element.querySelectorAll('a[href]');
+      allLinks.forEach(link => {
+        try {
+          const decoded = decodeURIComponent(link.href);
+          const match = decoded.match(emailRegex);
+          if (match) {
+            match.forEach(email => {
+              const lowerEmail = email.toLowerCase();
+              if (!seen.has(lowerEmail)) {
+                seen.add(lowerEmail);
+                emails.push({ email: lowerEmail, source: 'encoded-href', confidence: 'medium' });
+              }
+            });
+          }
+        } catch (e) {}
+      });
+
+      return emails;
+    }
+  `;
+}
+
+/**
+ * Extract phones from a DOM element using multiple strategies
+ * Works with both tel links AND plain text phones
+ * @param {Object} element - DOM element (in browser context)
+ * @param {Object} options - Extraction options
+ * @returns {Array<string>} - Array of phone numbers
+ */
+function extractPhonesFromElementCode() {
+  // This function returns code to be executed in browser context
+  return `
+    function extractPhonesFromElement(element, options = {}) {
+      const phones = [];
+      const seen = new Set();
+
+      // Helper to normalize phone for dedup
+      const normalizeForDedup = (phone) => phone.replace(/\\D/g, '');
+
+      // Strategy 1: tel: links (most reliable)
+      const telLinks = element.querySelectorAll('a[href^="tel:"]');
+      telLinks.forEach(link => {
+        const phone = link.href.replace('tel:', '').trim();
+        const normalized = normalizeForDedup(phone);
+        if (normalized.length >= 10 && !seen.has(normalized)) {
+          seen.add(normalized);
+          phones.push({ phone, source: 'tel', confidence: 'high' });
+        }
+      });
+
+      // Strategy 2: Plain text phone regex
+      const phonePatterns = [
+        /(?:\\+1[-. ]?)?\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})/g,
+        /([0-9]{3})[-. ]([0-9]{3})[-. ]([0-9]{4})/g,
+        /\\+1[-.\\s]?\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g
+      ];
+
+      const textContent = element.textContent || '';
+
+      for (const pattern of phonePatterns) {
+        pattern.lastIndex = 0;
+        let match;
+        while ((match = pattern.exec(textContent)) !== null) {
+          const phone = match[0];
+          const normalized = normalizeForDedup(phone);
+          if (normalized.length >= 10 && !seen.has(normalized)) {
+            seen.add(normalized);
+            phones.push({ phone, source: 'text', confidence: 'medium' });
+          }
+        }
+      }
+
+      // Strategy 3: data-phone attributes
+      const dataPhoneEls = element.querySelectorAll('[data-phone], [data-tel], [data-telephone]');
+      dataPhoneEls.forEach(el => {
+        const phone = (el.dataset.phone || el.dataset.tel || el.dataset.telephone || '').trim();
+        const normalized = normalizeForDedup(phone);
+        if (normalized.length >= 10 && !seen.has(normalized)) {
+          seen.add(normalized);
+          phones.push({ phone, source: 'data-attr', confidence: 'high' });
+        }
+      });
+
+      // Strategy 4: Elements with phone-related classes
+      const phoneClassEls = element.querySelectorAll('.phone, .telephone, [class*="phone"], [class*="tel-"]');
+      phoneClassEls.forEach(el => {
+        const text = el.textContent.trim();
+        const digits = text.replace(/\\D/g, '');
+        if (digits.length >= 10 && digits.length <= 11 && !seen.has(digits)) {
+          seen.add(digits);
+          phones.push({ phone: text, source: 'class-hint', confidence: 'medium' });
+        }
+      });
+
+      return phones;
+    }
+  `;
+}
+
+/**
+ * Extract name from a DOM element using multiple strategies
+ * Works with heading tags, classes, and context clues
+ * @returns {string} - Code to execute in browser context
+ */
+function extractNameFromElementCode() {
+  return `
+    function extractNameFromElement(element, options = {}) {
+      const blacklist = options.blacklist || new Set([
+        'sign in', 'log in', 'sign up', 'register', 'contact us', 'about us',
+        'view profile', 'learn more', 'read more', 'see more', 'load more',
+        'email', 'phone', 'call', 'text', 'message', 'website', 'address',
+        'menu', 'home', 'search', 'filter', 'back', 'next', 'previous'
+      ]);
+
+      const candidates = [];
+
+      // Priority selectors in order of reliability
+      const selectorGroups = [
+        // Group 1: Heading tags (most likely to contain names)
+        ['h1', 'h2', 'h3', 'h4'],
+
+        // Group 2: Specific name-related classes
+        ['.name', '.attorney-name', '.lawyer-name', '.agent-name', '.person-name',
+         '[class*="name"]:not([class*="username"]):not([class*="filename"])'],
+
+        // Group 3: Links to profiles (often contain names)
+        ['a[href*="/lawyer/"]', 'a[href*="/attorney/"]', 'a[href*="/Lawyers/"]',
+         'a[href*="/agent/"]', 'a[href*="/profile/"]', 'a[href*="/people/"]'],
+
+        // Group 4: Common emphasis tags
+        ['strong', 'b'],
+
+        // Group 5: Title-related elements
+        ['.title', '[class*="title"]']
+      ];
+
+      for (let groupIndex = 0; groupIndex < selectorGroups.length; groupIndex++) {
+        const selectors = selectorGroups[groupIndex];
+
+        for (const sel of selectors) {
+          try {
+            const elements = element.querySelectorAll(sel);
+
+            for (const el of elements) {
+              let text = el.textContent.trim();
+
+              // Skip empty or too long
+              if (!text || text.length < 2 || text.length > 100) continue;
+
+              // Skip if in blacklist (case-insensitive)
+              if (blacklist.has(text.toLowerCase())) continue;
+
+              // Skip if contains newlines (likely multi-line content)
+              if (text.includes('\\n') && text.split('\\n').length > 2) continue;
+
+              // Clean up common prefixes/suffixes
+              text = text
+                .replace(/^(attorney|lawyer|agent|broker|realtor|mr\\.|mrs\\.|ms\\.|dr\\.)\\s+/i, '')
+                .replace(/,?\\s*(jr\\.?|sr\\.?|ii|iii|iv|esq\\.?|phd|md)\\.?$/i, '')
+                .trim();
+
+              // Re-check length after cleanup
+              if (text.length < 2 || text.length > 100) continue;
+
+              // Check word count (names should be 1-5 words)
+              const wordCount = text.split(/\\s+/).length;
+              if (wordCount < 1 || wordCount > 5) continue;
+
+              // Must start with capital letter
+              if (!/^[A-Z]/.test(text)) continue;
+
+              // Must be mostly letters
+              if (!/^[A-Za-z\\s'\\-\\.]+$/.test(text)) continue;
+
+              // Calculate priority score based on group and position
+              const priority = (selectorGroups.length - groupIndex) * 10;
+
+              candidates.push({
+                name: text,
+                priority,
+                selector: sel
+              });
+            }
+          } catch (e) {}
+        }
+      }
+
+      // Return highest priority candidate
+      if (candidates.length === 0) return null;
+
+      candidates.sort((a, b) => b.priority - a.priority);
+      return candidates[0].name;
+    }
+  `;
+}
+
+/**
+ * Get the universal extraction code for browser context
+ * This bundles all extraction functions to be evaluated in Puppeteer
+ * @returns {string} - JavaScript code string
+ */
+function getUniversalExtractionCode() {
+  return `
+    ${extractEmailsFromElementCode()}
+    ${extractPhonesFromElementCode()}
+    ${extractNameFromElementCode()}
+
+    // Main extraction function for a card element
+    function extractContactFromCard(card, options = {}) {
+      const emails = extractEmailsFromElement(card, options);
+      const phones = extractPhonesFromElement(card, options);
+      const name = extractNameFromElement(card, options);
+
+      // Get best email (prefer mailto, then data-attr, then text)
+      const emailPriority = { 'mailto': 3, 'data-attr': 2, 'text': 1, 'obfuscated': 1, 'encoded-href': 1 };
+      emails.sort((a, b) => (emailPriority[b.source] || 0) - (emailPriority[a.source] || 0));
+      const bestEmail = emails[0]?.email || null;
+
+      // Get best phone (prefer tel, then data-attr, then text)
+      const phonePriority = { 'tel': 3, 'data-attr': 2, 'text': 1, 'class-hint': 1 };
+      phones.sort((a, b) => (phonePriority[b.source] || 0) - (phonePriority[a.source] || 0));
+      const bestPhone = phones[0]?.phone || null;
+
+      // Calculate confidence
+      let confidence = 'low';
+      if (name && bestEmail && bestPhone) {
+        confidence = 'high';
+      } else if ((name && bestEmail) || (bestEmail && bestPhone) || (name && bestPhone)) {
+        confidence = 'medium';
+      }
+
+      return {
+        name,
+        email: bestEmail,
+        phone: bestPhone,
+        confidence,
+        _extraction: {
+          emailSource: emails[0]?.source || null,
+          phoneSource: phones[0]?.source || null,
+          allEmails: emails.length,
+          allPhones: phones.length
+        }
+      };
+    }
+  `;
+}
+
+// ===========================
 // PDF RENDERING
 // ===========================
 
@@ -556,5 +866,11 @@ module.exports = {
   calculateConfidence,
 
   // PDF
-  renderAndParsePdf
+  renderAndParsePdf,
+
+  // Universal DOM extraction (browser context code generators)
+  extractEmailsFromElementCode,
+  extractPhonesFromElementCode,
+  extractNameFromElementCode,
+  getUniversalExtractionCode
 };

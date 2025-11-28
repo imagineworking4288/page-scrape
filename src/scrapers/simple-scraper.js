@@ -11,6 +11,9 @@ class SimpleScraper extends BaseScraper {
     this.NAME_REGEX = contactExtractor.NAME_REGEX;
     this.NAME_BLACKLIST = contactExtractor.NAME_BLACKLIST;
 
+    // Universal extraction code for browser context
+    this.universalExtractionCode = contactExtractor.getUniversalExtractionCode();
+
     // Common card selectors to try (prioritized order)
     this.CARD_SELECTORS = [
       // Compass.com specific selectors (prioritized)
@@ -637,21 +640,42 @@ class SimpleScraper extends BaseScraper {
 
   // renderAndParsePdf inherited from BaseScraper
 
+  /**
+   * Extract unique emails from page using universal extraction
+   * Works with mailto links, plain text emails, obfuscated emails, and data attributes
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {number} limit - Max emails to extract
+   * @returns {Promise<Set>} - Set of unique email addresses
+   */
   async extractUniqueEmails(page, cardSelector, limit) {
-    const emails = await page.evaluate((selector) => {
+    // Use universal extraction code
+    const extractionCode = this.universalExtractionCode;
+
+    const emails = await page.evaluate((selector, code) => {
+      // Inject and execute universal extraction code
+      eval(code);
+
       const cards = selector ? document.querySelectorAll(selector) : [document.body];
       const emailSet = new Set();
 
       cards.forEach(card => {
-        // Extract from mailto: links
-        card.querySelectorAll('a[href^="mailto:"]').forEach(link => {
-          const email = link.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
-          if (email) emailSet.add(email);
+        // Use universal extraction which handles:
+        // - mailto: links
+        // - Plain text emails
+        // - data-email attributes
+        // - Obfuscated emails (at/dot patterns)
+        // - Encoded href emails
+        const extractedEmails = extractEmailsFromElement(card, {});
+        extractedEmails.forEach(item => {
+          if (item.email) {
+            emailSet.add(item.email.toLowerCase());
+          }
         });
       });
 
       return Array.from(emailSet);
-    }, cardSelector);
+    }, cardSelector, extractionCode);
 
     // Filter to business domains only
     const businessEmails = new Set();
@@ -663,89 +687,77 @@ class SimpleScraper extends BaseScraper {
       }
     }
 
+    this.logger.info(`Extracted ${emails.length} total emails, ${businessEmails.size} business emails`);
     return businessEmails;
   }
 
+  /**
+   * Build contacts from unique emails using universal extraction
+   * Uses multi-strategy extraction for phones and names
+   * @param {Set} uniqueEmails - Set of unique emails
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @returns {Promise<Array>} - Array of contact objects
+   */
   async buildContactsFromEmails(uniqueEmails, page, cardSelector) {
-    const contacts = await page.evaluate((emails, selector, blacklist) => {
+    const extractionCode = this.universalExtractionCode;
+
+    const contacts = await page.evaluate((emails, selector, code, blacklistArray) => {
+      // Inject universal extraction code
+      eval(code);
+
       const emailArray = Array.from(emails);
       const contacts = [];
-      const blacklistSet = new Set(blacklist); // Convert array back to Set
+      const blacklistSet = new Set(blacklistArray);
+
+      // Helper to find card containing email (supports both mailto and plain text)
+      const findCardWithEmail = (email, cards) => {
+        for (const card of cards) {
+          // Check mailto link first
+          const mailtoLink = card.querySelector(`a[href^="mailto:${email}"]`);
+          if (mailtoLink) return card;
+
+          // Check plain text content
+          const textContent = card.textContent.toLowerCase();
+          if (textContent.includes(email.toLowerCase())) return card;
+        }
+        return null;
+      };
 
       for (const email of emailArray) {
-        // Find card containing this email
         const cards = selector ? document.querySelectorAll(selector) : [document.body];
-        let cardWithEmail = null;
+        const cardWithEmail = findCardWithEmail(email, cards);
 
-        for (const card of cards) {
-          const mailtoLink = card.querySelector(`a[href^="mailto:${email}"]`);
-          if (mailtoLink) {
-            cardWithEmail = card;
+        if (!cardWithEmail) continue;
+
+        // Use universal extraction for phone
+        const extractedPhones = extractPhonesFromElement(cardWithEmail, {});
+        const phone = extractedPhones.length > 0 ? extractedPhones[0].phone : null;
+
+        // Use universal extraction for name
+        const name = extractNameFromElement(cardWithEmail, { blacklist: blacklistSet });
+
+        // Extract profile URL
+        let profileUrl = null;
+        const profilePatterns = [
+          'a[href*="/agent/"]', 'a[href*="/profile/"]',
+          'a[href*="/lawyer/"]', 'a[href*="/Lawyers/"]',
+          'a[href*="/attorney/"]', 'a[href*="/people/"]'
+        ];
+        for (const pattern of profilePatterns) {
+          const profileLink = cardWithEmail.querySelector(pattern);
+          if (profileLink) {
+            profileUrl = profileLink.href;
             break;
           }
         }
 
-        if (!cardWithEmail) continue;
-
-        // Extract phone from tel: link
-        let phone = null;
-        const telLink = cardWithEmail.querySelector('a[href^="tel:"]');
-        if (telLink) {
-          phone = telLink.href.replace('tel:', '').trim();
-        }
-
-        // Extract name from heading tags with scoring
-        let name = null;
-        const nameSelectors = [
-          { selector: 'h1', priority: 10 },
-          { selector: 'h2', priority: 9 },
-          { selector: 'h3', priority: 8 },
-          { selector: 'a[href*="/agent/"]', priority: 7 },
-          { selector: 'a[href*="/profile/"]', priority: 6 },
-          { selector: '.name', priority: 5 },
-          { selector: '[class*="name"]', priority: 4 },
-          { selector: 'strong', priority: 3 },
-          { selector: 'b', priority: 2 }
-        ];
-
-        let bestNameCandidate = null;
-        let bestScore = -1;
-
-        for (const { selector, priority } of nameSelectors) {
-          const elements = cardWithEmail.querySelectorAll(selector);
-
-          for (const el of elements) {
-            const text = el.textContent.trim();
-
-            // CRITICAL: Check blacklist FIRST (case-insensitive)
-            if (blacklistSet.has(text.toLowerCase())) continue;
-
-            // Basic validation
-            if (text.length < 2 || text.length > 100) continue;
-
-            // Check if it looks like a name (starts with capital, mostly letters)
-            if (!/^[A-Z]/.test(text)) continue;
-            if (!/^[A-Za-z\s'\-\.]{2,100}$/.test(text)) continue;
-
-            // Calculate score based on priority and position
-            const rect = el.getBoundingClientRect();
-            const positionScore = Math.max(0, 100 - rect.top / 10); // Higher = better
-            const score = priority * 10 + positionScore;
-
-            if (score > bestScore) {
-              bestScore = score;
-              bestNameCandidate = text;
-            }
-          }
-        }
-
-        name = bestNameCandidate;
-
-        // Extract profile URL
-        let profileUrl = null;
-        const profileLink = cardWithEmail.querySelector('a[href*="/agent/"], a[href*="/profile/"]');
-        if (profileLink) {
-          profileUrl = profileLink.href;
+        // Calculate confidence
+        let confidence = 'low';
+        if (name && email && phone) {
+          confidence = 'high';
+        } else if ((name && email) || (email && phone) || (name && phone)) {
+          confidence = 'medium';
         }
 
         contacts.push({
@@ -754,12 +766,12 @@ class SimpleScraper extends BaseScraper {
           phone,
           profileUrl,
           source: 'html',
-          confidence: name && phone ? 'high' : (name || phone ? 'medium' : 'low')
+          confidence
         });
       }
 
       return contacts;
-    }, Array.from(uniqueEmails), cardSelector, Array.from(this.NAME_BLACKLIST));
+    }, Array.from(uniqueEmails), cardSelector, extractionCode, Array.from(this.NAME_BLACKLIST));
 
     // Add domain info to all contacts
     for (const contact of contacts) {
@@ -767,6 +779,59 @@ class SimpleScraper extends BaseScraper {
     }
 
     return contacts;
+  }
+
+  /**
+   * Extract all contacts directly from cards using universal extraction
+   * This method extracts emails, phones, and names in a single pass
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {Object} options - Extraction options
+   * @returns {Promise<Array>} - Array of contact objects
+   */
+  async extractContactsUniversal(page, cardSelector, options = {}) {
+    const extractionCode = this.universalExtractionCode;
+    const blacklistArray = Array.from(this.NAME_BLACKLIST);
+
+    const contacts = await page.evaluate((selector, code, blacklist) => {
+      // Inject universal extraction code
+      eval(code);
+
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+      const results = [];
+      const blacklistSet = new Set(blacklist);
+
+      for (const card of cards) {
+        // Use the bundled extraction function
+        const contact = extractContactFromCard(card, { blacklist: blacklistSet });
+
+        // Only include if we have at least an email
+        if (contact.email) {
+          results.push({
+            name: contact.name,
+            email: contact.email,
+            phone: contact.phone,
+            confidence: contact.confidence,
+            source: 'html-universal',
+            _extraction: contact._extraction
+          });
+        }
+      }
+
+      return results;
+    }, cardSelector, extractionCode, blacklistArray);
+
+    // Filter to business emails and add domain info
+    const businessContacts = [];
+    for (const contact of contacts) {
+      const domain = this.domainExtractor.extractAndNormalize(contact.email);
+      if (domain && this.domainExtractor.isBusinessDomain(domain)) {
+        this.addDomainInfo(contact);
+        businessContacts.push(contact);
+      }
+    }
+
+    return businessContacts;
   }
 
   async fillNamesFromPdf(contacts, page, keepPdf) {
