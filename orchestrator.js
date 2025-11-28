@@ -191,6 +191,7 @@ async function main() {
     let paginator = null;
     let pageUrls = [options.url];
     let siteConfig = null;
+    let paginationResult = null;
 
     if (paginationEnabled) {
       paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
@@ -211,7 +212,7 @@ async function main() {
       logger.info('');
 
       const discoveryStart = Date.now();
-      const paginationResult = await paginator.paginate(options.url, {
+      paginationResult = await paginator.paginate(options.url, {
         maxPages: maxPages,
         minContacts: minContacts,
         timeout: parseInt(process.env.PAGINATION_DISCOVERY_TIMEOUT) || 30000,
@@ -280,6 +281,11 @@ async function main() {
     if (paginationEnabled && paginator) {
       paginator.resetSeenContent();
       logger.info('✓ Paginator state reset for scraping');
+    }
+
+    // Load site config if not already loaded (for non-paginated scraping)
+    if (!siteConfig) {
+      siteConfig = configLoader.loadConfig(options.url);
     }
 
     // Scrape all pages
