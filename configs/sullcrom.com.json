@@ -1,6 +1,6 @@
 {
   "domain": "sullcrom.com",
-  "name": "Sullivan & Cromwell Lawyers",
+  "name": "Sullivan & Cromwell LLP",
   "baseUrl": "https://www.sullcrom.com/lawyers",
   "testUrl": "https://www.sullcrom.com/LawyerListing?custom_is_office=27567",
   "selectors": {
@@ -16,7 +16,14 @@
     "maxScrollAttempts": 50,
     "noNewContentThreshold": 3,
     "scrollStrategy": "viewport",
-    "networkIdleTimeout": 5000
+    "networkIdleTimeout": 5000,
+    "extractionMethod": "html",
+    "minCardIncrement": 1
+  },
+  "fallback": {
+    "enabled": true,
+    "methods": ["select", "pdf"],
+    "completenessThreshold": 0.3
   },
   "extraction": {
     "method": "hybrid",
@@ -30,6 +37,13 @@
   },
   "parsing": {
     "emailDomain": "sullcrom.com",
-    "nameBeforeEmail": true
+    "nameBeforeEmail": true,
+    "filterPersonalEmails": true,
+    "proximityWindow": 200
+  },
+  "validation": {
+    "requireEmail": true,
+    "requireName": false,
+    "minConfidence": "low"
   }
 }

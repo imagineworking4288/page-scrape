@@ -65,6 +65,20 @@ class PatternDetector {
         }
       } else {
         this.logger.info('[PatternDetector] No visual pagination controls found');
+
+        // PRIORITY 3.5: Check for infinite scroll
+        this.logger.info('[PatternDetector] Checking for infinite scroll...');
+        const infiniteScrollResult = await this.detectInfiniteScroll(page);
+        if (infiniteScrollResult.detected) {
+          this.logger.info(`[PatternDetector] Detected infinite scroll (score: ${infiniteScrollResult.score}/10)`);
+          return {
+            type: 'infinite-scroll',
+            paginationType: 'infinite-scroll',
+            detectionMethod: 'infinite-scroll-detection',
+            confidence: infiniteScrollResult.score / 10,
+            indicators: infiniteScrollResult.indicators
+          };
+        }
       }
 
       // PRIORITY 4: URL pattern detection (fallback)
@@ -729,6 +743,168 @@ class PatternDetector {
 
     this.logger.info('[PatternDetector] No pagination pattern detected');
     return null;
+  }
+
+  /**
+   * Detect if page uses infinite scroll
+   * @param {object} page - Puppeteer page object
+   * @returns {Promise<object>} - { detected, score, indicators }
+   */
+  async detectInfiniteScroll(page) {
+    try {
+      const indicators = await page.evaluate(() => {
+        const result = {
+          hasInfiniteScrollLibrary: false,
+          hasLazyLoadElements: false,
+          hasScrollListeners: false,
+          containerHeight: 0,
+          hasLoadMoreZone: false,
+          hasLoadMoreButton: false,
+          hasVirtualList: false,
+          hasObserverAPI: false
+        };
+
+        // Check for infinite scroll libraries
+        if (window.InfiniteScroll || window.infiniteScroll ||
+            window.__INFINITE_SCROLL__ || window.Waypoints) {
+          result.hasInfiniteScrollLibrary = true;
+        }
+
+        // Check for lazy-load attributes
+        const lazyElements = document.querySelectorAll(
+          '[data-lazy], [loading="lazy"], .lazy-load, .lazy, [data-src], .lazyload'
+        );
+        result.hasLazyLoadElements = lazyElements.length > 5;
+
+        // Check for scroll event listeners in scripts
+        const scripts = Array.from(document.querySelectorAll('script'));
+        result.hasScrollListeners = scripts.some(s =>
+          s.textContent &&
+          (s.textContent.includes('addEventListener') || s.textContent.includes('onscroll')) &&
+          (s.textContent.includes('scroll') || s.textContent.includes('loadMore'))
+        );
+
+        // Check if main content container is very tall
+        const mainContainer = document.querySelector(
+          'main, #main, .main-content, [role="main"], .content, #content'
+        );
+        if (mainContainer) {
+          result.containerHeight = mainContainer.scrollHeight;
+        }
+
+        // Check for "load more" zones or triggers
+        const loadZone = document.querySelector(
+          '[data-load-more], .load-more-zone, #load-more-trigger, ' +
+          '.infinite-scroll-trigger, [data-infinite], .loading-trigger'
+        );
+        result.hasLoadMoreZone = !!loadZone;
+
+        // Check for Load More button
+        const loadMoreButton = document.querySelector(
+          'button[class*="load-more"], button[class*="loadmore"], ' +
+          'a[class*="load-more"], .show-more, #show-more, ' +
+          '[data-action="load-more"], button:contains("Load More")'
+        );
+        result.hasLoadMoreButton = !!loadMoreButton;
+
+        // Check for virtual list/windowing libraries
+        if (document.querySelector('[data-index], [style*="height:"][style*="position:"]')) {
+          const potentialVirtual = document.querySelectorAll('[data-index]');
+          result.hasVirtualList = potentialVirtual.length > 10;
+        }
+
+        // Check if page uses IntersectionObserver
+        result.hasObserverAPI = typeof IntersectionObserver !== 'undefined' &&
+          document.querySelectorAll('[data-observe], .observe').length > 0;
+
+        return result;
+      });
+
+      // Calculate score
+      let score = 0;
+      if (indicators.hasInfiniteScrollLibrary) score += 3;
+      if (indicators.hasLazyLoadElements) score += 2;
+      if (indicators.hasScrollListeners) score += 2;
+      if (indicators.hasLoadMoreZone) score += 2;
+      if (indicators.hasLoadMoreButton) score += 1;
+      if (indicators.hasVirtualList) score += 2;
+      if (indicators.hasObserverAPI) score += 1;
+      if (indicators.containerHeight > 5000) score += 1;
+
+      // Additional check: Try scrolling to detect dynamic content loading
+      if (score < 4) {
+        const scrollTest = await this._testScrollLoading(page);
+        if (scrollTest.hasNewContent) {
+          score += 3;
+          indicators.scrollTestPassed = true;
+        }
+      }
+
+      return {
+        detected: score >= 4,
+        score: Math.min(score, 10),
+        indicators
+      };
+
+    } catch (error) {
+      this.logger.warn(`[PatternDetector] Infinite scroll detection error: ${error.message}`);
+      return { detected: false, score: 0, indicators: {} };
+    }
+  }
+
+  /**
+   * Test if scrolling loads new content
+   * @param {object} page - Puppeteer page object
+   * @returns {Promise<object>} - { hasNewContent, initialCount, finalCount }
+   */
+  async _testScrollLoading(page) {
+    try {
+      // Get initial state
+      const initialState = await page.evaluate(() => {
+        const containers = document.querySelectorAll(
+          'article, .card, .item, .result, [class*="card"], [class*="item"]'
+        );
+        return {
+          count: containers.length,
+          height: document.body.scrollHeight
+        };
+      });
+
+      // Scroll down
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+
+      // Wait for potential content
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Check new state
+      const finalState = await page.evaluate(() => {
+        const containers = document.querySelectorAll(
+          'article, .card, .item, .result, [class*="card"], [class*="item"]'
+        );
+        return {
+          count: containers.length,
+          height: document.body.scrollHeight
+        };
+      });
+
+      // Scroll back to top
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+
+      return {
+        hasNewContent: finalState.count > initialState.count ||
+                       finalState.height > initialState.height + 100,
+        initialCount: initialState.count,
+        finalCount: finalState.count,
+        heightDiff: finalState.height - initialState.height
+      };
+
+    } catch (error) {
+      return { hasNewContent: false, error: error.message };
+    }
   }
 }
 
