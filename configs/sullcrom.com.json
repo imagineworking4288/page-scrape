@@ -1,4 +1,5 @@
 {
+  "comment": "Sullivan & Cromwell LLP - Law firm with infinite scroll lawyer directory",
   "domain": "sullcrom.com",
   "name": "Sullivan & Cromwell LLP",
   "baseUrl": "https://www.sullcrom.com/lawyers",
@@ -6,7 +7,7 @@
   "selectors": {
     "container": ".attorney-card, [class*=\"attorney\"], .lawyer-card, [class*=\"lawyer-listing\"], .person-card",
     "name": "h3, h2, .name, [class*=\"name\"], .attorney-name",
-    "email": "a[href^='mailto:']",
+    "email": "a[href^='mailto:'], a:contains('Email')",
     "phone": "a[href^='tel:']",
     "profileLink": "a[href*='/lawyer/'], a[href*='/Lawyers/']"
   },
@@ -17,8 +18,20 @@
     "noNewContentThreshold": 3,
     "scrollStrategy": "viewport",
     "networkIdleTimeout": 5000,
-    "extractionMethod": "html",
-    "minCardIncrement": 1
+    "extractionMethod": "universal",
+    "minCardIncrement": 1,
+    "comment": "Batch architecture: scroll all → select all → parse → enrich"
+  },
+  "profileVisiting": {
+    "enabled": true,
+    "navigationTimeout": 30000,
+    "extractionDelay": 1500,
+    "maxRetries": 2,
+    "retryDelay": 2000,
+    "skipIfEmailExists": true,
+    "matchByName": true,
+    "nameSimilarityThreshold": 0.7,
+    "comment": "Visit profile pages for lawyers missing emails. Email is in mailto: on profile page."
   },
   "fallback": {
     "enabled": true,
@@ -26,9 +39,13 @@
     "completenessThreshold": 0.3
   },
   "extraction": {
-    "method": "hybrid",
-    "emailMatchStrategy": "proximity",
-    "comment": "Use hybrid extraction with proximity-based email matching for best results"
+    "method": "universal",
+    "strategies": {
+      "email": ["email-link-text", "mailto", "text", "data-attr"],
+      "phone": ["tel", "text"],
+      "name": ["heading", "class", "profile-link"]
+    },
+    "comment": "Universal extraction handles 'Email' text links with mailto: hrefs"
   },
   "pagination": {
     "enabled": false,
@@ -39,11 +56,13 @@
     "emailDomain": "sullcrom.com",
     "nameBeforeEmail": true,
     "filterPersonalEmails": true,
-    "proximityWindow": 200
+    "proximityWindow": 200,
+    "profileUrlPatterns": ["/Lawyers/", "/lawyer/", "/attorneys/", "/people/"]
   },
   "validation": {
     "requireEmail": true,
     "requireName": false,
-    "minConfidence": "low"
+    "minConfidence": "low",
+    "filterBusinessEmailsOnly": true
   }
 }

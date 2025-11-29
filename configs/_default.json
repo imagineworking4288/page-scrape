@@ -85,6 +85,17 @@
     "extractionMethod": "universal",
     "comment": "Settings for infinite scroll detection and extraction. Set enabled: true to use infinite scroll mode."
   },
+  "profileVisiting": {
+    "enabled": false,
+    "navigationTimeout": 30000,
+    "extractionDelay": 1000,
+    "maxRetries": 2,
+    "retryDelay": 2000,
+    "skipIfEmailExists": true,
+    "matchByName": true,
+    "nameSimilarityThreshold": 0.8,
+    "comment": "Settings for visiting individual profile pages to extract emails. Enable when emails only appear on profile pages."
+  },
   "fallback": {
     "enabled": true,
     "methods": ["select", "pdf"],

@@ -4,10 +4,16 @@
  * Specialized scraper for dynamically loading pages that use infinite scroll.
  * EXTENDS SimpleScraper to reuse universal extraction methods.
  *
+ * BATCH ARCHITECTURE:
+ * Phase 1: Scroll all - Load all content by scrolling to bottom
+ * Phase 2: Select all - Extract all card data using universal extraction
+ * Phase 3: Parse - Build contacts from extracted data
+ * Phase 4: Enrich - Visit profile pages for contacts missing emails
+ *
  * Features:
  * - Inherits all SimpleScraper extraction methods (universal extraction)
- * - Scroll management with configurable delays
- * - Content extraction during scrolling for efficiency
+ * - Batch scroll-then-extract for complete data collection
+ * - Profile visiting for contacts missing emails
  * - Load More button detection and clicking
  * - Fallback to Select and PDF methods on low completeness
  * - Comprehensive deduplication via ContentTracker
@@ -15,6 +21,7 @@
 
 const SimpleScraper = require('./simple-scraper');
 const { ContentTracker, ScrollDetector } = require('../features/infinite-scroll');
+const ProfileVisitor = require('../utils/profile-visitor');
 
 class InfiniteScrollScraper extends SimpleScraper {
   /**
@@ -45,6 +52,9 @@ class InfiniteScrollScraper extends SimpleScraper {
     // Fallback configuration
     this.enableFallback = options.enableFallback !== false;
     this.fallbackMethods = options.fallbackMethods || ['select', 'pdf'];
+
+    // Profile visiting configuration
+    this.enableProfileVisiting = options.enableProfileVisiting !== false;
 
     // Load More button selectors
     this.loadMoreSelectors = [
@@ -84,6 +94,7 @@ class InfiniteScrollScraper extends SimpleScraper {
 
   /**
    * Main scrape method for infinite scroll pages
+   * BATCH ARCHITECTURE: scroll all → select all → parse → enrich
    * @param {string} url - URL to scrape
    * @param {Object} siteConfig - Site-specific configuration
    * @returns {Promise<Array>} - Array of extracted contacts
@@ -91,7 +102,7 @@ class InfiniteScrollScraper extends SimpleScraper {
   async scrape(url, siteConfig = {}) {
     try {
       this.logger.info('═══════════════════════════════════════');
-      this.logger.info('  INFINITE SCROLL SCRAPER (Universal)');
+      this.logger.info('  INFINITE SCROLL SCRAPER (Batch Mode)');
       this.logger.info('═══════════════════════════════════════');
       this.logger.info(`URL: ${url}`);
 
@@ -113,56 +124,104 @@ class InfiniteScrollScraper extends SimpleScraper {
         networkIdleTimeout: this.networkIdleTimeout
       });
 
-      // Phase 1: Extract during infinite scroll
+      // ═══════════════════════════════════════
+      // PHASE 1: SCROLL ALL - Load all content
+      // ═══════════════════════════════════════
       this.logger.info('');
-      this.logger.info('Phase 1: Infinite scroll extraction');
+      this.logger.info('Phase 1: Scroll to load all content');
       this.logger.info('───────────────────────────────────');
 
-      const scrollResult = await this.scrollAndExtract(page, cardSelector, siteConfig);
-      let contacts = scrollResult.contacts;
-      let completeness = this.calculateCompleteness(contacts);
+      const scrollStats = await this.scrollToLoadAll(page, cardSelector);
+      this.logger.info(`Scroll complete: ${scrollStats.scrollsPerformed} scrolls, ${scrollStats.finalCardCount} cards loaded`);
 
-      this.logger.info(`Scroll complete: ${contacts.length} contacts (${(completeness * 100).toFixed(0)}% complete)`);
+      // ═══════════════════════════════════════
+      // PHASE 2: SELECT ALL - Extract all data
+      // ═══════════════════════════════════════
+      this.logger.info('');
+      this.logger.info('Phase 2: Extract all contact data');
+      this.logger.info('───────────────────────────────────');
 
-      // Phase 1.5: Visit profile pages for contacts missing emails
-      const contactsMissingEmails = contacts.filter(c => c.name && !c.email);
-      if (contactsMissingEmails.length > 0) {
+      // Scroll back to top before extraction
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await this.sleep(1000);
+
+      // Extract all contacts using universal extraction
+      const rawContacts = await this.extractAllContactsWithProfiles(page, cardSelector, siteConfig);
+      this.logger.info(`Extracted ${rawContacts.length} contacts from ${scrollStats.finalCardCount} cards`);
+
+      // ═══════════════════════════════════════
+      // PHASE 3: PARSE - Deduplicate and validate
+      // ═══════════════════════════════════════
+      this.logger.info('');
+      this.logger.info('Phase 3: Deduplicate and validate contacts');
+      this.logger.info('───────────────────────────────────');
+
+      const validContacts = this.deduplicateContacts(rawContacts);
+      let completeness = this.calculateCompleteness(validContacts);
+      this.logger.info(`After dedup: ${validContacts.length} unique contacts (${(completeness * 100).toFixed(0)}% complete)`);
+
+      // ═══════════════════════════════════════
+      // PHASE 4: ENRICH - Visit profile pages
+      // ═══════════════════════════════════════
+      const contactsMissingEmails = validContacts.filter(c => c.name && !c.email && c.profileUrl);
+
+      if (this.enableProfileVisiting && contactsMissingEmails.length > 0) {
         this.logger.info('');
-        this.logger.info(`Phase 1.5: Visiting profile pages for ${contactsMissingEmails.length} contacts missing emails`);
+        this.logger.info(`Phase 4: Enrich ${contactsMissingEmails.length} contacts from profiles`);
         this.logger.info('───────────────────────────────────');
 
-        await this.fillEmailsFromProfiles(contacts, page, cardSelector);
-        completeness = this.calculateCompleteness(contacts);
-        this.logger.info(`After profile visits: ${contacts.filter(c => c.email).length} contacts with emails`);
-      }
+        // Use ProfileVisitor from base scraper
+        const profileConfig = siteConfig.profileVisiting || { enabled: true };
+        if (profileConfig.enabled !== false) {
+          const enrichResult = await this.enrichContactsFromProfiles(validContacts, page, {
+            ...siteConfig,
+            profileVisiting: { ...profileConfig, enabled: true }
+          });
 
-      // Phase 2: Fallback if needed
-      if (this.enableFallback && completeness < this.completenessThreshold) {
-        this.logger.info('');
-        this.logger.info(`Phase 2: Fallback (completeness ${(completeness * 100).toFixed(0)}% < ${(this.completenessThreshold * 100).toFixed(0)}%)`);
-        this.logger.info('───────────────────────────────────');
-
-        const fallbackResult = await this.runFallbackChain(page, siteConfig, contacts);
-        if (fallbackResult.contacts.length > contacts.length ||
-            fallbackResult.completeness > completeness) {
-          contacts = fallbackResult.contacts;
-          completeness = fallbackResult.completeness;
-          this.logger.info(`Fallback improved results: ${contacts.length} contacts (${(completeness * 100).toFixed(0)}%)`);
+          this.logger.info(`Profile enrichment: ${enrichResult.stats?.enriched || 0} emails found`);
+          completeness = this.calculateCompleteness(validContacts);
         }
       }
 
-      // Phase 3: Fill missing names from PDF or email derivation
-      const contactsNeedingNames = contacts.filter(c => !c.name && c.email);
+      // ═══════════════════════════════════════
+      // PHASE 5: FALLBACK if needed
+      // ═══════════════════════════════════════
+      if (this.enableFallback && completeness < this.completenessThreshold) {
+        this.logger.info('');
+        this.logger.info(`Phase 5: Fallback (completeness ${(completeness * 100).toFixed(0)}% < ${(this.completenessThreshold * 100).toFixed(0)}%)`);
+        this.logger.info('───────────────────────────────────');
+
+        const fallbackResult = await this.runFallbackChain(page, siteConfig, validContacts);
+        if (fallbackResult.contacts.length > validContacts.length ||
+            fallbackResult.completeness > completeness) {
+          // Merge fallback results
+          for (const fbContact of fallbackResult.contacts) {
+            const existing = validContacts.find(c => c.email === fbContact.email);
+            if (!existing && fbContact.email) {
+              validContacts.push(fbContact);
+            } else if (existing && !existing.name && fbContact.name) {
+              existing.name = fbContact.name;
+            }
+          }
+          completeness = fallbackResult.completeness;
+          this.logger.info(`Fallback improved results: ${validContacts.length} contacts (${(completeness * 100).toFixed(0)}%)`);
+        }
+      }
+
+      // ═══════════════════════════════════════
+      // PHASE 6: Fill missing names
+      // ═══════════════════════════════════════
+      const contactsNeedingNames = validContacts.filter(c => !c.name && c.email);
       if (contactsNeedingNames.length > 0) {
         this.logger.info('');
-        this.logger.info(`Phase 3: Fill missing names (${contactsNeedingNames.length} contacts)`);
+        this.logger.info(`Phase 6: Fill ${contactsNeedingNames.length} missing names`);
         this.logger.info('───────────────────────────────────');
 
         // Try PDF first
-        await this.fillNamesFromPdf(contacts, page, false);
+        await this.fillNamesFromPdf(validContacts, page, false);
 
         // Then email derivation for remaining
-        const stillMissingNames = contacts.filter(c => !c.name && c.email);
+        const stillMissingNames = validContacts.filter(c => !c.name && c.email);
         for (const contact of stillMissingNames) {
           const derivedName = this.extractNameFromEmail(contact.email);
           if (derivedName) {
@@ -173,23 +232,194 @@ class InfiniteScrollScraper extends SimpleScraper {
       }
 
       // Add domain info to all contacts
-      for (const contact of contacts) {
+      for (const contact of validContacts) {
         this.addDomainInfo(contact);
         contact.source = contact.source || 'infinite-scroll';
       }
 
       this.logger.info('');
       this.logger.info('═══════════════════════════════════════');
-      this.logger.info(`  COMPLETE: ${contacts.length} contacts extracted`);
+      this.logger.info(`  COMPLETE: ${validContacts.length} contacts extracted`);
       this.logger.info('═══════════════════════════════════════');
 
-      return contacts;
+      return validContacts;
 
     } catch (error) {
       this.logger.error(`Infinite scroll scraping failed: ${error.message}`);
       this.logger.error(error.stack);
       return [];
     }
+  }
+
+  /**
+   * Phase 1: Scroll to load all content
+   * Does NOT extract during scroll - just loads content
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @returns {Promise<Object>} - { scrollsPerformed, finalCardCount }
+   */
+  async scrollToLoadAll(page, cardSelector) {
+    let scrollAttempts = 0;
+    let noNewContentCount = 0;
+    let previousHeight = await page.evaluate(() => document.body.scrollHeight);
+    let previousCardCount = cardSelector ?
+      await page.$$eval(cardSelector, els => els.length).catch(() => 0) : 0;
+
+    this.logger.info(`Initial state: ${previousCardCount} cards, height ${previousHeight}px`);
+
+    while (scrollAttempts < this.maxScrollAttempts) {
+      scrollAttempts++;
+
+      // Try to click Load More button
+      const loadMoreClicked = await this.clickLoadMoreIfExists(page);
+      if (loadMoreClicked) {
+        this.logger.info('Clicked "Load More" button');
+        await this.sleep(this.scrollDelay);
+      }
+
+      // Perform scroll
+      await this.performScroll(page);
+
+      // Wait for content to load
+      await this.waitForContentLoad(page, previousHeight);
+
+      // Check if page changed
+      const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+      const currentCardCount = cardSelector ?
+        await page.$$eval(cardSelector, els => els.length).catch(() => 0) : 0;
+
+      const newCards = currentCardCount - previousCardCount;
+      this.logger.info(`Scroll ${scrollAttempts}/${this.maxScrollAttempts} - Cards: ${previousCardCount} → ${currentCardCount} (+${newCards})`);
+
+      if (currentHeight === previousHeight && currentCardCount === previousCardCount) {
+        noNewContentCount++;
+        if (noNewContentCount >= this.noNewContentThreshold) {
+          this.logger.info(`No new content for ${this.noNewContentThreshold} consecutive scrolls, stopping`);
+          break;
+        }
+      } else {
+        noNewContentCount = 0;
+      }
+
+      previousHeight = currentHeight;
+      previousCardCount = currentCardCount;
+    }
+
+    return {
+      scrollsPerformed: scrollAttempts,
+      finalCardCount: previousCardCount
+    };
+  }
+
+  /**
+   * Phase 2: Extract all contacts with profile URLs in one pass
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {Object} siteConfig - Site configuration
+   * @returns {Promise<Array>} - Array of raw contact objects
+   */
+  async extractAllContactsWithProfiles(page, cardSelector, siteConfig = {}) {
+    const extractionCode = this.universalExtractionCode;
+    const blacklistArray = Array.from(this.NAME_BLACKLIST);
+    const profilePatterns = siteConfig.parsing?.profileUrlPatterns || [
+      '/agents/', '/profile/', '/realtor/', '/team/', '/broker/',
+      '/member/', '/lawyer/', '/Lawyers/', '/attorney/', '/people/',
+      '/professionals/', '/attorneys/', '/our-team/', '/staff/'
+    ];
+
+    const contacts = await page.evaluate((selector, code, blacklist, patterns) => {
+      // Inject universal extraction code
+      eval(code);
+
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+      const results = [];
+      const blacklistSet = new Set(blacklist);
+
+      for (const card of cards) {
+        // Use the bundled extraction function
+        const contact = extractContactFromCard(card, {
+          blacklist: blacklistSet,
+          profilePatterns: patterns
+        });
+
+        // Always include the card data (even without email) for profile enrichment
+        if (contact.email || contact.name || contact.profileUrl) {
+          results.push({
+            name: contact.name,
+            email: contact.email,
+            phone: contact.phone,
+            profileUrl: contact.profileUrl,
+            confidence: contact.confidence,
+            source: 'infinite-scroll-html',
+            _extraction: contact._extraction
+          });
+        }
+      }
+
+      return results;
+    }, cardSelector, extractionCode, blacklistArray, profilePatterns);
+
+    // Filter to business emails and add domain info
+    const businessContacts = [];
+    for (const contact of contacts) {
+      if (contact.email) {
+        const domain = this.domainExtractor.extractAndNormalize(contact.email);
+        if (domain && this.domainExtractor.isBusinessDomain(domain)) {
+          this.addDomainInfo(contact);
+          businessContacts.push(contact);
+        }
+      } else if (contact.name && contact.profileUrl) {
+        // Keep contacts with name and profile URL for enrichment
+        businessContacts.push(contact);
+      }
+    }
+
+    return businessContacts;
+  }
+
+  /**
+   * Phase 3: Deduplicate contacts
+   * @param {Array} contacts - Raw contacts array
+   * @returns {Array} - Deduplicated contacts
+   */
+  deduplicateContacts(contacts) {
+    const emailMap = new Map();
+    const nameMap = new Map();
+    const result = [];
+
+    for (const contact of contacts) {
+      const emailKey = contact.email?.toLowerCase();
+      const nameKey = contact.name?.toLowerCase().trim();
+
+      // Check if we already have this contact by email
+      if (emailKey && emailMap.has(emailKey)) {
+        // Merge with existing
+        const existing = emailMap.get(emailKey);
+        if (!existing.name && contact.name) existing.name = contact.name;
+        if (!existing.phone && contact.phone) existing.phone = contact.phone;
+        if (!existing.profileUrl && contact.profileUrl) existing.profileUrl = contact.profileUrl;
+        continue;
+      }
+
+      // Check if we already have this contact by name (only if no email)
+      if (!emailKey && nameKey && nameMap.has(nameKey)) {
+        const existing = nameMap.get(nameKey);
+        if (!existing.phone && contact.phone) existing.phone = contact.phone;
+        if (!existing.profileUrl && contact.profileUrl) existing.profileUrl = contact.profileUrl;
+        continue;
+      }
+
+      // New contact
+      if (emailKey) {
+        emailMap.set(emailKey, contact);
+      }
+      if (nameKey && !emailKey) {
+        nameMap.set(nameKey, contact);
+      }
+      result.push(contact);
+    }
+
+    return result;
   }
 
   /**
@@ -206,6 +436,10 @@ class InfiniteScrollScraper extends SimpleScraper {
     if (infiniteConfig.noNewContentThreshold) this.noNewContentThreshold = infiniteConfig.noNewContentThreshold;
     if (infiniteConfig.scrollStrategy) this.scrollStrategy = infiniteConfig.scrollStrategy;
     if (infiniteConfig.extractionMethod) this.extractionMethod = infiniteConfig.extractionMethod;
+
+    // Profile visiting config
+    const profileConfig = siteConfig.profileVisiting || {};
+    if (profileConfig.enabled !== undefined) this.enableProfileVisiting = profileConfig.enabled;
 
     // Fallback config
     const fallbackConfig = siteConfig.fallback || {};
@@ -258,94 +492,6 @@ class InfiniteScrollScraper extends SimpleScraper {
 
     this.logger.warn('Could not auto-detect card selector');
     return null;
-  }
-
-  /**
-   * Perform infinite scroll and extract contacts using universal extraction
-   * @param {Object} page - Puppeteer page
-   * @param {string} cardSelector - CSS selector for cards
-   * @param {Object} siteConfig - Site configuration
-   * @returns {Promise<Object>} - { contacts, stats }
-   */
-  async scrollAndExtract(page, cardSelector, siteConfig) {
-    this.contentTracker.clear();
-    const allContacts = [];
-    let scrollAttempts = 0;
-    let noNewContentCount = 0;
-    let previousHeight = await page.evaluate(() => document.body.scrollHeight);
-    let previousCardCount = cardSelector ?
-      await page.$$eval(cardSelector, els => els.length).catch(() => 0) : 0;
-
-    this.logger.info(`Initial state: ${previousCardCount} cards, height ${previousHeight}px`);
-
-    while (scrollAttempts < this.maxScrollAttempts) {
-      // Use SimpleScraper's universal extraction method
-      const currentContacts = await this.extractContactsUniversal(page, cardSelector, {});
-      let newItemsFound = 0;
-
-      for (const contact of currentContacts) {
-        // Use ContentTracker to dedupe
-        if (this.contentTracker.checkAndMark(contact)) {
-          // Mark source as infinite-scroll
-          contact.source = 'infinite-scroll-html';
-          allContacts.push(contact);
-          newItemsFound++;
-        }
-      }
-
-      scrollAttempts++;
-      this.logger.info(`Scroll attempt ${scrollAttempts}/${this.maxScrollAttempts} - Found ${newItemsFound} new items (Total: ${allContacts.length})`);
-
-      // Check stopping conditions
-      if (newItemsFound === 0) {
-        noNewContentCount++;
-        if (noNewContentCount >= this.noNewContentThreshold) {
-          this.logger.info(`No new content for ${this.noNewContentThreshold} consecutive scrolls, stopping`);
-          break;
-        }
-      } else {
-        noNewContentCount = 0;
-      }
-
-      // Try to click Load More button
-      const loadMoreClicked = await this.clickLoadMoreIfExists(page);
-      if (loadMoreClicked) {
-        this.logger.info('Clicked "Load More" button');
-        await this.sleep(this.scrollDelay);
-      }
-
-      // Perform scroll
-      await this.performScroll(page);
-
-      // Wait for content to load
-      await this.waitForContentLoad(page, previousHeight);
-
-      // Check if page changed
-      const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-      const currentCardCount = cardSelector ?
-        await page.$$eval(cardSelector, els => els.length).catch(() => 0) : 0;
-
-      if (currentHeight === previousHeight && currentCardCount === previousCardCount && noNewContentCount > 0) {
-        this.logger.info('Page height and card count unchanged, likely reached end');
-        break;
-      }
-
-      previousHeight = currentHeight;
-      previousCardCount = currentCardCount;
-    }
-
-    // Scroll back to top
-    await page.evaluate(() => window.scrollTo(0, 0));
-
-    const stats = this.contentTracker.getStats();
-    return {
-      contacts: allContacts,
-      stats: {
-        scrollsPerformed: scrollAttempts,
-        uniqueContactsFound: stats.uniqueCount,
-        duplicatesSkipped: stats.duplicatesSkipped
-      }
-    };
   }
 
   /**
@@ -595,6 +741,7 @@ class InfiniteScrollScraper extends SimpleScraper {
             name: existingContact.name || contact.name,
             email: existingContact.email || contact.email,
             phone: existingContact.phone || contact.phone,
+            profileUrl: existingContact.profileUrl || contact.profileUrl,
             source: 'merged',
             confidence: existingContact.confidence || contact.confidence
           });
@@ -623,152 +770,6 @@ class InfiniteScrollScraper extends SimpleScraper {
     }
 
     return score / contacts.length;
-  }
-
-  /**
-   * Fill emails from profile pages for contacts missing emails
-   * @param {Array} contacts - Array of contacts to update
-   * @param {Object} page - Puppeteer page
-   * @param {string} cardSelector - CSS selector for cards
-   */
-  async fillEmailsFromProfiles(contacts, page, cardSelector) {
-    const contactsNeedingEmails = contacts.filter(c => c.name && !c.email);
-    let visitCount = 0;
-    let foundCount = 0;
-    const originalUrl = page.url();
-
-    // First, collect profile URLs from the current page
-    const profileUrls = await page.evaluate((selector) => {
-      const cards = selector ? document.querySelectorAll(selector) : [document.body];
-      const profiles = [];
-
-      for (const card of cards) {
-        // Find profile links - look for various patterns
-        const profileSelectors = [
-          'a[href*="/Lawyers/"]',
-          'a[href*="/lawyer/"]',
-          'a[href*="/attorney/"]',
-          'a[href*="/profile/"]',
-          'a[href*="/people/"]'
-        ];
-
-        for (const sel of profileSelectors) {
-          const link = card.querySelector(sel);
-          if (link && link.href) {
-            // Extract name from card to match later
-            const nameEl = card.querySelector('h2, h3, h4, .name, [class*="name"]');
-            const name = nameEl ? nameEl.textContent.trim() : null;
-
-            profiles.push({
-              url: link.href,
-              name: name
-            });
-            break;  // Only need one profile URL per card
-          }
-        }
-      }
-
-      return profiles;
-    }, cardSelector);
-
-    this.logger.info(`Found ${profileUrls.length} profile URLs`);
-
-    // Visit each profile page for contacts missing emails
-    for (const contact of contactsNeedingEmails) {
-      // Find matching profile URL by name
-      const matchingProfile = profileUrls.find(p => {
-        if (!p.name || !contact.name) return false;
-        // Fuzzy match - check if names contain each other
-        const pName = p.name.toLowerCase();
-        const cName = contact.name.toLowerCase();
-        return pName.includes(cName) || cName.includes(pName) ||
-               pName.split(' ').some(part => cName.includes(part));
-      });
-
-      if (!matchingProfile) {
-        this.logger.debug(`No profile URL found for: ${contact.name}`);
-        continue;
-      }
-
-      try {
-        this.logger.info(`Visiting profile for ${contact.name}: ${matchingProfile.url}`);
-        visitCount++;
-
-        await this.browserManager.navigate(matchingProfile.url);
-        await this.sleep(1500);  // Wait for page to load
-
-        // Extract email from profile page using universal extraction
-        const email = await page.evaluate(() => {
-          // Try mailto links first
-          const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
-          for (const link of mailtoLinks) {
-            const email = link.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
-            if (email && email.includes('@')) {
-              return email;
-            }
-          }
-
-          // Try links with "Email" text
-          const allLinks = document.querySelectorAll('a[href]');
-          for (const link of allLinks) {
-            const linkText = link.textContent.trim().toLowerCase();
-            if (linkText === 'email' || linkText === 'e-mail') {
-              const href = link.href || '';
-              if (href.toLowerCase().includes('mailto:')) {
-                return href.replace(/mailto:/i, '').split('?')[0].toLowerCase().trim();
-              }
-            }
-          }
-
-          // Try plain text email pattern
-          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-          const bodyText = document.body.textContent || '';
-          const matches = bodyText.match(emailRegex);
-          if (matches && matches.length > 0) {
-            // Return first business-looking email (not gmail, yahoo, etc)
-            for (const email of matches) {
-              const lower = email.toLowerCase();
-              if (!lower.includes('gmail') && !lower.includes('yahoo') &&
-                  !lower.includes('hotmail') && !lower.includes('outlook')) {
-                return lower;
-              }
-            }
-          }
-
-          return null;
-        });
-
-        if (email) {
-          contact.email = email;
-          contact.source = (contact.source || 'infinite-scroll') + '+profile';
-          contact.profileUrl = matchingProfile.url;
-          foundCount++;
-          this.logger.info(`  Found email: ${email}`);
-        } else {
-          this.logger.debug(`  No email found on profile page`);
-        }
-
-        // Rate limit between profile visits
-        if (this.rateLimiter) {
-          await this.rateLimiter.waitBeforeRequest();
-        } else {
-          await this.sleep(1000);
-        }
-
-      } catch (error) {
-        this.logger.warn(`Failed to visit profile for ${contact.name}: ${error.message}`);
-      }
-    }
-
-    // Navigate back to original URL
-    try {
-      await this.browserManager.navigate(originalUrl);
-      await this.sleep(2000);
-    } catch (e) {
-      this.logger.warn(`Failed to navigate back to original URL: ${e.message}`);
-    }
-
-    this.logger.info(`Visited ${visitCount} profile pages, found emails for ${foundCount} contacts`);
   }
 
   /**

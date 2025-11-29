@@ -10,6 +10,8 @@
  */
 const DomainExtractor = require('../utils/domain-extractor');
 const contactExtractor = require('../utils/contact-extractor');
+const ProfileVisitor = require('../utils/profile-visitor');
+
 class BaseScraper {
   constructor(browserManager, rateLimiter, logger) {
     this.browserManager = browserManager;
@@ -18,6 +20,59 @@ class BaseScraper {
     this.extractor = contactExtractor;
     this.domainExtractor = new DomainExtractor(logger);
     this.processedEmails = new Set();
+    this.profileVisitor = null; // Lazy initialized
+  }
+
+  /**
+   * Get or create ProfileVisitor instance
+   * @param {Object} config - Site-specific configuration
+   * @returns {ProfileVisitor}
+   */
+  getProfileVisitor(config = {}) {
+    if (!this.profileVisitor) {
+      const profileConfig = config.profileVisiting || {};
+      this.profileVisitor = new ProfileVisitor({
+        logger: this.logger,
+        config: config,
+        navigationTimeout: profileConfig.navigationTimeout || 30000,
+        extractionDelay: profileConfig.extractionDelay || 1000,
+        maxRetries: profileConfig.maxRetries || 2,
+        retryDelay: profileConfig.retryDelay || 2000,
+        skipIfEmailExists: profileConfig.skipIfEmailExists !== false
+      });
+    }
+    return this.profileVisitor;
+  }
+
+  /**
+   * Enrich contacts by visiting profile pages
+   * Only visits profiles for contacts missing emails
+   * @param {Array} contacts - Array of contacts with profileUrl field
+   * @param {Object} page - Puppeteer page instance
+   * @param {Object} config - Site-specific configuration
+   * @returns {Promise<Object>} - { enrichedContacts, stats }
+   */
+  async enrichContactsFromProfiles(contacts, page, config = {}) {
+    const profileConfig = config.profileVisiting || {};
+
+    // Skip if profile visiting is disabled
+    if (!profileConfig.enabled) {
+      this.logger.log('[BaseScraper] Profile visiting disabled, skipping enrichment');
+      return { enrichedContacts: contacts, stats: { skipped: contacts.length } };
+    }
+
+    // Filter contacts that need enrichment (have profileUrl but no email)
+    const needsEnrichment = contacts.filter(c => c.profileUrl && !c.email);
+
+    if (needsEnrichment.length === 0) {
+      this.logger.log('[BaseScraper] No contacts need profile enrichment');
+      return { enrichedContacts: contacts, stats: { skipped: contacts.length } };
+    }
+
+    this.logger.log(`[BaseScraper] Enriching ${needsEnrichment.length} contacts from profiles`);
+
+    const visitor = this.getProfileVisitor(config);
+    return await visitor.visitProfiles(contacts, page, config);
   }
   // ===========================
   // EMAIL EXTRACTION

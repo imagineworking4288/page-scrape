@@ -732,6 +732,76 @@ function extractNameFromElementCode() {
 }
 
 /**
+ * Extract profile URL from a DOM element
+ * Searches for links that match profile URL patterns
+ * @returns {string} - Code to execute in browser context
+ */
+function extractProfileUrlFromElementCode() {
+  return `
+    function extractProfileUrlFromElement(element, options = {}) {
+      const profilePatterns = options.profilePatterns || [
+        '/agents/', '/profile/', '/realtor/', '/team/', '/broker/',
+        '/member/', '/lawyer/', '/Lawyers/', '/attorney/', '/people/',
+        '/professionals/', '/attorneys/', '/our-team/', '/staff/',
+        '/about/', '/bio/'
+      ];
+
+      // Find all links in the element
+      const links = element.querySelectorAll('a[href]');
+      let bestMatch = null;
+      let bestScore = 0;
+
+      for (const link of links) {
+        const href = link.href;
+        if (!href) continue;
+
+        // Skip mailto/tel links
+        if (href.startsWith('mailto:') || href.startsWith('tel:')) continue;
+
+        // Check if URL matches any profile pattern
+        let matchScore = 0;
+        for (const pattern of profilePatterns) {
+          if (href.toLowerCase().includes(pattern.toLowerCase())) {
+            matchScore = 1;
+
+            // Bonus for exact patterns (not partial)
+            if (href.includes(pattern + '/') || href.endsWith(pattern)) {
+              matchScore = 2;
+            }
+            break;
+          }
+        }
+
+        if (matchScore === 0) continue;
+
+        // Additional scoring based on link properties
+        // Links with names/images are more likely to be profile links
+        const hasImage = link.querySelector('img') !== null;
+        const hasNameClass = /name|person|attorney|lawyer|agent/i.test(link.className);
+        const linkTextLength = link.textContent.trim().length;
+
+        // Calculate final score
+        let score = matchScore;
+        if (hasImage) score += 0.5;
+        if (hasNameClass) score += 0.5;
+        if (linkTextLength > 2 && linkTextLength < 50) score += 0.3;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = {
+            url: href,
+            text: link.textContent.trim().substring(0, 100),
+            score: score
+          };
+        }
+      }
+
+      return bestMatch;
+    }
+  `;
+}
+
+/**
  * Get the universal extraction code for browser context
  * This bundles all extraction functions to be evaluated in Puppeteer
  * @returns {string} - JavaScript code string
@@ -741,15 +811,17 @@ function getUniversalExtractionCode() {
     ${extractEmailsFromElementCode()}
     ${extractPhonesFromElementCode()}
     ${extractNameFromElementCode()}
+    ${extractProfileUrlFromElementCode()}
 
     // Main extraction function for a card element
     function extractContactFromCard(card, options = {}) {
       const emails = extractEmailsFromElement(card, options);
       const phones = extractPhonesFromElement(card, options);
       const name = extractNameFromElement(card, options);
+      const profileUrlResult = extractProfileUrlFromElement(card, options);
 
-      // Get best email (prefer mailto, then data-attr, then text)
-      const emailPriority = { 'mailto': 3, 'data-attr': 2, 'text': 1, 'obfuscated': 1, 'encoded-href': 1 };
+      // Get best email (prefer email-link-text, mailto, then data-attr, then text)
+      const emailPriority = { 'email-link-text': 4, 'email-link-href': 4, 'mailto': 3, 'data-attr': 2, 'text': 1, 'obfuscated': 1, 'encoded-href': 1 };
       emails.sort((a, b) => (emailPriority[b.source] || 0) - (emailPriority[a.source] || 0));
       const bestEmail = emails[0]?.email || null;
 
@@ -757,6 +829,9 @@ function getUniversalExtractionCode() {
       const phonePriority = { 'tel': 3, 'data-attr': 2, 'text': 1, 'class-hint': 1 };
       phones.sort((a, b) => (phonePriority[b.source] || 0) - (phonePriority[a.source] || 0));
       const bestPhone = phones[0]?.phone || null;
+
+      // Get profile URL
+      const profileUrl = profileUrlResult?.url || null;
 
       // Calculate confidence
       let confidence = 'low';
@@ -770,10 +845,12 @@ function getUniversalExtractionCode() {
         name,
         email: bestEmail,
         phone: bestPhone,
+        profileUrl,
         confidence,
         _extraction: {
           emailSource: emails[0]?.source || null,
           phoneSource: phones[0]?.source || null,
+          profileUrlScore: profileUrlResult?.score || null,
           allEmails: emails.length,
           allPhones: phones.length
         }
@@ -898,5 +975,6 @@ module.exports = {
   extractEmailsFromElementCode,
   extractPhonesFromElementCode,
   extractNameFromElementCode,
+  extractProfileUrlFromElementCode,
   getUniversalExtractionCode
 };
