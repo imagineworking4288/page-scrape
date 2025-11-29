@@ -463,6 +463,33 @@ function extractEmailsFromElementCode() {
     function extractEmailsFromElement(element, options = {}) {
       const emails = [];
       const seen = new Set();
+      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+
+      // Strategy 0: Links with "Email" or "email" text (HIGHEST PRIORITY)
+      // Critical for sites like Sullivan & Cromwell where link text is "Email" but href has mailto:
+      const allEmailTextLinks = element.querySelectorAll('a[href]');
+      allEmailTextLinks.forEach(link => {
+        const linkText = link.textContent.trim().toLowerCase();
+        if (linkText === 'email' || linkText === 'e-mail' || linkText === 'send email' || linkText === 'contact email') {
+          const href = link.href || '';
+          // Check if href contains mailto:
+          if (href.toLowerCase().includes('mailto:')) {
+            const emailPart = href.replace(/mailto:/i, '').split('?')[0].toLowerCase().trim();
+            if (emailPart && emailPart.includes('@') && !seen.has(emailPart)) {
+              seen.add(emailPart);
+              emails.push({ email: emailPart, source: 'email-link-text', confidence: 'high' });
+            }
+          } else {
+            // Check if href directly contains an email pattern
+            emailRegex.lastIndex = 0;
+            const match = href.match(emailRegex);
+            if (match && !seen.has(match[0].toLowerCase())) {
+              seen.add(match[0].toLowerCase());
+              emails.push({ email: match[0].toLowerCase(), source: 'email-link-href', confidence: 'high' });
+            }
+          }
+        }
+      });
 
       // Strategy 1: mailto: links (most reliable)
       const mailtoLinks = element.querySelectorAll('a[href^="mailto:"]');
@@ -475,7 +502,6 @@ function extractEmailsFromElementCode() {
       });
 
       // Strategy 2: Plain text email regex in text content
-      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
       const textContent = element.textContent || '';
       const textMatches = textContent.match(emailRegex) || [];
       textMatches.forEach(email => {

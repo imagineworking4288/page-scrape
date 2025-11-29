@@ -124,6 +124,18 @@ class InfiniteScrollScraper extends SimpleScraper {
 
       this.logger.info(`Scroll complete: ${contacts.length} contacts (${(completeness * 100).toFixed(0)}% complete)`);
 
+      // Phase 1.5: Visit profile pages for contacts missing emails
+      const contactsMissingEmails = contacts.filter(c => c.name && !c.email);
+      if (contactsMissingEmails.length > 0) {
+        this.logger.info('');
+        this.logger.info(`Phase 1.5: Visiting profile pages for ${contactsMissingEmails.length} contacts missing emails`);
+        this.logger.info('───────────────────────────────────');
+
+        await this.fillEmailsFromProfiles(contacts, page, cardSelector);
+        completeness = this.calculateCompleteness(contacts);
+        this.logger.info(`After profile visits: ${contacts.filter(c => c.email).length} contacts with emails`);
+      }
+
       // Phase 2: Fallback if needed
       if (this.enableFallback && completeness < this.completenessThreshold) {
         this.logger.info('');
@@ -611,6 +623,152 @@ class InfiniteScrollScraper extends SimpleScraper {
     }
 
     return score / contacts.length;
+  }
+
+  /**
+   * Fill emails from profile pages for contacts missing emails
+   * @param {Array} contacts - Array of contacts to update
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   */
+  async fillEmailsFromProfiles(contacts, page, cardSelector) {
+    const contactsNeedingEmails = contacts.filter(c => c.name && !c.email);
+    let visitCount = 0;
+    let foundCount = 0;
+    const originalUrl = page.url();
+
+    // First, collect profile URLs from the current page
+    const profileUrls = await page.evaluate((selector) => {
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+      const profiles = [];
+
+      for (const card of cards) {
+        // Find profile links - look for various patterns
+        const profileSelectors = [
+          'a[href*="/Lawyers/"]',
+          'a[href*="/lawyer/"]',
+          'a[href*="/attorney/"]',
+          'a[href*="/profile/"]',
+          'a[href*="/people/"]'
+        ];
+
+        for (const sel of profileSelectors) {
+          const link = card.querySelector(sel);
+          if (link && link.href) {
+            // Extract name from card to match later
+            const nameEl = card.querySelector('h2, h3, h4, .name, [class*="name"]');
+            const name = nameEl ? nameEl.textContent.trim() : null;
+
+            profiles.push({
+              url: link.href,
+              name: name
+            });
+            break;  // Only need one profile URL per card
+          }
+        }
+      }
+
+      return profiles;
+    }, cardSelector);
+
+    this.logger.info(`Found ${profileUrls.length} profile URLs`);
+
+    // Visit each profile page for contacts missing emails
+    for (const contact of contactsNeedingEmails) {
+      // Find matching profile URL by name
+      const matchingProfile = profileUrls.find(p => {
+        if (!p.name || !contact.name) return false;
+        // Fuzzy match - check if names contain each other
+        const pName = p.name.toLowerCase();
+        const cName = contact.name.toLowerCase();
+        return pName.includes(cName) || cName.includes(pName) ||
+               pName.split(' ').some(part => cName.includes(part));
+      });
+
+      if (!matchingProfile) {
+        this.logger.debug(`No profile URL found for: ${contact.name}`);
+        continue;
+      }
+
+      try {
+        this.logger.info(`Visiting profile for ${contact.name}: ${matchingProfile.url}`);
+        visitCount++;
+
+        await this.browserManager.navigate(matchingProfile.url);
+        await this.sleep(1500);  // Wait for page to load
+
+        // Extract email from profile page using universal extraction
+        const email = await page.evaluate(() => {
+          // Try mailto links first
+          const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
+          for (const link of mailtoLinks) {
+            const email = link.href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+            if (email && email.includes('@')) {
+              return email;
+            }
+          }
+
+          // Try links with "Email" text
+          const allLinks = document.querySelectorAll('a[href]');
+          for (const link of allLinks) {
+            const linkText = link.textContent.trim().toLowerCase();
+            if (linkText === 'email' || linkText === 'e-mail') {
+              const href = link.href || '';
+              if (href.toLowerCase().includes('mailto:')) {
+                return href.replace(/mailto:/i, '').split('?')[0].toLowerCase().trim();
+              }
+            }
+          }
+
+          // Try plain text email pattern
+          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+          const bodyText = document.body.textContent || '';
+          const matches = bodyText.match(emailRegex);
+          if (matches && matches.length > 0) {
+            // Return first business-looking email (not gmail, yahoo, etc)
+            for (const email of matches) {
+              const lower = email.toLowerCase();
+              if (!lower.includes('gmail') && !lower.includes('yahoo') &&
+                  !lower.includes('hotmail') && !lower.includes('outlook')) {
+                return lower;
+              }
+            }
+          }
+
+          return null;
+        });
+
+        if (email) {
+          contact.email = email;
+          contact.source = (contact.source || 'infinite-scroll') + '+profile';
+          contact.profileUrl = matchingProfile.url;
+          foundCount++;
+          this.logger.info(`  Found email: ${email}`);
+        } else {
+          this.logger.debug(`  No email found on profile page`);
+        }
+
+        // Rate limit between profile visits
+        if (this.rateLimiter) {
+          await this.rateLimiter.waitBeforeRequest();
+        } else {
+          await this.sleep(1000);
+        }
+
+      } catch (error) {
+        this.logger.warn(`Failed to visit profile for ${contact.name}: ${error.message}`);
+      }
+    }
+
+    // Navigate back to original URL
+    try {
+      await this.browserManager.navigate(originalUrl);
+      await this.sleep(2000);
+    } catch (e) {
+      this.logger.warn(`Failed to navigate back to original URL: ${e.message}`);
+    }
+
+    this.logger.info(`Visited ${visitCount} profile pages, found emails for ${foundCount} contacts`);
   }
 
   /**
