@@ -6,6 +6,7 @@
 const BaseScraper = require('./base-scraper');
 const ConfigLoader = require('../utils/config-loader');
 const TextParser = require('../utils/text-parser');
+const ContactExtractor = require('../utils/contact-extractor');
 
 class SelectScraper extends BaseScraper {
   constructor(browserManager, rateLimiter, logger) {
@@ -278,6 +279,7 @@ class SelectScraper extends BaseScraper {
 
   /**
    * Extract contacts using DOM-based container detection
+   * Uses universal extraction from contact-extractor.js for comprehensive email/phone/name detection
    * @param {object} page - Puppeteer page
    * @param {object} startPos - Start position {x, y}
    * @param {object} endPos - End position {x, y}
@@ -307,98 +309,13 @@ class SelectScraper extends BaseScraper {
       // Get blacklist from text parser to pass to browser context
       const nameBlacklist = Array.from(this.textParser.NAME_BLACKLIST);
 
-      // Extract contacts from containers
-      const contacts = await page.evaluate((selector, start, end, baseUrl, configSelectors, profileUrlPatterns, blacklistArray) => {
-        // Recreate blacklist Set in browser context
-        const NAME_BLACKLIST = new Set(blacklistArray);
+      // Get universal extraction code from contact-extractor
+      const universalExtractionCode = ContactExtractor.getUniversalExtractionCode();
 
-        // Helper: Validate name against blacklist
-        const isValidName = (text) => {
-          if (!text || text.length < 2 || text.length > 50) return false;
-
-          // Check blacklist (case-insensitive)
-          const lowerText = text.toLowerCase();
-          if (NAME_BLACKLIST.has(lowerText)) return false;
-
-          // Check for partial matches with common UI words
-          const uiWords = ['find', 'agent', 'last name', 'first name', 'register', 'login', 'view', 'profile'];
-          if (uiWords.some(word => lowerText.includes(word))) return false;
-
-          // Must start with capital letter
-          if (!text[0] || text[0] !== text[0].toUpperCase()) return false;
-
-          // Basic name pattern - at least one letter, no @ symbol
-          if (text.includes('@')) return false;
-          if (!/[a-zA-Z]/.test(text)) return false;
-
-          return true;
-        };
-
-        // Helper: Extract name from container using multiple strategies
-        const extractNameFromContainer = (container, email) => {
-          // Strategy 1: Try agent profile links
-          const profileLinkSelectors = ['a[href*="/agents/"]', 'a[href*="/profile/"]', 'a[href*="/realtor/"]', 'a[href*="/team/"]'];
-          for (const selector of profileLinkSelectors) {
-            const profileLink = container.querySelector(selector);
-            if (profileLink && !profileLink.href.includes('mailto:')) {
-              const candidateName = profileLink.textContent.trim();
-              if (isValidName(candidateName)) {
-                return candidateName;
-              }
-            }
-          }
-
-          // Strategy 2: Try heading elements
-          const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
-          for (const heading of headings) {
-            const candidateName = heading.textContent.trim();
-            if (isValidName(candidateName)) {
-              return candidateName;
-            }
-          }
-
-          // Strategy 3: Try elements with "name" in class
-          const nameElements = container.querySelectorAll('[class*="name"], [class*="Name"]');
-          for (const nameEl of nameElements) {
-            const candidateName = nameEl.textContent.trim();
-            if (isValidName(candidateName)) {
-              return candidateName;
-            }
-          }
-
-          // Strategy 4: Try strong/bold text
-          const boldElements = container.querySelectorAll('strong, b');
-          for (const boldEl of boldElements) {
-            const candidateName = boldEl.textContent.trim();
-            if (isValidName(candidateName)) {
-              return candidateName;
-            }
-          }
-
-          // Strategy 5: Text before email (case-insensitive search)
-          const textLower = container.textContent.toLowerCase();
-          const emailIndex = textLower.indexOf(email.toLowerCase());
-
-          if (emailIndex !== -1) {
-            const textBefore = container.textContent.substring(0, emailIndex);
-            const lines = textBefore.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            lines.reverse();
-
-            for (const line of lines) {
-              const words = line.split(/\s+/);
-              const capitalizedWords = words.filter(w => w.length > 0 && w[0] === w[0].toUpperCase());
-
-              if (capitalizedWords.length >= 1 && capitalizedWords.length <= 5) {
-                const candidateName = capitalizedWords.join(' ');
-                if (isValidName(candidateName)) {
-                  return candidateName;
-                }
-              }
-            }
-          }
-
-          return null;
-        };
+      // Extract contacts from containers using universal extraction
+      const contacts = await page.evaluate((selector, start, end, baseUrl, configSelectors, profileUrlPatterns, blacklistArray, extractionCode) => {
+        // Inject and execute universal extraction code
+        eval(extractionCode);
 
         const containers = document.querySelectorAll(selector);
         const results = [];
@@ -412,120 +329,109 @@ class SelectScraper extends BaseScraper {
             continue;
           }
 
-          // Extract email
-          let emailLink = configSelectors?.email
-            ? container.querySelector(configSelectors.email)
-            : container.querySelector('a[href^="mailto:"]');
+          // Use universal extraction from contact-extractor.js
+          const extracted = extractContactFromCard(container, {
+            blacklist: new Set(blacklistArray),
+            profilePatterns: profileUrlPatterns || []
+          });
 
-          if (!emailLink) continue;
+          // Skip containers without email
+          if (!extracted.email) continue;
 
-          const email = emailLink.href.replace('mailto:', '').split('?')[0].toLowerCase();
-
-          // Extract phone from tel: link
-          let phoneLink = configSelectors?.phone
-            ? container.querySelector(configSelectors.phone)
-            : container.querySelector('a[href^="tel:"]');
-
-          let phone = null;
-          let phoneSource = null;
-
-          if (phoneLink) {
-            phone = phoneLink.href.replace('tel:', '').replace(/\D/g, '');
-            // Normalize phone
-            if (phone.length === 10) {
-              phone = `+1-${phone.substring(0, 3)}-${phone.substring(3, 6)}-${phone.substring(6)}`;
-            } else if (phone.length === 11 && phone[0] === '1') {
-              phone = `+${phone[0]}-${phone.substring(1, 4)}-${phone.substring(4, 7)}-${phone.substring(7)}`;
-            }
-            phoneSource = 'tel-link';
-          } else {
-            // Try to match phone from text content
-            const phoneRegex = /(\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})/;
-            const match = container.textContent.match(phoneRegex);
-            if (match) {
-              const digits = match[0].replace(/\D/g, '');
-              if (digits.length === 10) {
-                phone = `+1-${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6)}`;
-              } else if (digits.length === 11 && digits[0] === '1') {
-                phone = `+${digits[0]}-${digits.substring(1, 4)}-${digits.substring(4, 7)}-${digits.substring(7)}`;
-              }
-              phoneSource = 'text-match';
-            }
-          }
-
-          // Extract profile URL
-          let profileUrl = null;
-          if (configSelectors?.profileLink) {
-            const profileLink = container.querySelector(configSelectors.profileLink);
-            if (profileLink) {
-              profileUrl = new URL(profileLink.href, baseUrl).href;
-            }
-          } else if (profileUrlPatterns && profileUrlPatterns.length > 0) {
-            const links = container.querySelectorAll('a[href]');
-            for (const link of links) {
-              const href = link.getAttribute('href');
-              if (href && profileUrlPatterns.some(pattern => href.includes(pattern))) {
-                profileUrl = new URL(href, baseUrl).href;
-                break;
+          // Override with config-specific selectors if provided
+          if (configSelectors?.email) {
+            const emailEl = container.querySelector(configSelectors.email);
+            if (emailEl) {
+              const href = emailEl.href || '';
+              if (href.includes('mailto:')) {
+                extracted.email = href.replace('mailto:', '').split('?')[0].toLowerCase();
               }
             }
           }
 
-          // Extract name
-          let name = null;
           if (configSelectors?.name) {
             const nameEl = container.querySelector(configSelectors.name);
             if (nameEl) {
-              name = nameEl.textContent.trim();
+              extracted.name = nameEl.textContent.trim();
             }
-          } else {
-            // Use multi-strategy name extraction
-            name = extractNameFromContainer(container, email);
           }
 
-          // Extract domain
-          const domain = email.split('@')[1];
+          if (configSelectors?.phone) {
+            const phoneEl = container.querySelector(configSelectors.phone);
+            if (phoneEl) {
+              const href = phoneEl.href || '';
+              if (href.includes('tel:')) {
+                const digits = href.replace('tel:', '').replace(/\D/g, '');
+                if (digits.length === 10) {
+                  extracted.phone = `+1-${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6)}`;
+                } else if (digits.length === 11 && digits[0] === '1') {
+                  extracted.phone = `+${digits[0]}-${digits.substring(1, 4)}-${digits.substring(4, 7)}-${digits.substring(7)}`;
+                }
+              }
+            }
+          }
+
+          if (configSelectors?.profileLink) {
+            const profileLink = container.querySelector(configSelectors.profileLink);
+            if (profileLink) {
+              try {
+                extracted.profileUrl = new URL(profileLink.href, baseUrl).href;
+              } catch (e) {}
+            }
+          }
+
+          // Normalize phone if present but not already normalized
+          if (extracted.phone && !extracted.phone.startsWith('+')) {
+            const digits = extracted.phone.replace(/\D/g, '');
+            if (digits.length === 10) {
+              extracted.phone = `+1-${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6)}`;
+            } else if (digits.length === 11 && digits[0] === '1') {
+              extracted.phone = `+${digits[0]}-${digits.substring(1, 4)}-${digits.substring(4, 7)}-${digits.substring(7)}`;
+            }
+          }
+
+          // Normalize profile URL
+          if (extracted.profileUrl && !extracted.profileUrl.startsWith('http')) {
+            try {
+              extracted.profileUrl = new URL(extracted.profileUrl, baseUrl).href;
+            } catch (e) {}
+          }
+
+          // Extract domain from email
+          const domain = extracted.email.split('@')[1];
 
           results.push({
-            name: name,
-            email: email,
-            phone: phone,
-            phoneSource: phoneSource,
-            profileUrl: profileUrl,
+            name: extracted.name,
+            email: extracted.email,
+            phone: extracted.phone,
+            phoneSource: extracted._extraction?.phoneSource || null,
+            profileUrl: extracted.profileUrl,
             source: 'select-dom',
-            confidence: null, // Will be calculated below
+            confidence: extracted.confidence,
             domain: domain,
-            domainType: null // Will be set by DomainExtractor
+            domainType: null, // Will be set by DomainExtractor
+            _extraction: extracted._extraction // Keep extraction metadata for debugging
           });
         }
 
         return results;
-      }, containerSelector, startPos, endPos, baseUrl, config.selectors || {}, config.parsing?.profileUrlPatterns || [], nameBlacklist);
+      }, containerSelector, startPos, endPos, baseUrl, config.selectors || {}, config.parsing?.profileUrlPatterns || [], nameBlacklist, universalExtractionCode);
 
       if (contacts.length === 0) {
         return null;
       }
 
-      // Calculate confidence for each contact
-      for (const contact of contacts) {
-        const hasName = !!contact.name;
-        const hasEmail = !!contact.email;
-        const hasPhone = !!contact.phone;
-
-        if (hasName && hasEmail && hasPhone) {
-          contact.confidence = 'high';
-        } else if ((hasName && hasEmail) || (hasEmail && hasPhone)) {
-          contact.confidence = 'medium';
-        } else {
-          contact.confidence = 'low';
-        }
-      }
-
       // Detect and flag shared phones
       this.detectSharedPhones(contacts);
 
-      // Names are already validated inside the browser context
-      this.logger.info(`DOM extraction found ${contacts.length} contacts`);
+      // Log extraction sources for debugging
+      const emailSources = {};
+      for (const contact of contacts) {
+        const source = contact._extraction?.emailSource || 'unknown';
+        emailSources[source] = (emailSources[source] || 0) + 1;
+      }
+      this.logger.info(`DOM extraction found ${contacts.length} contacts (email sources: ${JSON.stringify(emailSources)})`);
+
       return contacts;
 
     } catch (error) {

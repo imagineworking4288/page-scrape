@@ -1,44 +1,37 @@
 /**
  * Test Configuration
  * Defines test cases with expected results for validation
+ *
+ * Updated: Removed Compass (requires authentication), focused on Sullivan & Cromwell
  */
 
 module.exports = {
   tests: [
     {
-      name: 'compass-manhattan',
-      url: 'https://www.compass.com/agents/new-york/new-york/manhattan/',
-      description: 'Compass Manhattan real estate agents (infinite scroll)',
-      expectedMin: 80,
-      expectedMax: 150,
-      minNamesRequired: 60,
-      scrollOptions: {
-        maxScrolls: 30,
-        scrollDelay: 1500,
-        limit: null
-      }
-    },
-    {
-      name: 'sullivan-cromwell',
+      name: 'sullivan-cromwell-lawyers',
       url: 'https://www.sullcrom.com/lawyers',
-      description: 'Sullivan & Cromwell lawyers directory (infinite scroll)',
-      expectedMin: 40,
-      expectedMax: 100,
-      minNamesRequired: 30,
+      description: 'Sullivan & Cromwell lawyers directory - uses "Email" link text pattern',
+      expectedMin: 50,
+      expectedMax: 300,
+      minNamesRequired: 40,
       scrollOptions: {
-        maxScrolls: 50,
+        maxScrolls: 60,
         scrollDelay: 2000,
+        noChangeThreshold: 3,
         limit: null
       },
-      notes: 'Emails may be on profile pages only - may need profile visiting'
+      // Sullivan & Cromwell uses "Email" text links with mailto: href
+      // Universal extraction handles this via Strategy 0 (email-link-text)
+      extractionNotes: 'Emails extracted via <a> links with text "Email" containing mailto: hrefs'
     }
   ],
 
   // Global test settings
   settings: {
-    timeout: 120000, // 2 minutes per test
+    timeout: 180000, // 3 minutes per test (increased for large directories)
     retries: 2,
     browserHeadless: false, // Set to true for CI/CD
-    saveScreenshots: true
+    saveScreenshots: true,
+    debugMode: false // Set to true for verbose logging
   }
 };

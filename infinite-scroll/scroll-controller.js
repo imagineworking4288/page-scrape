@@ -29,6 +29,22 @@ class ScrollController {
     let noChangeCount = 0;
     let previousHeight = await this.getPageHeight();
 
+    // If initial height is 0, page might not be ready - wait and retry
+    if (previousHeight === 0) {
+      this.logger.warn('Initial page height is 0, waiting for page to be ready...');
+      await this.sleep(2000);
+      previousHeight = await this.getPageHeight();
+
+      if (previousHeight === 0) {
+        this.logger.error('Page height still 0 after waiting, aborting scroll');
+        return {
+          scrollsPerformed: 0,
+          finalHeight: 0,
+          error: 'Page not ready'
+        };
+      }
+    }
+
     console.log(`Initial page height: ${previousHeight}px`);
     this.logger.info(`Initial page height: ${previousHeight}px`);
 
@@ -83,18 +99,54 @@ class ScrollController {
 
   /**
    * Get current page scroll height
+   * Includes retry logic to handle "Requesting main frame too early!" errors
    */
   async getPageHeight() {
-    return await this.page.evaluate(() => document.body.scrollHeight);
+    const maxRetries = 3;
+    const retryDelay = 500;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const height = await this.page.evaluate(() => document.body.scrollHeight);
+        return height;
+      } catch (error) {
+        this.logger.warn(`getPageHeight failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+
+        if (attempt < maxRetries) {
+          await this.sleep(retryDelay);
+        } else {
+          this.logger.error(`getPageHeight failed after ${maxRetries} attempts`);
+          // Return a safe default rather than crashing
+          return 0;
+        }
+      }
+    }
+
+    return 0;
   }
 
   /**
    * Scroll down by 80% of viewport height
+   * Includes error handling to prevent scroll failures from crashing
    */
   async performScroll() {
-    await this.page.evaluate(() => {
-      window.scrollBy(0, window.innerHeight * 0.8);
-    });
+    try {
+      await this.page.evaluate(() => {
+        window.scrollBy(0, window.innerHeight * 0.8);
+      });
+    } catch (error) {
+      this.logger.warn(`performScroll failed: ${error.message}`);
+      // Wait a bit and try once more
+      await this.sleep(500);
+      try {
+        await this.page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight * 0.8);
+        });
+      } catch (retryError) {
+        this.logger.error(`performScroll retry failed: ${retryError.message}`);
+        // Continue anyway - scroll might have worked partially
+      }
+    }
   }
 
   /**

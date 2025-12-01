@@ -95,14 +95,9 @@ class TestRunner {
     this.ensureOutputDir();
     console.log(`[TestRunner] Output directory: ${this.outputDir}`);
 
-    // Initialize logger
-    try {
-      this.logger = new Logger({ level: 'info' });
-      console.log('[TestRunner] ✓ Logger initialized');
-    } catch (error) {
-      console.error('[TestRunner] Logger initialization failed:', error.message);
-      throw error;
-    }
+    // Use logger directly (it's already a configured winston instance, not a class)
+    this.logger = Logger;
+    console.log('[TestRunner] ✓ Logger initialized');
 
     // Initialize browser manager (will be set in initBrowser)
     this.browserManager = null;
@@ -176,6 +171,47 @@ class TestRunner {
   }
 
   /**
+   * Reset page state between tests
+   * Clears cookies, local storage, and navigates to blank page
+   */
+  async resetPageState() {
+    try {
+      const page = this.browserManager.getPage();
+      if (!page) {
+        console.log('[resetPageState] No page to reset');
+        return;
+      }
+
+      // Navigate to about:blank to clear the page
+      console.log('[resetPageState] Navigating to about:blank...');
+      await page.goto('about:blank', { waitUntil: 'load', timeout: 10000 });
+
+      // Clear cookies
+      console.log('[resetPageState] Clearing cookies...');
+      const client = await page.target().createCDPSession();
+      await client.send('Network.clearBrowserCookies');
+
+      // Clear local storage and session storage
+      console.log('[resetPageState] Clearing storage...');
+      await page.evaluate(() => {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch (e) {
+          // May fail on about:blank, that's ok
+        }
+      });
+
+      console.log('[resetPageState] ✓ Page state reset complete');
+      this.logger.info('Page state reset between tests');
+
+    } catch (error) {
+      console.warn('[resetPageState] Error resetting page state:', error.message);
+      // Non-fatal error, continue with tests
+    }
+  }
+
+  /**
    * Run all tests from test-config.js
    */
   async runAllTests() {
@@ -225,9 +261,11 @@ class TestRunner {
           });
         }
 
-        // Wait between tests
+        // Reset page state and wait between tests
         if (i < testConfig.tests.length - 1) {
-          console.log('\n[runAllTests] Waiting 3s before next test...');
+          console.log('\n[runAllTests] Resetting page state before next test...');
+          await this.resetPageState();
+          console.log('[runAllTests] Waiting 3s before next test...');
           await this.sleep(3000);
         }
       }
