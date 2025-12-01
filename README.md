@@ -86,63 +86,69 @@ python -m python_scraper.test_scraper \
 
 See [python_scraper/README.md](python_scraper/README.md) for detailed documentation.
 
-## Infinite Scroll Support
+## Infinite Scroll Support (New Implementation)
 
-The scraper now supports sites that use infinite scroll to load content dynamically.
+The scraper now includes a simplified, reliable infinite scroll implementation for sites that load content dynamically.
 
-### Configuration
+### Testing Infinite Scroll (Standalone)
 
-Add this to your site config:
+Before integrating into the main codebase, test the new implementation:
 
-```json
-{
-  "infiniteScroll": {
-    "enabled": true,
-    "scrollDelay": 2000,
-    "maxScrollAttempts": 50,
-    "noNewContentThreshold": 3,
-    "scrollStrategy": "viewport"
-  }
-}
+```bash
+cd infinite-scroll
+node test-scraper.js
+```
+
+This will:
+- Test against Compass Manhattan and Sullivan & Cromwell
+- Output detailed JSON results to `infinite-scroll/output/`
+- Validate extraction accuracy and completeness
+
+### Test Output
+
+Each test creates detailed JSON files:
+- `compass-manhattan-{timestamp}.json` - Individual test results
+- `sullivan-cromwell-{timestamp}.json`
+- `test-summary.json` - Overall summary with pass/fail status
+
+### Architecture
+
+The new implementation uses a simple 2-phase approach:
+
+**Phase 1: Scroll to End**
+- ScrollController loads all content by scrolling
+- Stops when page height unchanged for 3 consecutive scrolls
+- Automatically clicks "Load More" buttons
+- No extraction during scroll - just content loading
+
+**Phase 2: Extract Contacts**
+- Delegates to SimpleScraper's proven extraction methods
+- No code serialization or browser context issues
+- Reuses existing HTML + PDF extraction logic
+
+### Files
+
+```
+infinite-scroll/
+├── infinite-scroll-scraper.js  (100 lines) - Main scraper
+├── scroll-controller.js        (130 lines) - Scrolling logic
+├── test-scraper.js             (300 lines) - Test runner
+├── test-config.js              (50 lines)  - Test cases
+└── output/                     - JSON test results
 ```
 
 ### Configuration Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `enabled` | false | Enable infinite scroll mode |
+| `maxScrolls` | 50 | Maximum scroll iterations |
 | `scrollDelay` | 1500 | Wait time (ms) after each scroll |
-| `maxScrollAttempts` | 50 | Maximum scroll iterations |
-| `noNewContentThreshold` | 3 | Scrolls without new content before stopping |
-| `scrollStrategy` | "viewport" | "viewport", "bottom", or "fixed" |
-| `networkIdleTimeout` | 5000 | Max time (ms) to wait for network idle |
+| `noChangeThreshold` | 3 | Scrolls without height change before stopping |
+| `limit` | null | Maximum contacts to extract |
 
 ### Known Working Sites
+- Compass.com (real estate agents)
 - Sullivan & Cromwell (sullcrom.com)
-
-### Troubleshooting Infinite Scroll
-
-**Problem**: Scraper stops too early
-- Increase `noNewContentThreshold` to 5
-- Increase `scrollDelay` to 3000ms
-
-**Problem**: Scraper runs too long
-- Decrease `maxScrollAttempts` to 30
-- Use `--limit` flag to stop after N contacts
-
-**Problem**: Duplicate contacts
-- Check that email extraction is working correctly
-- Verify `emailMatchStrategy` is set to "proximity"
-
-### Testing Infinite Scroll
-
-```bash
-# Run basic unit tests
-node tests/infinite-scroll-basic.test.js
-
-# Run integration test with Sullivan & Cromwell
-node tests/infinite-scroll-test.js
-```
 
 ## Pagination Testing
 

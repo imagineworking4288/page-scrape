@@ -28,12 +28,6 @@ class ScrapingWorkflow {
     this.minContacts = options.minContacts || 1;
     this.startPage = options.startPage || 1;
     this.discoverOnly = options.discoverOnly || false;
-
-    // Infinite scroll options
-    this.infiniteScrollEnabled = options.infiniteScrollEnabled || false;
-    this.cardSelector = options.cardSelector || null;
-    this.maxScrollAttempts = options.maxScrollAttempts || 50;
-    this.scrollDelay = options.scrollDelay || 1500;
   }
 
   /**
@@ -224,79 +218,11 @@ class ScrapingWorkflow {
   }
 
   /**
-   * Scrape using infinite scroll
-   * @param {string} url - Target URL
-   * @returns {Promise<Object>} - Scraping result with contacts and stats
-   */
-  async scrapeInfiniteScroll(url) {
-    const scraper = this.createScraper();
-
-    // Check if scraper supports infinite scroll
-    if (typeof scraper.scrapeInfiniteScroll !== 'function') {
-      throw new Error(`Scraper method '${this.method}' does not support infinite scroll`);
-    }
-
-    this.logger.info('Starting infinite scroll scraping...');
-
-    const contacts = await scraper.scrapeInfiniteScroll(url, {
-      cardSelector: this.cardSelector,
-      maxItems: this.limit || Infinity,
-      maxScrollAttempts: this.maxScrollAttempts,
-      scrollDelay: this.scrollDelay,
-      keepPdf: this.keepPdfs
-    });
-
-    // Deduplicate contacts
-    const uniqueContacts = this.deduplicateContacts(contacts);
-
-    return {
-      contacts: uniqueContacts,
-      totalExtracted: contacts.length,
-      duplicatesRemoved: contacts.length - uniqueContacts.length,
-      pagesScraped: 1,
-      scrollMode: true
-    };
-  }
-
-  /**
    * Run the complete scraping workflow
    * @param {string} url - Target URL
    * @returns {Promise<Object>} - Complete workflow result
    */
   async run(url) {
-    // Check if infinite scroll mode is enabled
-    if (this.infiniteScrollEnabled) {
-      this.logger.info('Infinite scroll mode enabled');
-
-      const scrapingResult = await this.scrapeInfiniteScroll(url);
-
-      // Generate domain statistics
-      let domainStats = null;
-      if (this.domainExtractor && scrapingResult.contacts.length > 0) {
-        domainStats = this.domainExtractor.getDomainStats(scrapingResult.contacts);
-      }
-
-      return {
-        discoveryOnly: false,
-        pagination: {
-          success: true,
-          urls: [url],
-          pattern: null,
-          totalPages: 1,
-          paginationType: 'infinite-scroll'
-        },
-        contacts: scrapingResult.contacts,
-        stats: {
-          totalExtracted: scrapingResult.totalExtracted,
-          duplicatesRemoved: scrapingResult.duplicatesRemoved,
-          pagesScraped: 1,
-          uniqueContacts: scrapingResult.contacts.length,
-          scrollMode: true
-        },
-        domainStats: domainStats
-      };
-    }
-
     // Step 1: Discover pagination
     const paginationResult = await this.discoverPagination(url);
 
@@ -305,11 +231,21 @@ class ScrapingWorkflow {
 
       // Check if it's an infinite scroll page
       if (paginationResult.paginationType === 'infinite-scroll') {
-        this.logger.info('Detected infinite scroll - switching to scroll mode');
-
-        // Auto-switch to infinite scroll mode
-        this.infiniteScrollEnabled = true;
-        return await this.run(url);
+        this.logger.info('Detected infinite scroll - use the standalone infinite-scroll scraper');
+        // Return with hint to use infinite scroll scraper
+        return {
+          discoveryOnly: false,
+          pagination: paginationResult,
+          contacts: [],
+          stats: {
+            totalExtracted: 0,
+            duplicatesRemoved: 0,
+            pagesScraped: 0,
+            uniqueContacts: 0
+          },
+          domainStats: null,
+          hint: 'Use infinite-scroll/infinite-scroll-scraper.js for this site'
+        };
       }
     }
 

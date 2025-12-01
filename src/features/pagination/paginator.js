@@ -3,7 +3,6 @@ const { URL } = require('url');
 const PatternDetector = require('./pattern-detector');
 const BinarySearcher = require('./binary-searcher');
 const UrlGenerator = require('./url-generator');
-const { InfiniteScrollHandler } = require('../infinite-scroll');
 
 /**
  * Paginator - Handles automatic pagination detection and URL generation for scraping
@@ -343,64 +342,6 @@ class Paginator {
     } catch (error) {
       return false;
     }
-  }
-
-  /**
-   * Handle infinite scroll extraction
-   * @param {object} page - Puppeteer page object
-   * @param {object} options - Scroll options
-   * @param {Function} extractFn - Function to extract data from current view
-   * @returns {Promise<object>} - {success, items, stats}
-   */
-  async handleInfiniteScroll(page, options = {}, extractFn = null) {
-    const config = {
-      cardSelector: options.cardSelector || null,
-      infiniteScroll: {
-        maxScrollAttempts: options.maxScrollAttempts || 50,
-        scrollDelay: options.scrollDelay || 1500,
-        noNewContentThreshold: options.noNewContentThreshold || 3
-      }
-    };
-
-    const handler = new InfiniteScrollHandler(page, config, this.logger);
-
-    if (!extractFn) {
-      this.logger.warn('[Paginator] No extract function provided for infinite scroll');
-      return {
-        success: false,
-        items: [],
-        stats: handler.getStats(),
-        error: 'No extract function provided'
-      };
-    }
-
-    try {
-      const items = await handler.scrollAndCollect(extractFn, options.maxItems || Infinity);
-      return {
-        success: true,
-        items: items,
-        stats: handler.getStats(),
-        error: null
-      };
-    } catch (error) {
-      this.logger.error(`[Paginator] Infinite scroll error: ${error.message}`);
-      return {
-        success: false,
-        items: [],
-        stats: handler.getStats(),
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Create an InfiniteScrollHandler instance for external use
-   * @param {object} page - Puppeteer page object
-   * @param {object} config - Configuration options
-   * @returns {InfiniteScrollHandler}
-   */
-  createInfiniteScrollHandler(page, config = {}) {
-    return new InfiniteScrollHandler(page, config, this.logger);
   }
 
   /**
