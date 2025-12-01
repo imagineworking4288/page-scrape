@@ -22,12 +22,14 @@ class ScrollController {
    * @returns {Object} - { scrollsPerformed, finalHeight }
    */
   async scrollToEnd() {
+    console.log('ScrollController: Starting scroll to end...');
     this.logger.info('Starting scroll to end...');
 
     let scrollAttempts = 0;
     let noChangeCount = 0;
     let previousHeight = await this.getPageHeight();
 
+    console.log(`Initial page height: ${previousHeight}px`);
     this.logger.info(`Initial page height: ${previousHeight}px`);
 
     while (scrollAttempts < this.maxScrolls) {
@@ -67,8 +69,11 @@ class ScrollController {
     }
 
     if (scrollAttempts >= this.maxScrolls) {
+      console.log(`WARNING: Reached max scrolls (${this.maxScrolls})`);
       this.logger.warn(`Reached max scrolls (${this.maxScrolls})`);
     }
+
+    console.log(`ScrollController complete: ${scrollAttempts} scrolls, final height: ${previousHeight}px`);
 
     return {
       scrollsPerformed: scrollAttempts,

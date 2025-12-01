@@ -25,9 +25,9 @@
     "dotenv": "^16.3.1",
     "googleapis": "^128.0.0",
     "pdf-parse": "^1.1.4",
-    "puppeteer": "^21.5.2",
+    "puppeteer": "^21.11.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "winston": "^3.11.0"
+    "winston": "^3.18.3"
   }
 }
