@@ -10,7 +10,8 @@ const { URL } = require('url');
 class ConfigLoader {
   constructor(logger) {
     this.logger = logger;
-    this.configDir = path.join(__dirname, '..', 'configs');
+    // Config directory is at project root: page-scrape/configs/
+    this.configDir = path.join(__dirname, '..', '..', 'configs');
     this.defaultConfigPath = path.join(this.configDir, '_default.json');
     this.paginationCachePath = path.join(this.configDir, '_pagination_cache.json');
     this.paginationCache = this.loadPaginationCache();
@@ -85,6 +86,14 @@ class ConfigLoader {
       throw new Error(`Config for ${domain} missing required field: domain`);
     }
 
+    // For infinite scroll configs, markers are not required
+    if (config.infiniteScroll?.enabled === true) {
+      // Infinite scroll config - markers optional
+      this.logger.info(`Config for ${domain} uses infinite scroll mode`);
+      return;
+    }
+
+    // For traditional select scraping, markers are required
     if (!config.markers) {
       throw new Error(`Config for ${domain} missing required field: markers`);
     }
@@ -120,7 +129,7 @@ class ConfigLoader {
       if (config.parsing.emailDomain !== null && typeof config.parsing.emailDomain !== 'string') {
         throw new Error(`Config for ${domain}: parsing.emailDomain must be string or null`);
       }
-      if (typeof config.parsing.nameBeforeEmail !== 'boolean') {
+      if (config.parsing.nameBeforeEmail !== undefined && typeof config.parsing.nameBeforeEmail !== 'boolean') {
         throw new Error(`Config for ${domain}: parsing.nameBeforeEmail must be boolean`);
       }
     }

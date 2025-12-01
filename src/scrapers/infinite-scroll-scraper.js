@@ -145,8 +145,36 @@ class InfiniteScrollScraper extends SimpleScraper {
       await page.evaluate(() => window.scrollTo(0, 0));
       await this.sleep(1000);
 
-      // Extract all contacts using universal extraction
-      const rawContacts = await this.extractAllContactsWithProfiles(page, cardSelector, siteConfig);
+      // Determine extraction method based on config
+      const extractionMethod = siteConfig.infiniteScroll?.extractionMethod || 'universal';
+      let rawContacts = [];
+
+      if (extractionMethod === 'profile-only') {
+        // Profile-only: emails are ONLY on profile pages, not on listing
+        // Just extract names + profile URLs, then visit profiles in Phase 4
+        this.logger.info('Using profile-only extraction method (emails only on profile pages)');
+        rawContacts = await this.extractContactsFromProfileUrls(page, cardSelector, siteConfig);
+      } else if (extractionMethod === 'text-selection') {
+        // Use text selection approach (for sites where emails are in text but hard to DOM-parse)
+        this.logger.info('Using text selection extraction method');
+        rawContacts = await this.extractAllContactsViaTextSelection(page, cardSelector, siteConfig);
+      } else {
+        // Use DOM-based universal extraction (default)
+        this.logger.info('Using DOM-based universal extraction method');
+        rawContacts = await this.extractAllContactsWithProfiles(page, cardSelector, siteConfig);
+
+        // If DOM extraction found no contacts with emails, try profile-only as fallback
+        const contactsWithEmails = rawContacts.filter(c => c.email).length;
+        if (contactsWithEmails === 0 && rawContacts.length < scrollStats.finalCardCount / 2) {
+          this.logger.info('DOM extraction yielded few results, trying profile-only fallback...');
+          const profileContacts = await this.extractContactsFromProfileUrls(page, cardSelector, siteConfig);
+          if (profileContacts.length > rawContacts.length) {
+            rawContacts = profileContacts;
+            this.logger.info(`Profile-only extraction found ${profileContacts.length} contacts`);
+          }
+        }
+      }
+
       this.logger.info(`Extracted ${rawContacts.length} contacts from ${scrollStats.finalCardCount} cards`);
 
       // ═══════════════════════════════════════
@@ -312,7 +340,7 @@ class InfiniteScrollScraper extends SimpleScraper {
   }
 
   /**
-   * Phase 2: Extract all contacts with profile URLs in one pass
+   * Phase 2: Extract all contacts with profile URLs in one pass (DOM-based)
    * @param {Object} page - Puppeteer page
    * @param {string} cardSelector - CSS selector for cards
    * @param {Object} siteConfig - Site configuration
@@ -375,6 +403,244 @@ class InfiniteScrollScraper extends SimpleScraper {
     }
 
     return businessContacts;
+  }
+
+  /**
+   * Phase 2 (Alternative): Extract contacts via text selection (like browser copy/paste)
+   * This mimics selecting all card text and parsing it as a string.
+   * Use this when DOM extraction fails to find emails (emails only on profile pages).
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {Object} siteConfig - Site configuration
+   * @returns {Promise<Array>} - Array of contact objects
+   */
+  async extractAllContactsViaTextSelection(page, cardSelector, siteConfig = {}) {
+    this.logger.info('[Phase 2] Selecting all card text...');
+
+    // Step 1: Select all text from cards (like browser Ctrl+A on card section)
+    const selectedText = await this.selectAllCardsText(page, cardSelector);
+
+    if (!selectedText || selectedText.length === 0) {
+      this.logger.warn('No text selected from cards');
+      return [];
+    }
+
+    this.logger.info(`Selected ${selectedText.length} characters of text`);
+
+    // Step 2: Parse text string into contacts using TextParser
+    const TextParser = require('../utils/text-parser');
+    const textParser = new TextParser(this.logger);
+
+    const contacts = textParser.parse(selectedText, siteConfig);
+    this.logger.info(`Parsed ${contacts.length} contacts from text`);
+
+    // Step 3: Collect profile URLs from DOM (separate from text parsing)
+    const profileUrls = await this.collectProfileUrls(page, cardSelector, siteConfig);
+    this.logger.info(`Collected ${profileUrls.length} profile URLs from DOM`);
+
+    // Step 4: Match contacts to profile URLs by name similarity
+    const matchedContacts = this.matchContactsToProfileUrls(contacts, profileUrls);
+    const withProfiles = matchedContacts.filter(c => c.profileUrl).length;
+    this.logger.info(`Matched ${withProfiles}/${contacts.length} contacts to profile URLs`);
+
+    // Step 5: Add domain info to contacts with emails
+    for (const contact of matchedContacts) {
+      if (contact.email) {
+        this.addDomainInfo(contact);
+      }
+    }
+
+    return matchedContacts;
+  }
+
+  /**
+   * Select all text from cards using browser Selection API
+   * Mimics user selecting text with mouse/keyboard
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @returns {Promise<string>} - Selected text as string
+   */
+  async selectAllCardsText(page, cardSelector) {
+    return await page.evaluate((selector) => {
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+
+      if (cards.length === 0) {
+        return '';
+      }
+
+      // Create a range spanning all cards
+      const range = document.createRange();
+      const firstCard = cards[0];
+      const lastCard = cards[cards.length - 1];
+
+      // Set range start to beginning of first card
+      range.setStart(firstCard, 0);
+
+      // Set range end to end of last card
+      range.setEnd(lastCard, lastCard.childNodes.length);
+
+      // Use Selection API to get text (mimics browser selection)
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Extract text
+      const selectedText = selection.toString();
+
+      // Clear selection (clean up)
+      selection.removeAllRanges();
+
+      return selectedText;
+    }, cardSelector);
+  }
+
+  /**
+   * Collect profile URLs from DOM
+   * Extracts {url, name} pairs for matching
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {Object} siteConfig - Site configuration
+   * @returns {Promise<Array>} - Array of {url, name} objects
+   */
+  async collectProfileUrls(page, cardSelector, siteConfig = {}) {
+    const profilePatterns = siteConfig.parsing?.profileUrlPatterns || [
+      '/agents/', '/profile/', '/realtor/', '/team/', '/broker/',
+      '/member/', '/lawyer/', '/Lawyers/', '/attorney/', '/people/',
+      '/professionals/', '/attorneys/', '/our-team/', '/staff/'
+    ];
+
+    return await page.evaluate((selector, patterns) => {
+      const cards = selector ? document.querySelectorAll(selector) : [document.body];
+      const results = [];
+
+      for (const card of cards) {
+        // Find links matching profile patterns
+        const links = card.querySelectorAll('a[href]');
+
+        for (const link of links) {
+          const href = link.href;
+          if (!href) continue;
+
+          // Check if URL matches profile pattern
+          const isProfileUrl = patterns.some(pattern =>
+            href.toLowerCase().includes(pattern.toLowerCase())
+          );
+
+          if (!isProfileUrl) continue;
+
+          // Try to extract name from link or nearby elements
+          let name = link.textContent.trim();
+
+          // If link text is generic, look in parent card for name
+          if (!name || name.length < 3 || /^(view|profile|more|details|email)$/i.test(name)) {
+            // Look for name in headings
+            const nameEl = card.querySelector('h1, h2, h3, h4, .name, [class*="name"]');
+            if (nameEl) {
+              name = nameEl.textContent.trim();
+            }
+          }
+
+          if (name && href) {
+            results.push({
+              url: href,
+              name: name
+            });
+            break; // One profile URL per card
+          }
+        }
+      }
+
+      return results;
+    }, cardSelector, profilePatterns);
+  }
+
+  /**
+   * Match contacts to profile URLs by name similarity
+   * @param {Array} contacts - Contacts from text parsing
+   * @param {Array} profileUrls - Profile URLs from DOM
+   * @returns {Array} - Contacts with matched profileUrl field
+   */
+  matchContactsToProfileUrls(contacts, profileUrls) {
+    this.logger.info(`[DEBUG] Matching ${contacts.length} contacts to ${profileUrls.length} profile URLs`);
+    if (contacts.length > 0) {
+      this.logger.info(`[DEBUG] Sample contact: ${JSON.stringify(contacts[0])}`);
+    }
+    if (profileUrls.length > 0) {
+      this.logger.info(`[DEBUG] Sample profile URL: ${JSON.stringify(profileUrls[0])}`);
+    }
+
+    for (const contact of contacts) {
+      if (!contact.name) continue;
+
+      // Find matching profile URL by name
+      const contactNameLower = contact.name.toLowerCase();
+
+      const match = profileUrls.find(profile => {
+        const profileNameLower = profile.name.toLowerCase();
+
+        // Try exact match first
+        if (contactNameLower === profileNameLower) return true;
+
+        // Try substring match (either direction)
+        if (contactNameLower.includes(profileNameLower)) return true;
+        if (profileNameLower.includes(contactNameLower)) return true;
+
+        // Try word-by-word match
+        const contactWords = contactNameLower.split(/\s+/);
+        const profileWords = profileNameLower.split(/\s+/);
+
+        // If all words in one name appear in the other
+        const allContactWordsInProfile = contactWords.every(word =>
+          profileWords.some(pw => pw.includes(word) || word.includes(pw))
+        );
+        const allProfileWordsInContact = profileWords.every(word =>
+          contactWords.some(cw => cw.includes(word) || word.includes(cw))
+        );
+
+        return allContactWordsInProfile || allProfileWordsInContact;
+      });
+
+      if (match) {
+        contact.profileUrl = match.url;
+      }
+    }
+
+    return contacts;
+  }
+
+  /**
+   * Phase 2 (Profile-Only): Extract contacts from profile URLs
+   * For sites where emails are ONLY on profile pages (not on listing)
+   * Creates contacts from profile URLs with names, ready for enrichment
+   * @param {Object} page - Puppeteer page
+   * @param {string} cardSelector - CSS selector for cards
+   * @param {Object} siteConfig - Site configuration
+   * @returns {Promise<Array>} - Array of contact objects with profileUrl (no email yet)
+   */
+  async extractContactsFromProfileUrls(page, cardSelector, siteConfig = {}) {
+    this.logger.info('[Phase 2] Extracting contacts from profile URLs (profile-only mode)...');
+
+    // Collect profile URLs with names from DOM
+    const profileUrls = await this.collectProfileUrls(page, cardSelector, siteConfig);
+    this.logger.info(`Found ${profileUrls.length} profile URLs with names`);
+
+    // Create contacts from profile URLs
+    const contacts = [];
+    for (const profile of profileUrls) {
+      if (profile.name && profile.url) {
+        contacts.push({
+          name: profile.name,
+          email: null,
+          phone: null,
+          profileUrl: profile.url,
+          confidence: 'low',
+          source: 'infinite-scroll-profile-url'
+        });
+      }
+    }
+
+    this.logger.info(`Created ${contacts.length} contacts from profile URLs (ready for enrichment)`);
+    return contacts;
   }
 
   /**

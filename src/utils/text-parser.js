@@ -22,14 +22,18 @@ class TextParser {
    * @param {object} config - Site config with parsing rules
    * @returns {array} - Array of contact objects
    */
-  parse(rawText, config) {
+  parse(rawText, config = {}) {
     if (!rawText || rawText.trim().length === 0) {
       this.logger.warn('No text provided to parser');
       return [];
     }
 
+    // Safely access parsing config
+    const parsingConfig = config?.parsing || {};
+    const emailDomain = parsingConfig.emailDomain || null;
+
     // Find all emails in text
-    const emails = this.extractEmails(rawText, config.parsing?.emailDomain);
+    const emails = this.extractEmails(rawText, emailDomain);
 
     if (emails.length === 0) {
       this.logger.warn('No emails found in selected text');
@@ -47,7 +51,7 @@ class TextParser {
       const block = blocks[i];
       const email = emails[i];
 
-      const contact = this.parseBlock(block, email, config.parsing);
+      const contact = this.parseBlock(block, email, parsingConfig);
 
       if (contact) {
         contacts.push(contact);

@@ -18,9 +18,9 @@
     "noNewContentThreshold": 3,
     "scrollStrategy": "viewport",
     "networkIdleTimeout": 5000,
-    "extractionMethod": "universal",
+    "extractionMethod": "profile-only",
     "minCardIncrement": 1,
-    "comment": "Batch architecture: scroll all → select all → parse → enrich"
+    "comment": "Profile-only mode: emails are ONLY on profile pages, not on listing. Extract names+URLs, then visit profiles."
   },
   "profileVisiting": {
     "enabled": true,
