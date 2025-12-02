@@ -57,7 +57,7 @@ class BaseScraper {
 
     // Skip if profile visiting is disabled
     if (!profileConfig.enabled) {
-      this.logger.log('[BaseScraper] Profile visiting disabled, skipping enrichment');
+      this.logger.info('[BaseScraper] Profile visiting disabled, skipping enrichment');
       return { enrichedContacts: contacts, stats: { skipped: contacts.length } };
     }
 
@@ -65,11 +65,11 @@ class BaseScraper {
     const needsEnrichment = contacts.filter(c => c.profileUrl && !c.email);
 
     if (needsEnrichment.length === 0) {
-      this.logger.log('[BaseScraper] No contacts need profile enrichment');
+      this.logger.info('[BaseScraper] No contacts need profile enrichment');
       return { enrichedContacts: contacts, stats: { skipped: contacts.length } };
     }
 
-    this.logger.log(`[BaseScraper] Enriching ${needsEnrichment.length} contacts from profiles`);
+    this.logger.info(`[BaseScraper] Enriching ${needsEnrichment.length} contacts from profiles`);
 
     const visitor = this.getProfileVisitor(config);
     return await visitor.visitProfiles(contacts, page, config);

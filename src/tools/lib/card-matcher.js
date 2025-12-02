@@ -646,8 +646,8 @@ class CardMatcher {
   async findSimilarCards(page, selectionBox, threshold = null) {
     const effectiveThreshold = threshold || this.DEFAULT_THRESHOLD;
 
-    this.logger.log(`[CardMatcher] Finding cards with threshold ${effectiveThreshold}%`);
-    this.logger.log(`[CardMatcher] Selection box: ${JSON.stringify(selectionBox)}`);
+    this.logger.info(`[CardMatcher] Finding cards with threshold ${effectiveThreshold}%`);
+    this.logger.info(`[CardMatcher] Selection box: ${JSON.stringify(selectionBox)}`);
 
     try {
       // Inject matcher code
@@ -663,7 +663,7 @@ class CardMatcher {
         return result;
       }
 
-      this.logger.log(`[CardMatcher] Found ${result.totalFound} matching cards`);
+      this.logger.info(`[CardMatcher] Found ${result.totalFound} matching cards`);
 
       return result;
 

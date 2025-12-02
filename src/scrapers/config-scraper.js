@@ -53,7 +53,7 @@ class ConfigScraper extends BaseScraper {
     const content = fs.readFileSync(fullPath, 'utf8');
     const config = JSON.parse(content);
 
-    this.logger.log(`[ConfigScraper] Loaded config: ${config.name} (v${config.version})`);
+    this.logger.info(`[ConfigScraper] Loaded config: ${config.name} (v${config.version})`);
 
     return config;
   }
@@ -104,7 +104,7 @@ class ConfigScraper extends BaseScraper {
    * @returns {Promise<Array>} - Array of contacts
    */
   async scrape(url, limit = 100, keep = false, pageNum = 1, sourceUrl = null) {
-    this.logger.log(`[ConfigScraper] Scraping: ${url} (page ${pageNum})`);
+    this.logger.info(`[ConfigScraper] Scraping: ${url} (page ${pageNum})`);
 
     // Validate config
     const validation = this.validateConfig(this.config);
@@ -163,7 +163,7 @@ class ConfigScraper extends BaseScraper {
         contact.pageNum = pageNum;
       });
 
-      this.logger.log(`[ConfigScraper] Extracted ${contacts.length} contacts`);
+      this.logger.info(`[ConfigScraper] Extracted ${contacts.length} contacts`);
 
       return contacts;
 
@@ -214,7 +214,7 @@ class ConfigScraper extends BaseScraper {
       });
     }, cardSelector);
 
-    this.logger.log(`[ConfigScraper] Found ${cardBoxes.length} card elements`);
+    this.logger.info(`[ConfigScraper] Found ${cardBoxes.length} card elements`);
 
     if (cardBoxes.length === 0) {
       // Try pattern-based matching as fallback
@@ -265,7 +265,7 @@ class ConfigScraper extends BaseScraper {
    * @returns {Promise<Array>} - Contacts array
    */
   async extractWithPatternMatching(page, limit) {
-    this.logger.log('[ConfigScraper] Using pattern-based card matching');
+    this.logger.info('[ConfigScraper] Using pattern-based card matching');
 
     // Use structural/visual patterns from config
     const pattern = this.config.cardPattern;
@@ -409,7 +409,7 @@ class ConfigScraper extends BaseScraper {
     const pagination = this.config.pagination;
 
     while (pageNum <= maxPages && allContacts.length < limit) {
-      this.logger.log(`[ConfigScraper] Scraping page ${pageNum}: ${currentUrl}`);
+      this.logger.info(`[ConfigScraper] Scraping page ${pageNum}: ${currentUrl}`);
 
       const pageContacts = await this.scrape(
         currentUrl,
@@ -420,7 +420,7 @@ class ConfigScraper extends BaseScraper {
       );
 
       if (pageContacts.length === 0) {
-        this.logger.log('[ConfigScraper] No contacts found, stopping pagination');
+        this.logger.info('[ConfigScraper] No contacts found, stopping pagination');
         break;
       }
 
@@ -432,7 +432,7 @@ class ConfigScraper extends BaseScraper {
         const nextUrl = await this.getNextPageUrl(page, pagination.settings.nextSelector);
 
         if (!nextUrl) {
-          this.logger.log('[ConfigScraper] No next page found');
+          this.logger.info('[ConfigScraper] No next page found');
           break;
         }
 
@@ -450,7 +450,7 @@ class ConfigScraper extends BaseScraper {
       await this.rateLimiter.wait();
     }
 
-    this.logger.log(`[ConfigScraper] Total contacts extracted: ${allContacts.length}`);
+    this.logger.info(`[ConfigScraper] Total contacts extracted: ${allContacts.length}`);
 
     return allContacts;
   }
@@ -516,7 +516,7 @@ class ConfigScraper extends BaseScraper {
    * @returns {Promise<Array>} - All contacts
    */
   async scrapeWithScroll(url, limit = 100, maxScrolls = 50) {
-    this.logger.log(`[ConfigScraper] Scraping with scroll: ${url}`);
+    this.logger.info(`[ConfigScraper] Scraping with scroll: ${url}`);
 
     const page = await this.browserManager.getPage();
     if (!page) return [];
@@ -559,7 +559,7 @@ class ConfigScraper extends BaseScraper {
           allContacts.push(...newContacts);
         }
 
-        this.logger.log(`[ConfigScraper] Scroll ${scrollCount + 1}: ${newContacts.length} new, ${allContacts.length} total`);
+        this.logger.info(`[ConfigScraper] Scroll ${scrollCount + 1}: ${newContacts.length} new, ${allContacts.length} total`);
 
         // Scroll down
         await page.evaluate(() => {

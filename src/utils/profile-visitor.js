@@ -67,7 +67,7 @@ class ProfileVisitor {
       return true;
     });
 
-    this.logger.log(`[ProfileVisitor] Starting profile visits: ${contactsToVisit.length} profiles to visit`);
+    this.logger.info(`[ProfileVisitor] Starting profile visits: ${contactsToVisit.length} profiles to visit`);
 
     // Process profiles sequentially to avoid rate limiting
     for (const contact of contactsToVisit) {
@@ -79,7 +79,7 @@ class ProfileVisitor {
           contact.email = result.email;
           contact.emailSource = 'profile-page';
           stats.enriched++;
-          this.logger.log(`[ProfileVisitor] Enriched: ${contact.name || 'Unknown'} -> ${result.email}`);
+          this.logger.info(`[ProfileVisitor] Enriched: ${contact.name || 'Unknown'} -> ${result.email}`);
         }
 
         // Also capture phone if missing
@@ -98,7 +98,7 @@ class ProfileVisitor {
       }
     }
 
-    this.logger.log(`[ProfileVisitor] Complete: ${stats.enriched} enriched, ${stats.failed} failed, ${stats.skipped} skipped`);
+    this.logger.info(`[ProfileVisitor] Complete: ${stats.enriched} enriched, ${stats.failed} failed, ${stats.skipped} skipped`);
 
     return {
       enrichedContacts: contacts,
@@ -388,7 +388,7 @@ class ProfileVisitor {
       return results;
     }, profilePatterns);
 
-    this.logger.log(`[ProfileVisitor] Found ${profiles.length} profile URLs`);
+    this.logger.info(`[ProfileVisitor] Found ${profiles.length} profile URLs`);
     return profiles;
   }
 

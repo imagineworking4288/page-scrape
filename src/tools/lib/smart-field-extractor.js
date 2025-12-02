@@ -164,26 +164,56 @@ class SmartFieldExtractor {
 
       /**
        * Extract emails from element
+       * Priority order:
+       * 1. mailto: links (most reliable - handles "Email" link text case)
+       * 2. Links with text containing @
+       * 3. Plain text email patterns
        */
       function extractEmails(element) {
         const emails = [];
-        const text = element.textContent;
 
-        // From text content
-        const textMatches = text.match(PATTERNS.email) || [];
-        textMatches.forEach(email => {
-          if (!emails.includes(email.toLowerCase())) {
-            emails.push(email.toLowerCase());
-          }
-        });
-
-        // From mailto links
+        // Strategy 1: From mailto links (HIGHEST PRIORITY)
+        // Handles case where link text is "Email" but href has actual address
         const mailtoLinks = element.querySelectorAll('a[href^="mailto:"]');
         mailtoLinks.forEach(link => {
           const href = link.getAttribute('href');
-          const email = href.replace('mailto:', '').split('?')[0].toLowerCase();
-          if (email && !emails.includes(email)) {
+          const email = href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+          if (email && email.includes('@') && !emails.includes(email)) {
             emails.push(email);
+          }
+        });
+
+        // Strategy 2: Links with email-like text (in case mailto not used)
+        const allLinks = element.querySelectorAll('a[href]');
+        allLinks.forEach(link => {
+          const text = link.textContent.trim();
+          const match = text.match(PATTERNS.email);
+          if (match) {
+            const email = match[0].toLowerCase();
+            if (!emails.includes(email)) {
+              emails.push(email);
+            }
+          }
+          // Also check href for email patterns (some sites put email in href without mailto)
+          const href = link.getAttribute('href');
+          if (href && href.includes('@') && !href.startsWith('mailto:')) {
+            const hrefMatch = href.match(PATTERNS.email);
+            if (hrefMatch) {
+              const email = hrefMatch[0].toLowerCase();
+              if (!emails.includes(email)) {
+                emails.push(email);
+              }
+            }
+          }
+        });
+
+        // Strategy 3: Plain text content (fallback)
+        const text = element.textContent;
+        const textMatches = text.match(PATTERNS.email) || [];
+        textMatches.forEach(email => {
+          const normalizedEmail = email.toLowerCase();
+          if (!emails.includes(normalizedEmail)) {
+            emails.push(normalizedEmail);
           }
         });
 
@@ -708,7 +738,7 @@ class SmartFieldExtractor {
    * @returns {Promise<Object>} - Extracted data
    */
   async extractFromSelection(page, selectionBox) {
-    this.logger.log('[SmartFieldExtractor] Extracting from selection');
+    this.logger.info('[SmartFieldExtractor] Extracting from selection');
 
     try {
       // Inject extractor code
@@ -744,7 +774,7 @@ class SmartFieldExtractor {
    * @returns {Promise<Array>} - Array of extracted data
    */
   async extractFromCards(page, boxes, limit = 100) {
-    this.logger.log(`[SmartFieldExtractor] Extracting from ${boxes.length} cards`);
+    this.logger.info(`[SmartFieldExtractor] Extracting from ${boxes.length} cards`);
 
     try {
       // Inject extractor code
@@ -787,7 +817,7 @@ class SmartFieldExtractor {
         return extracted;
       }, boxes, pageUrl, limit);
 
-      this.logger.log(`[SmartFieldExtractor] Extracted ${results.length} cards`);
+      this.logger.info(`[SmartFieldExtractor] Extracted ${results.length} cards`);
 
       return results;
 
