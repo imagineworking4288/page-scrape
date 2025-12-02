@@ -25,10 +25,11 @@ const program = new Command();
 program
   .name('universal-scraper')
   .description('Universal professional directory scraper')
-  .version('1.0.0')
+  .version('2.0.0')
   .requiredOption('-u, --url <url>', 'Target URL to scrape')
   .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
-  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid|select', 'hybrid')
+  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid|select|config', 'hybrid')
+  .option('-c, --config <name>', 'Config file name for --method config (e.g., "sullcrom" or "sullcrom.json")')
   .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
   .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
@@ -41,6 +42,8 @@ program
   .option('--min-contacts <number>', 'Minimum contacts per page to continue', parseInt)
   .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
   .option('--no-export', 'Skip Google Sheets export (only output JSON)')
+  .option('--scroll', 'Enable infinite scroll handling for --method config')
+  .option('--max-scrolls <number>', 'Maximum scroll attempts for infinite scroll', parseInt, 50)
   .parse(process.argv);
 
 const options = program.opts();
@@ -312,8 +315,33 @@ async function main() {
         scraper = new SelectScraper(browserManager, rateLimiter, logger);
         break;
 
+      case 'config':
+        logger.info('Using config method (v2.0 config-based extraction)...');
+        const ConfigScraper = require('./src/scrapers/config-scraper');
+
+        // Load config file
+        if (!options.config) {
+          // Try to auto-detect config from URL domain
+          const urlObj = new URL(options.url);
+          const domain = urlObj.hostname.replace(/^www\./, '').replace(/\.[^.]+$/, '');
+          options.config = domain;
+          logger.info(`Auto-detecting config: ${options.config}`);
+        }
+
+        const configScraperInstance = new ConfigScraper(browserManager, rateLimiter, logger);
+        const loadedConfig = configScraperInstance.loadConfig(options.config);
+
+        scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
+        logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
+
+        // Handle infinite scroll mode
+        if (options.scroll || loadedConfig.pagination?.type === 'infinite-scroll') {
+          logger.info('Infinite scroll mode enabled');
+        }
+        break;
+
       default:
-        throw new Error(`Invalid method: ${options.method}. Use html, pdf, hybrid, or select.`);
+        throw new Error(`Invalid method: ${options.method}. Use html, pdf, hybrid, select, or config.`);
     }
 
     // Loop through all pages
@@ -335,6 +363,15 @@ async function main() {
 
         if (options.method === 'pdf') {
           pageContacts = await scraper.scrapePdf(pageUrl, options.limit, options.keep, currentPage, pageUrl);
+        } else if (options.method === 'config' && (options.scroll || scraper.config?.pagination?.type === 'infinite-scroll')) {
+          // Use scroll-based scraping for config method with infinite scroll
+          pageContacts = await scraper.scrapeWithScroll(pageUrl, options.limit, options.maxScrolls || 50);
+        } else if (options.method === 'config' && paginationEnabled) {
+          // Use pagination-aware scraping for config method
+          pageContacts = await scraper.scrapeWithPagination(pageUrl, options.limit, maxPages);
+          // Skip the rest of the loop since pagination is handled internally
+          allContacts = pageContacts;
+          break;
         } else {
           pageContacts = await scraper.scrape(pageUrl, options.limit, options.keep, currentPage, pageUrl);
         }

@@ -1,8 +1,11 @@
 /**
- * Config Builder
+ * Config Builder v2.0
  *
- * Builds site-specific configuration files from interactive selections.
- * Supports traditional pagination configurations.
+ * Builds site-specific configuration files from visual card selection.
+ * Supports both legacy v1.0 format and new v2.0 format with:
+ * - Card pattern matching (structural + visual signatures)
+ * - Smart field extraction rules
+ * - Enhanced pagination support
  */
 
 const fs = require('fs');
@@ -15,7 +18,185 @@ class ConfigBuilder {
   }
 
   /**
-   * Build configuration object from selections
+   * Build v2.0 configuration from visual selection
+   * @param {Object} matchResult - Result from CardMatcher.findSimilarCards()
+   * @param {Object} extractionRules - Rules from SmartFieldExtractor
+   * @param {Object} metadata - Site metadata
+   * @returns {Object} - Configuration v2.0 object
+   */
+  buildConfigV2(matchResult, extractionRules, metadata) {
+    const config = {
+      // Metadata
+      name: this.generateConfigName(metadata.url),
+      version: '2.0',
+      createdAt: new Date().toISOString(),
+      sourceUrl: metadata.url,
+      domain: metadata.domain,
+
+      // Card pattern for matching
+      cardPattern: this.buildCardPattern(matchResult),
+
+      // Field extraction configuration
+      fieldExtraction: extractionRules || this.getDefaultExtractionRules(),
+
+      // Pagination configuration
+      pagination: this.buildPaginationConfig(metadata.pagination || {}, metadata),
+
+      // Extraction settings
+      extraction: {
+        waitFor: matchResult.selector,
+        waitTimeout: 15000,
+        scrollToLoad: true,
+        stripHtml: true,
+        trimWhitespace: true,
+        deduplicateBy: 'email'
+      },
+
+      // Site-specific options
+      options: {
+        minDelay: 2000,
+        maxDelay: 5000,
+        userAgent: null,
+        viewport: { width: 1920, height: 1080 }
+      },
+
+      // Detection statistics
+      detectionStats: {
+        totalCardsFound: matchResult.totalFound || 0,
+        avgConfidence: this.calculateAverageConfidence(matchResult.matches || []),
+        timestamp: new Date().toISOString()
+      },
+
+      // Notes
+      notes: this.generateNotesV2(matchResult, metadata)
+    };
+
+    return config;
+  }
+
+  /**
+   * Build card pattern from match result
+   * @param {Object} matchResult - Result from CardMatcher
+   * @returns {Object} - Card pattern configuration
+   */
+  buildCardPattern(matchResult) {
+    const ref = matchResult.referenceElement || {};
+
+    return {
+      // CSS selector for finding cards
+      selector: matchResult.selector || null,
+
+      // Structural signature for matching
+      structural: {
+        tagName: ref.structural?.tagName || null,
+        parentChain: ref.structural?.parentChain || [],
+        childCount: ref.structural?.childCount || 0,
+        childTags: ref.structural?.childTags || {},
+        classPatterns: ref.structural?.classPatterns || [],
+        hasLinks: ref.structural?.hasLinks || false,
+        hasImages: ref.structural?.hasImages || false
+      },
+
+      // Visual properties for matching
+      visual: {
+        width: ref.visual?.box?.width || null,
+        height: ref.visual?.box?.height || null,
+        aspectRatio: ref.visual?.aspectRatio || null,
+        display: ref.visual?.display || null
+      },
+
+      // Matching thresholds
+      matching: {
+        structuralWeight: 0.6,
+        visualWeight: 0.4,
+        minConfidence: 65
+      }
+    };
+  }
+
+  /**
+   * Get default field extraction rules
+   * @returns {Object} - Default extraction rules
+   */
+  getDefaultExtractionRules() {
+    return {
+      strategy: 'smart',
+      contextWindow: 400,
+      fields: {
+        name: {
+          required: true,
+          selectors: ['[class*="name"]', 'h1', 'h2', 'h3', 'h4', 'strong'],
+          validation: 'name'
+        },
+        email: {
+          required: true,
+          pattern: 'email',
+          includeMailto: true
+        },
+        phone: {
+          required: false,
+          pattern: 'phone',
+          includeTel: true,
+          normalize: true
+        },
+        title: {
+          required: false,
+          selectors: ['[class*="title"]', '[class*="position"]', '[class*="role"]']
+        },
+        location: {
+          required: false,
+          selectors: ['[class*="location"]', '[class*="city"]', '[class*="address"]']
+        },
+        profileUrl: {
+          required: false,
+          urlPatterns: ['/profile/', '/people/', '/attorney/', '/staff/', '/bio/']
+        },
+        socialLinks: {
+          required: false,
+          platforms: ['linkedin', 'twitter', 'facebook', 'github']
+        }
+      }
+    };
+  }
+
+  /**
+   * Calculate average confidence from matches
+   * @param {Array} matches - Array of match results
+   * @returns {number} - Average confidence percentage
+   */
+  calculateAverageConfidence(matches) {
+    if (!matches || matches.length === 0) return 0;
+    const sum = matches.reduce((acc, m) => acc + (m.confidence || 0), 0);
+    return Math.round(sum / matches.length);
+  }
+
+  /**
+   * Generate notes for v2.0 config
+   * @param {Object} matchResult - Match result
+   * @param {Object} metadata - Site metadata
+   * @returns {Array} - Notes array
+   */
+  generateNotesV2(matchResult, metadata) {
+    const notes = [];
+
+    notes.push(`Config v2.0 generated on ${new Date().toLocaleString()}`);
+    notes.push(`Source: ${metadata.url}`);
+    notes.push(`Cards detected: ${matchResult.totalFound || 0}`);
+
+    if (matchResult.matches && matchResult.matches.length > 0) {
+      const avgConf = this.calculateAverageConfidence(matchResult.matches);
+      notes.push(`Average confidence: ${avgConf}%`);
+    }
+
+    if (matchResult.selector) {
+      notes.push(`Card selector: ${matchResult.selector}`);
+    }
+
+    return notes;
+  }
+
+  /**
+   * Build configuration object from selections (Legacy v1.0)
    * @param {Object} selections - User's element selections
    * @param {Object} metadata - Site metadata
    * @returns {Object} - Configuration object
@@ -413,9 +594,15 @@ module.exports = ${JSON.stringify(config, null, 2)};
    * @returns {Object} - Summary object
    */
   getSummary(config) {
+    // Handle both v1.0 and v2.0 configs
+    if (config.version === '2.0') {
+      return this.getSummaryV2(config);
+    }
+
     return {
       name: config.name,
       domain: config.domain,
+      version: config.version || '1.0',
       cardSelector: config.selectors?.card,
       fields: {
         name: config.selectors?.fields?.name ? 'Defined' : 'Not set',
@@ -425,6 +612,192 @@ module.exports = ${JSON.stringify(config, null, 2)};
       pagination: config.pagination?.type || 'none',
       paginationEnabled: config.pagination?.enabled || false,
       infiniteScroll: config.pagination?.type === 'infinite-scroll'
+    };
+  }
+
+  /**
+   * Export v2.0 config summary for display
+   * @param {Object} config - Configuration v2.0
+   * @returns {Object} - Summary object
+   */
+  getSummaryV2(config) {
+    return {
+      name: config.name,
+      domain: config.domain,
+      version: '2.0',
+      cardSelector: config.cardPattern?.selector,
+      cardsDetected: config.detectionStats?.totalCardsFound || 0,
+      avgConfidence: config.detectionStats?.avgConfidence || 0,
+      fields: {
+        name: config.fieldExtraction?.fields?.name ? 'Smart' : 'Not set',
+        email: config.fieldExtraction?.fields?.email ? 'Smart' : 'Not set',
+        phone: config.fieldExtraction?.fields?.phone ? 'Smart' : 'Not set',
+        title: config.fieldExtraction?.fields?.title ? 'Smart' : 'Not set',
+        location: config.fieldExtraction?.fields?.location ? 'Smart' : 'Not set',
+        profileUrl: config.fieldExtraction?.fields?.profileUrl ? 'Smart' : 'Not set'
+      },
+      pagination: config.pagination?.type || 'none',
+      paginationEnabled: config.pagination?.enabled || false
+    };
+  }
+
+  /**
+   * Validate v2.0 configuration completeness
+   * @param {Object} config - Configuration v2.0 to validate
+   * @returns {Object} - Validation result
+   */
+  validateConfigV2(config) {
+    const errors = [];
+    const warnings = [];
+
+    // Required: card pattern
+    if (!config.cardPattern?.selector) {
+      errors.push('Missing card selector');
+    }
+
+    // Required: field extraction config
+    if (!config.fieldExtraction) {
+      errors.push('Missing field extraction configuration');
+    }
+
+    // Warnings for missing fields
+    if (!config.fieldExtraction?.fields?.name) {
+      warnings.push('No name extraction rule - names may not be extracted');
+    }
+
+    if (!config.fieldExtraction?.fields?.email) {
+      warnings.push('No email extraction rule - emails may not be extracted');
+    }
+
+    // Check detection quality
+    if (config.detectionStats?.avgConfidence < 50) {
+      warnings.push('Low average confidence - config may need refinement');
+    }
+
+    if (config.detectionStats?.totalCardsFound < 2) {
+      warnings.push('Only one card detected - verify card pattern is correct');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors: errors,
+      warnings: warnings,
+      score: this.calculateConfigScoreV2(config, errors, warnings)
+    };
+  }
+
+  /**
+   * Calculate quality score for v2.0 config
+   * @param {Object} config - Configuration v2.0
+   * @param {Array} errors - Validation errors
+   * @param {Array} warnings - Validation warnings
+   * @returns {number} - Score 0-100
+   */
+  calculateConfigScoreV2(config, errors, warnings) {
+    let score = 100;
+
+    // Deduct for errors
+    score -= errors.length * 30;
+
+    // Deduct for warnings
+    score -= warnings.length * 10;
+
+    // Bonus for field completeness
+    const fields = config.fieldExtraction?.fields || {};
+    if (fields.name) score += 5;
+    if (fields.email) score += 5;
+    if (fields.phone) score += 3;
+    if (fields.title) score += 2;
+    if (fields.location) score += 2;
+    if (fields.profileUrl) score += 3;
+
+    // Bonus for high confidence
+    const avgConf = config.detectionStats?.avgConfidence || 0;
+    if (avgConf >= 80) score += 10;
+    else if (avgConf >= 60) score += 5;
+
+    // Bonus for multiple cards
+    const cardCount = config.detectionStats?.totalCardsFound || 0;
+    if (cardCount >= 10) score += 10;
+    else if (cardCount >= 5) score += 5;
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * Generate test command for v2.0 config
+   * @param {Object} config - Configuration v2.0
+   * @returns {string} - CLI command
+   */
+  generateTestCommandV2(config) {
+    let cmd = `node orchestrator.js --url "${config.sourceUrl}" --method config`;
+
+    if (config.name) {
+      cmd += ` --config ${config.name}`;
+    }
+
+    cmd += ' --limit 10';
+
+    return cmd;
+  }
+
+  /**
+   * Check if config is v2.0 format
+   * @param {Object} config - Configuration to check
+   * @returns {boolean} - True if v2.0
+   */
+  isV2Config(config) {
+    return config.version === '2.0' || config.cardPattern !== undefined;
+  }
+
+  /**
+   * Migrate v1.0 config to v2.0 format
+   * @param {Object} v1Config - V1.0 configuration
+   * @returns {Object} - V2.0 configuration
+   */
+  migrateToV2(v1Config) {
+    return {
+      name: v1Config.name,
+      version: '2.0',
+      createdAt: v1Config.createdAt,
+      updatedAt: new Date().toISOString(),
+      sourceUrl: v1Config.sourceUrl,
+      domain: v1Config.domain,
+
+      cardPattern: {
+        selector: v1Config.selectors?.card,
+        structural: null, // Unknown from v1
+        visual: null,
+        matching: {
+          structuralWeight: 0.6,
+          visualWeight: 0.4,
+          minConfidence: 65
+        }
+      },
+
+      fieldExtraction: {
+        strategy: 'selector', // Use explicit selectors from v1
+        fields: {
+          name: v1Config.selectors?.fields?.name ? {
+            selector: v1Config.selectors.fields.name
+          } : null,
+          email: v1Config.selectors?.fields?.email ? {
+            selector: v1Config.selectors.fields.email
+          } : { pattern: 'email', includeMailto: true },
+          phone: v1Config.selectors?.fields?.phone ? {
+            selector: v1Config.selectors.fields.phone
+          } : { pattern: 'phone', includeTel: true }
+        }
+      },
+
+      pagination: v1Config.pagination,
+      extraction: v1Config.extraction,
+      options: v1Config.options,
+
+      notes: [
+        `Migrated from v1.0 on ${new Date().toLocaleString()}`,
+        ...(v1Config.notes || [])
+      ]
     };
   }
 }

@@ -1,9 +1,15 @@
 /**
- * Interactive Session
+ * Interactive Session v2.0
  *
  * Core workflow orchestrator for the config generator.
  * Manages browser page lifecycle, injects overlay UI, and coordinates
- * the element selection workflow.
+ * the visual card selection workflow.
+ *
+ * v2.0 Features:
+ * - Rectangle-based card selection
+ * - Hybrid pattern matching (structural + visual)
+ * - Smart field extraction
+ * - Card highlighting with confidence scores
  */
 
 const fs = require('fs');
@@ -14,6 +20,8 @@ const SelectorGenerator = require('./selector-generator');
 const ElementAnalyzer = require('./element-analyzer');
 const ConfigBuilder = require('./config-builder');
 const ConfigValidator = require('./config-validator');
+const CardMatcher = require('./card-matcher');
+const SmartFieldExtractor = require('./smart-field-extractor');
 
 class InteractiveSession {
   constructor(browserManager, rateLimiter, logger, configLoader, options = {}) {
@@ -33,11 +41,20 @@ class InteractiveSession {
       paginationPattern: null
     };
 
+    // v2.0 state
+    this.matchResult = null;
+    this.previewData = null;
+    this.extractionRules = null;
+
     // Helper modules
     this.selectorGenerator = new SelectorGenerator(logger);
     this.elementAnalyzer = new ElementAnalyzer(logger);
     this.configBuilder = new ConfigBuilder(logger, { outputDir: options.outputDir || 'configs' });
     this.configValidator = new ConfigValidator(logger);
+
+    // v2.0 modules
+    this.cardMatcher = new CardMatcher(logger);
+    this.fieldExtractor = new SmartFieldExtractor(logger);
 
     // Session state
     this.page = null;
@@ -267,6 +284,185 @@ class InteractiveSession {
       this.logger.info('Close requested');
       return await this.handleUserCancelled();
     });
+
+    // ===========================
+    // v2.0 Functions - Rectangle Selection
+    // ===========================
+
+    // Handle rectangle selection from overlay
+    await this.page.exposeFunction('__configGen_handleRectangleSelection', async (box) => {
+      this.logger.info(`Rectangle selection: ${JSON.stringify(box)}`);
+      return await this.handleRectangleSelection(box);
+    });
+
+    // Confirm selection and generate config
+    await this.page.exposeFunction('__configGen_confirmAndGenerate', async () => {
+      this.logger.info('Confirm and generate requested');
+      return await this.handleConfirmAndGenerate();
+    });
+  }
+
+  // ===========================
+  // v2.0 Rectangle Selection Handlers
+  // ===========================
+
+  /**
+   * Handle rectangle selection from user
+   * @param {Object} box - {x, y, width, height} of selection
+   * @returns {Promise<Object>} - Result with matches
+   */
+  async handleRectangleSelection(box) {
+    this.logger.info('[v2.0] Processing rectangle selection...');
+
+    try {
+      // Step 1: Find similar cards using CardMatcher
+      const matchResult = await this.cardMatcher.findSimilarCards(
+        this.page,
+        box,
+        this.options.matchThreshold || 65
+      );
+
+      if (!matchResult.success) {
+        // Send error to overlay
+        await this.page.evaluate((error) => {
+          if (window.handleCardDetectionResult) {
+            window.handleCardDetectionResult({ success: false, error: error });
+          }
+        }, matchResult.error || 'Failed to find cards');
+
+        return matchResult;
+      }
+
+      // Store match result
+      this.matchResult = matchResult;
+      this.selections.cardSelector = matchResult.selector;
+
+      this.logger.info(`[v2.0] Found ${matchResult.totalFound} matching cards`);
+
+      // Step 2: Extract fields from reference card for preview
+      const previewResult = await this.fieldExtractor.extractFromSelection(this.page, box);
+
+      if (previewResult.success) {
+        this.previewData = previewResult.data;
+      } else {
+        this.previewData = {};
+      }
+
+      // Step 3: Generate extraction rules
+      this.extractionRules = this.fieldExtractor.generateExtractionRules(this.previewData);
+
+      // Send result to overlay
+      const result = {
+        success: true,
+        matches: matchResult.matches,
+        totalFound: matchResult.totalFound,
+        selector: matchResult.selector,
+        previewData: this.previewData
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleCardDetectionResult) {
+          window.handleCardDetectionResult(res);
+        }
+      }, result);
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[v2.0] Rectangle selection error: ${error.message}`);
+
+      await this.page.evaluate((err) => {
+        if (window.handleCardDetectionResult) {
+          window.handleCardDetectionResult({ success: false, error: err });
+        }
+      }, error.message);
+
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle confirm and generate config (v2.0)
+   * @returns {Promise<Object>} - Result with config path
+   */
+  async handleConfirmAndGenerate() {
+    this.logger.info('[v2.0] Generating config...');
+
+    try {
+      if (!this.matchResult) {
+        throw new Error('No card selection to confirm');
+      }
+
+      // Prepare metadata
+      const metadata = {
+        url: this.testUrl,
+        domain: this.domain,
+        pagination: this.selections.paginationPattern || { type: 'none' }
+      };
+
+      // Build v2.0 config
+      const config = this.configBuilder.buildConfigV2(
+        this.matchResult,
+        this.extractionRules,
+        metadata
+      );
+
+      // Validate config
+      const validation = this.configBuilder.validateConfigV2(config);
+
+      if (!validation.valid) {
+        this.logger.warn(`[v2.0] Config validation errors: ${validation.errors.join(', ')}`);
+      }
+
+      if (validation.warnings.length > 0) {
+        this.logger.warn(`[v2.0] Config validation warnings: ${validation.warnings.join(', ')}`);
+      }
+
+      // Save config
+      const configPath = this.configBuilder.saveConfig(config, this.options.outputDir);
+
+      this.logger.info(`[v2.0] Config saved to: ${configPath}`);
+
+      // Send result to overlay
+      const result = {
+        success: true,
+        configPath: configPath,
+        configName: config.name,
+        validation: validation
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete(res);
+        }
+      }, result);
+
+      // Mark session complete
+      this.sessionComplete = true;
+      this.sessionResult = {
+        success: true,
+        configPath: configPath,
+        config: config,
+        validation: validation
+      };
+
+      if (this.resolveSession) {
+        this.resolveSession(this.sessionResult);
+      }
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[v2.0] Generate config error: ${error.message}`);
+
+      await this.page.evaluate((err) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete({ success: false, error: err });
+        }
+      }, error.message);
+
+      return { success: false, error: error.message };
+    }
   }
 
   /**
@@ -757,9 +953,6 @@ class InteractiveSession {
 
     this.logger.info('Testing for infinite scroll...');
 
-    // Import ScrollDetector for robust content load detection
-    const { ScrollDetector } = require('../../features/infinite-scroll');
-
     const containerSelector = this.selections.cardSelector;
 
     // Get initial state
@@ -768,12 +961,6 @@ class InteractiveSession {
     const initialHeight = await this.page.evaluate(() => document.body.scrollHeight);
 
     this.logger.info(`Initial: ${initialCardCount} cards, ${initialHeight}px height`);
-
-    // Initialize scroll detector with conservative settings
-    const scrollDetector = new ScrollDetector(this.page, this.logger, {
-      scrollDelay: 2000,
-      networkIdleTimeout: 5000
-    });
 
     // Perform 3-5 test scrolls to get reliable detection
     const scrollResults = [];
@@ -790,8 +977,8 @@ class InteractiveSession {
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
       });
 
-      // Wait for content to load using ScrollDetector
-      await scrollDetector.waitForContentLoad({ previousHeight: beforeHeight });
+      // Wait for content to load (simple delay-based approach)
+      await this.sleep(2000);
 
       const afterCount = await this.page.$$eval(containerSelector, els => els.length)
         .catch(() => 0);

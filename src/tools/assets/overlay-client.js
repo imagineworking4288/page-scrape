@@ -1,48 +1,74 @@
 /**
- * Overlay Client Script
+ * Visual Card Scraper - Overlay Client Script v2.0
  *
- * This script runs in the browser context and communicates with the
- * Node.js backend via exposed functions.
+ * This script runs in the browser context and handles:
+ * - Rectangle selection for card detection
+ * - Card highlighting
+ * - Preview data display
+ * - Communication with Node.js backend
  */
 
 (function() {
   'use strict';
 
-  // State
+  // ===========================
+  // STATE MANAGEMENT
+  // ===========================
+
   const state = {
-    currentStep: 'ready',
-    currentField: null,
-    selections: {
-      cardSelector: null,
-      nameSelector: null,
-      emailSelector: null,
-      phoneSelector: null,
-      paginationType: 'none',
-      infiniteScroll: null
-    },
-    cardCount: 0,
-    isListening: false,
-    hoveredElement: null,
+    isDrawing: false,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    selectionBox: null,
+    detectedCards: [],
+    previewData: null,
     backendReady: false
   };
 
-  // Field sequence for selection
-  const fieldSequence = ['name', 'email', 'phone'];
-  let currentFieldIndex = 0;
+  // DOM Elements
+  let canvas, ctx, selectionPreview, dimensionsLabel;
+  let cardHighlightsContainer;
 
-  // DOM elements
-  let highlightBox;
-
-  // Heartbeat monitoring
-  let heartbeatInterval;
-  let lastPingSuccess = Date.now();
+  // ===========================
+  // INITIALIZATION
+  // ===========================
 
   /**
-   * Wait for backend initialization
-   * @returns {Promise<boolean>}
+   * Initialize the overlay
    */
-  async function waitForInitialization() {
-    const maxAttempts = 50; // 5 seconds total (50 * 100ms)
+  async function init() {
+    console.log('[ConfigGen v2.0] Initializing overlay...');
+
+    // Get DOM elements
+    canvas = document.getElementById('selectionCanvas');
+    selectionPreview = document.getElementById('selectionPreview');
+    dimensionsLabel = document.getElementById('selectionDimensions');
+    cardHighlightsContainer = document.getElementById('cardHighlights');
+
+    // Setup canvas
+    if (canvas) {
+      ctx = canvas.getContext('2d');
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+    }
+
+    // Wait for backend
+    const initialized = await waitForBackend();
+    if (!initialized) {
+      showToast('Failed to connect to backend', 'error');
+      return;
+    }
+
+    console.log('[ConfigGen v2.0] Overlay initialized successfully');
+  }
+
+  /**
+   * Wait for backend functions to be exposed
+   */
+  async function waitForBackend() {
+    const maxAttempts = 50;
     let attempts = 0;
 
     while (attempts < maxAttempts) {
@@ -50,76 +76,47 @@
         if (typeof __configGen_initialize === 'function') {
           const result = await __configGen_initialize();
           if (result && result.ready) {
-            console.log('[ConfigGen] Backend initialized successfully');
             state.backendReady = true;
             return true;
           }
         }
       } catch (err) {
-        // Function not ready yet, continue waiting
+        // Continue waiting
       }
 
       attempts++;
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sleep(100);
     }
 
-    // Failed to initialize
-    console.error('[ConfigGen] Failed to connect to backend after 5 seconds');
-    showError('Failed to connect to backend. Please refresh and try again.');
+    console.error('[ConfigGen v2.0] Backend initialization timeout');
     return false;
   }
 
   /**
-   * Start heartbeat monitoring
+   * Resize canvas to match window
    */
-  function startHeartbeat() {
-    heartbeatInterval = setInterval(async () => {
-      try {
-        if (typeof __configGen_ping === 'function') {
-          const result = await __configGen_ping();
-          if (result && result.alive) {
-            lastPingSuccess = Date.now();
-          }
-        }
-      } catch (err) {
-        // Check if we've been disconnected for >10 seconds
-        if (Date.now() - lastPingSuccess > 10000) {
-          showError('Connection lost. Please restart the config generator.');
-          clearInterval(heartbeatInterval);
-        }
+  function resizeCanvas() {
+    if (canvas) {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+  }
+
+  // ===========================
+  // PANEL MANAGEMENT
+  // ===========================
+
+  /**
+   * Show a specific panel
+   */
+  function showPanel(panelId) {
+    const panels = ['instructionPanel', 'confirmationPanel', 'progressPanel', 'completePanel'];
+    panels.forEach(id => {
+      const panel = document.getElementById(id);
+      if (panel) {
+        panel.classList.toggle('active', id === panelId);
       }
-    }, 5000); // Ping every 5 seconds
-  }
-
-  /**
-   * Show error message in overlay
-   */
-  function showError(message) {
-    const phaseEl = document.getElementById('currentPhase');
-    if (phaseEl) {
-      phaseEl.textContent = 'Error: ' + message;
-      phaseEl.style.color = '#ff6b6b';
-    }
-    console.error('[ConfigGen] ' + message);
-  }
-
-  /**
-   * Initialize the overlay
-   */
-  async function init() {
-    highlightBox = document.getElementById('highlightBox');
-    updatePhase('Connecting to backend...');
-
-    // Wait for backend initialization
-    const initialized = await waitForInitialization();
-    if (!initialized) {
-      return;
-    }
-
-    // Start heartbeat monitoring
-    startHeartbeat();
-
-    updatePhase('Ready to start');
+    });
   }
 
   /**
@@ -127,520 +124,524 @@
    */
   window.toggleMinimize = function() {
     const panel = document.getElementById('controlPanel');
-    panel.classList.toggle('minimized');
-    const btn = panel.querySelector('.minimize-btn');
-    btn.textContent = panel.classList.contains('minimized') ? '+' : '−';
+    if (panel) {
+      panel.classList.toggle('minimized');
+      const btn = panel.querySelector('.minimize-btn');
+      if (btn) {
+        btn.textContent = panel.classList.contains('minimized') ? '+' : '−';
+      }
+    }
   };
 
   /**
-   * Show a specific step
+   * Show progress panel with message
    */
-  function showStep(stepId) {
-    document.querySelectorAll('.step').forEach(step => {
-      step.classList.remove('active');
-    });
-    const step = document.getElementById(`step-${stepId}`);
-    if (step) {
-      step.classList.add('active');
-    }
-    state.currentStep = stepId;
+  function showProgress(title, message) {
+    document.getElementById('progressTitle').textContent = title;
+    document.getElementById('progressMessage').textContent = message;
+    showPanel('progressPanel');
   }
 
-  /**
-   * Update the phase display
-   */
-  function updatePhase(text) {
-    const phaseEl = document.getElementById('currentPhase');
-    if (phaseEl) {
-      phaseEl.textContent = text;
-    }
-  }
+  // ===========================
+  // SELECTION DRAWING
+  // ===========================
 
   /**
-   * Start selection process
+   * Start selection mode
    */
   window.startSelection = function() {
-    showStep('card');
-    updatePhase('Step 1: Select contact card');
-    startElementSelection('card');
+    console.log('[ConfigGen v2.0] Starting selection mode');
+
+    // Show canvas
+    canvas.classList.remove('hidden');
+
+    // Setup event listeners
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+
+    // Update subtitle
+    document.getElementById('panelSubtitle').textContent = 'Draw a rectangle around a card';
   };
 
   /**
-   * Start listening for element clicks
+   * Handle mouse down - start drawing
    */
-  function startElementSelection(type) {
-    state.isListening = true;
-    state.currentField = type;
+  function handleMouseDown(e) {
+    // Ignore if clicking on panel
+    const panel = document.getElementById('controlPanel');
+    if (panel && panel.contains(e.target)) return;
 
-    // Notify backend
-    if (window.__configGen_setMode) {
-      window.__configGen_setMode(type);
-    }
+    state.isDrawing = true;
+    state.startX = e.clientX;
+    state.startY = e.clientY;
+    state.currentX = e.clientX;
+    state.currentY = e.clientY;
 
-    // Add hover effect listener
-    document.addEventListener('mousemove', handleMouseMove, true);
-    document.addEventListener('click', handleClick, true);
+    // Show preview
+    selectionPreview.style.display = 'block';
+    updateSelectionPreview();
   }
 
   /**
-   * Stop listening for clicks
-   */
-  function stopElementSelection() {
-    state.isListening = false;
-    state.currentField = null;
-    hideHighlight();
-
-    document.removeEventListener('mousemove', handleMouseMove, true);
-    document.removeEventListener('click', handleClick, true);
-  }
-
-  /**
-   * Handle mouse move for hover highlight
+   * Handle mouse move - update rectangle
    */
   function handleMouseMove(e) {
-    if (!state.isListening) return;
+    if (!state.isDrawing) return;
 
-    // Ignore events on the control panel
-    const panel = document.getElementById('controlPanel');
-    if (panel && panel.contains(e.target)) {
-      hideHighlight();
+    state.currentX = e.clientX;
+    state.currentY = e.clientY;
+    updateSelectionPreview();
+  }
+
+  /**
+   * Handle mouse up - finalize selection
+   */
+  function handleMouseUp(e) {
+    if (!state.isDrawing) return;
+
+    state.isDrawing = false;
+    state.currentX = e.clientX;
+    state.currentY = e.clientY;
+
+    // Calculate selection box
+    const box = getSelectionBox();
+
+    // Validate minimum size
+    if (box.width < 50 || box.height < 50) {
+      showToast('Selection too small. Please draw a larger rectangle.', 'warning');
+      hideSelectionPreview();
       return;
     }
 
-    const element = e.target;
-    if (element !== state.hoveredElement) {
-      state.hoveredElement = element;
-      showHighlight(element, state.currentField);
-    }
+    // Store selection
+    state.selectionBox = box;
+
+    // Hide canvas and preview
+    canvas.classList.add('hidden');
+    hideSelectionPreview();
+
+    // Remove event listeners
+    canvas.removeEventListener('mousedown', handleMouseDown);
+    canvas.removeEventListener('mousemove', handleMouseMove);
+    canvas.removeEventListener('mouseup', handleMouseUp);
+
+    // Process selection
+    processSelection(box);
   }
 
   /**
-   * Handle element click
+   * Update selection preview rectangle
    */
-  function handleClick(e) {
-    if (!state.isListening) return;
+  function updateSelectionPreview() {
+    const box = getSelectionBox();
 
-    // Ignore clicks on the control panel
-    const panel = document.getElementById('controlPanel');
-    if (panel && panel.contains(e.target)) {
-      return;
-    }
+    selectionPreview.style.left = box.x + 'px';
+    selectionPreview.style.top = box.y + 'px';
+    selectionPreview.style.width = box.width + 'px';
+    selectionPreview.style.height = box.height + 'px';
 
-    e.preventDefault();
-    e.stopPropagation();
-
-    const element = e.target;
-
-    // Report click to backend
-    if (window.__configGen_reportClick) {
-      window.__configGen_reportClick({
-        x: e.clientX,
-        y: e.clientY,
-        type: state.currentField
-      });
-    }
-
-    // Handle based on current step
-    if (state.currentField === 'card') {
-      handleCardSelection(element);
-    } else {
-      handleFieldSelection(element, state.currentField);
-    }
+    dimensionsLabel.textContent = `${Math.round(box.width)} x ${Math.round(box.height)}`;
   }
 
   /**
-   * Handle card selection
+   * Get normalized selection box (handles any drag direction)
    */
-  function handleCardSelection(element) {
-    stopElementSelection();
+  function getSelectionBox() {
+    const x = Math.min(state.startX, state.currentX);
+    const y = Math.min(state.startY, state.currentY);
+    const width = Math.abs(state.currentX - state.startX);
+    const height = Math.abs(state.currentY - state.startY);
 
-    // Build simple selector
-    const selector = buildSimpleSelector(element);
-    state.selections.cardSelector = selector;
-
-    // Count matching elements
-    const count = document.querySelectorAll(selector).length;
-    state.cardCount = count;
-
-    // Update UI
-    document.getElementById('cardSelectorPreview').textContent = selector;
-    document.getElementById('cardSelectorFinal').textContent = selector;
-    document.getElementById('cardCount').textContent = count;
-
-    // Highlight all matching cards
-    highlightAllMatches(selector);
-
-    // Move to confirmation step
-    showStep('confirm-cards');
-    updatePhase('Confirm card selection');
+    return { x, y, width, height };
   }
 
   /**
-   * Handle field selection
+   * Hide selection preview
    */
-  function handleFieldSelection(element, fieldName) {
-    // Build selector relative to card
-    const selector = buildRelativeSelector(element, state.selections.cardSelector);
-    state.selections[`${fieldName}Selector`] = selector;
-
-    // Update UI
-    const previewEl = document.getElementById(`${fieldName}SelectorPreview`);
-    if (previewEl) {
-      previewEl.textContent = selector || '(empty)';
-    }
-
-    const iconEl = document.getElementById(`icon-${fieldName}`);
-    if (iconEl) {
-      iconEl.classList.remove('current', 'pending');
-      iconEl.classList.add('selected');
-    }
-
-    // Move to next field
-    currentFieldIndex++;
-
-    if (currentFieldIndex < fieldSequence.length) {
-      const nextField = fieldSequence[currentFieldIndex];
-      startFieldSelection(nextField);
-    } else {
-      // All fields done
-      stopElementSelection();
-      document.getElementById('finishFieldsBtn').style.display = 'block';
-    }
+  function hideSelectionPreview() {
+    selectionPreview.style.display = 'none';
   }
 
-  /**
-   * Start field selection for a specific field
-   */
-  function startFieldSelection(fieldName) {
-    state.currentField = fieldName;
+  // ===========================
+  // SELECTION PROCESSING
+  // ===========================
 
-    // Update icons
-    fieldSequence.forEach(field => {
-      const icon = document.getElementById(`icon-${field}`);
-      if (icon) {
-        icon.classList.remove('current');
-        if (field === fieldName) {
-          icon.classList.add('current');
-        }
+  /**
+   * Process the selection and find similar cards
+   */
+  async function processSelection(box) {
+    showProgress('Finding Similar Cards', 'Analyzing page structure...');
+
+    try {
+      // Send selection to backend
+      if (typeof __configGen_handleRectangleSelection === 'function') {
+        await __configGen_handleRectangleSelection(box);
+      } else {
+        throw new Error('Backend function not available');
       }
+    } catch (error) {
+      console.error('[ConfigGen v2.0] Selection processing error:', error);
+      showToast('Failed to process selection: ' + error.message, 'error');
+      showPanel('instructionPanel');
+    }
+  }
+
+  /**
+   * Handle card detection result from backend
+   * Called by backend via page.evaluate
+   */
+  window.handleCardDetectionResult = function(result) {
+    console.log('[ConfigGen v2.0] Card detection result:', result);
+
+    if (!result.success) {
+      showToast(result.error || 'No cards found', 'error');
+      showPanel('instructionPanel');
+      return;
+    }
+
+    // Store data
+    state.detectedCards = result.matches || [];
+    state.previewData = result.previewData || {};
+
+    // Update stats
+    document.getElementById('cardCountStat').textContent = state.detectedCards.length;
+
+    const avgConfidence = state.detectedCards.length > 0
+      ? Math.round(state.detectedCards.reduce((sum, c) => sum + c.confidence, 0) / state.detectedCards.length)
+      : 0;
+    document.getElementById('avgConfidenceStat').textContent = avgConfidence + '%';
+
+    // Build preview table
+    buildPreviewTable(state.previewData);
+
+    // Highlight detected cards
+    highlightCards(state.detectedCards);
+
+    // Show confirmation panel
+    showPanel('confirmationPanel');
+    document.getElementById('panelSubtitle').textContent = `${state.detectedCards.length} cards detected`;
+  };
+
+  /**
+   * Build preview table from extracted data
+   */
+  function buildPreviewTable(data) {
+    const tbody = document.getElementById('previewTableBody');
+    tbody.innerHTML = '';
+
+    // Standard fields
+    const fields = [
+      { key: 'name', label: 'Name' },
+      { key: 'email', label: 'Email' },
+      { key: 'phone', label: 'Phone' },
+      { key: 'title', label: 'Title' },
+      { key: 'location', label: 'Location' },
+      { key: 'profileUrl', label: 'Profile URL' }
+    ];
+
+    fields.forEach(field => {
+      const value = data[field.key];
+      const row = document.createElement('tr');
+
+      const nameCell = document.createElement('td');
+      nameCell.className = 'field-name';
+      nameCell.textContent = field.label;
+
+      const valueCell = document.createElement('td');
+      valueCell.className = 'field-value' + (value ? '' : ' empty');
+      valueCell.textContent = value || '(not found)';
+      valueCell.title = value || '';
+
+      row.appendChild(nameCell);
+      row.appendChild(valueCell);
+      tbody.appendChild(row);
     });
 
-    const previewEl = document.getElementById(`${fieldName}SelectorPreview`);
-    if (previewEl) {
-      previewEl.textContent = 'Click to select...';
+    // Social links
+    if (data.socialLinks && data.socialLinks.length > 0) {
+      const row = document.createElement('tr');
+      const nameCell = document.createElement('td');
+      nameCell.className = 'field-name';
+      nameCell.textContent = 'Social';
+
+      const valueCell = document.createElement('td');
+      valueCell.className = 'field-value';
+      valueCell.textContent = data.socialLinks.map(s => s.platform).join(', ');
+
+      row.appendChild(nameCell);
+      row.appendChild(valueCell);
+      tbody.appendChild(row);
     }
 
-    updatePhase(`Select ${fieldName} field`);
-    startElementSelection(fieldName);
+    // Other fields
+    if (data.otherFields && data.otherFields.length > 0) {
+      data.otherFields.slice(0, 3).forEach((field, i) => {
+        const row = document.createElement('tr');
+        const nameCell = document.createElement('td');
+        nameCell.className = 'field-name';
+        nameCell.textContent = `Other ${i + 1}`;
+
+        const valueCell = document.createElement('td');
+        valueCell.className = 'field-value';
+        valueCell.textContent = truncate(field.value, 50);
+        valueCell.title = field.value;
+
+        row.appendChild(nameCell);
+        row.appendChild(valueCell);
+        tbody.appendChild(row);
+      });
+    }
+  }
+
+  // ===========================
+  // CARD HIGHLIGHTING
+  // ===========================
+
+  /**
+   * Highlight detected cards on the page
+   */
+  function highlightCards(cards) {
+    clearHighlights();
+
+    cards.forEach((card, index) => {
+      const highlight = document.createElement('div');
+      highlight.className = 'card-highlight';
+
+      // Set confidence class
+      if (card.confidence >= 75) {
+        highlight.classList.add('high-confidence');
+      } else if (card.confidence >= 50) {
+        highlight.classList.add('medium-confidence');
+      } else {
+        highlight.classList.add('low-confidence');
+      }
+
+      // Position
+      highlight.style.left = card.box.x + 'px';
+      highlight.style.top = card.box.y + 'px';
+      highlight.style.width = card.box.width + 'px';
+      highlight.style.height = card.box.height + 'px';
+
+      // Badge
+      const badge = document.createElement('div');
+      badge.className = 'confidence-badge';
+      badge.textContent = `#${index + 1} - ${Math.round(card.confidence)}%`;
+      highlight.appendChild(badge);
+
+      cardHighlightsContainer.appendChild(highlight);
+    });
   }
 
   /**
-   * Skip current step
+   * Clear all card highlights
    */
-  window.skipStep = function(step) {
-    if (step === 'card') {
-      stopElementSelection();
-      // Use auto-detection (backend will handle)
-      if (window.__configGen_autoDetect) {
-        window.__configGen_autoDetect('card');
-      }
+  function clearHighlights() {
+    if (cardHighlightsContainer) {
+      cardHighlightsContainer.innerHTML = '';
     }
+  }
+
+  // ===========================
+  // USER ACTIONS
+  // ===========================
+
+  /**
+   * Retry selection
+   */
+  window.retrySelection = function() {
+    console.log('[ConfigGen v2.0] Retrying selection');
+
+    // Clear state
+    state.selectionBox = null;
+    state.detectedCards = [];
+    state.previewData = null;
+
+    // Clear highlights
+    clearHighlights();
+
+    // Show instruction panel
+    showPanel('instructionPanel');
+    document.getElementById('panelSubtitle').textContent = 'Config Generator v2.0';
   };
 
   /**
-   * Skip current field
+   * Confirm selection and generate config
    */
-  window.skipCurrentField = function() {
-    const currentField = fieldSequence[currentFieldIndex];
-    state.selections[`${currentField}Selector`] = null;
+  window.confirmAndGenerate = function() {
+    console.log('[ConfigGen v2.0] Confirming and generating config');
 
-    const previewEl = document.getElementById(`${currentField}SelectorPreview`);
-    if (previewEl) {
-      previewEl.textContent = '(skipped)';
-    }
+    showProgress('Generating Config', 'Extracting field patterns...');
 
-    const iconEl = document.getElementById(`icon-${currentField}`);
-    if (iconEl) {
-      iconEl.classList.remove('current');
-      iconEl.classList.add('pending');
-    }
-
-    currentFieldIndex++;
-
-    if (currentFieldIndex < fieldSequence.length) {
-      startFieldSelection(fieldSequence[currentFieldIndex]);
+    // Call backend to generate config
+    if (typeof __configGen_confirmAndGenerate === 'function') {
+      __configGen_confirmAndGenerate();
     } else {
-      stopElementSelection();
-      document.getElementById('finishFieldsBtn').style.display = 'block';
+      showToast('Backend function not available', 'error');
+      showPanel('confirmationPanel');
     }
   };
 
   /**
-   * Go back to a previous step
+   * Handle config generation complete
+   * Called by backend via page.evaluate
    */
-  window.goBack = function(step) {
-    if (step === 'card') {
-      showStep('card');
-      updatePhase('Step 1: Select contact card');
-      startElementSelection('card');
-    }
-  };
+  window.handleConfigComplete = function(result) {
+    console.log('[ConfigGen v2.0] Config complete:', result);
 
-  /**
-   * Confirm card selection
-   */
-  window.confirmCards = function() {
-    hideAllHighlights();
-    showStep('fields');
-    updatePhase('Step 2: Select fields');
-    currentFieldIndex = 0;
-    startFieldSelection(fieldSequence[0]);
-  };
-
-  /**
-   * Finish field selection
-   */
-  window.finishFields = function() {
-    stopElementSelection();
-    showStep('pagination');
-    updatePhase('Detecting pagination...');
-
-    // Request pagination detection from backend
-    if (window.__configGen_detectPagination) {
-      window.__configGen_detectPagination(state.selections.cardSelector);
-    }
-  };
-
-  /**
-   * Handle pagination detection result (called from backend)
-   */
-  window.handlePaginationResult = function(result) {
-    document.getElementById('paginationLoading').style.display = 'none';
-    document.getElementById('paginationResult').style.display = 'block';
-
-    if (result.detected) {
-      state.selections.paginationType = 'infinite-scroll';
-      state.selections.infiniteScroll = result;
-
-      document.getElementById('infiniteScrollInfo').style.display = 'block';
-      document.getElementById('initialCardCount').textContent = result.initialCount || '-';
-      document.getElementById('afterScrollCount').textContent = result.afterScrollCount || '-';
-      document.getElementById('scrollConfidence').textContent = result.confidence || 'unknown';
-    } else {
-      document.getElementById('noPaginationInfo').style.display = 'block';
-      state.selections.paginationType = 'none';
+    if (!result.success) {
+      showToast(result.error || 'Config generation failed', 'error');
+      showPanel('confirmationPanel');
+      return;
     }
 
-    document.getElementById('paginationContinueBtn').style.display = 'block';
-    updatePhase('Pagination check complete');
+    // Clear highlights
+    clearHighlights();
+
+    // Update complete panel
+    document.getElementById('completeCardCount').textContent =
+      `${state.detectedCards.length} cards detected`;
+    document.getElementById('completeConfigPath').textContent =
+      result.configPath || 'configs/generated.json';
+
+    // Show complete panel
+    showPanel('completePanel');
+    document.getElementById('panelSubtitle').textContent = 'Complete!';
   };
 
   /**
-   * Proceed to summary
-   */
-  window.proceedToSummary = function() {
-    showStep('summary');
-    updatePhase('Review configuration');
-
-    // Fill summary table
-    document.getElementById('summaryCard').textContent =
-      state.selections.cardSelector || '(not set)';
-    document.getElementById('summaryName').textContent =
-      state.selections.nameSelector || '(not set)';
-    document.getElementById('summaryEmail').textContent =
-      state.selections.emailSelector || '(not set)';
-    document.getElementById('summaryPhone').textContent =
-      state.selections.phoneSelector || '(not set)';
-    document.getElementById('summaryPagination').textContent =
-      state.selections.paginationType === 'infinite-scroll' ? 'Infinite Scroll' :
-      state.selections.paginationType || 'None';
-  };
-
-  /**
-   * Start over
-   */
-  window.startOver = function() {
-    state.selections = {
-      cardSelector: null,
-      nameSelector: null,
-      emailSelector: null,
-      phoneSelector: null,
-      paginationType: 'none',
-      infiniteScroll: null
-    };
-    currentFieldIndex = 0;
-    hideAllHighlights();
-    showStep('ready');
-    updatePhase('Ready to start');
-  };
-
-  /**
-   * Save configuration
-   */
-  window.saveConfig = function() {
-    if (window.__configGen_save) {
-      window.__configGen_save(state.selections);
-    }
-  };
-
-  /**
-   * Handle save result (called from backend)
-   */
-  window.handleSaveResult = function(result) {
-    showStep('complete');
-    updatePhase('Complete');
-
-    if (result.success) {
-      document.getElementById('savedConfigPath').textContent = result.configPath;
-    } else {
-      document.getElementById('savedConfigPath').textContent =
-        'Error: ' + (result.error || 'Unknown error');
-    }
-  };
-
-  /**
-   * Close the panel
+   * Close panel and notify backend
    */
   window.closePanel = function() {
-    if (window.__configGen_close) {
-      window.__configGen_close();
+    console.log('[ConfigGen v2.0] Closing panel');
+
+    if (typeof __configGen_close === 'function') {
+      __configGen_close();
     }
   };
 
+  // ===========================
+  // TOAST NOTIFICATIONS
+  // ===========================
+
   /**
-   * Build a simple CSS selector for an element
+   * Show toast notification
    */
-  function buildSimpleSelector(element) {
-    // Try ID first
-    if (element.id) {
-      return `#${element.id}`;
+  function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+
+    toast.textContent = message;
+    toast.className = 'toast ' + type;
+    toast.classList.add('show');
+
+    setTimeout(() => {
+      toast.classList.remove('show');
+    }, 3000);
+  }
+
+  // ===========================
+  // UTILITY FUNCTIONS
+  // ===========================
+
+  /**
+   * Sleep for specified milliseconds
+   */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Truncate string to specified length
+   */
+  function truncate(str, maxLength) {
+    if (!str) return '';
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength - 3) + '...';
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   */
+  function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /**
+   * Format camelCase to Title Case
+   */
+  function formatFieldName(name) {
+    return name
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, str => str.toUpperCase())
+      .trim();
+  }
+
+  // ===========================
+  // BACKEND COMMUNICATION HELPERS
+  // ===========================
+
+  /**
+   * Exposed controller for backend communication
+   */
+  window.OverlayController = {
+    /**
+     * Handle message from backend
+     */
+    handleBackendMessage(command, data) {
+      console.log('[ConfigGen v2.0] Backend message:', command, data);
+
+      switch (command) {
+        case 'initialize':
+          // Backend initialized
+          break;
+        case 'showProgress':
+          showProgress(data.title, data.message);
+          break;
+        case 'showError':
+          showToast(data.message, 'error');
+          break;
+        default:
+          console.warn('[ConfigGen v2.0] Unknown command:', command);
+      }
+    },
+
+    /**
+     * Clear all highlights
+     */
+    clearHighlights() {
+      clearHighlights();
+    },
+
+    /**
+     * Highlight elements by selector
+     */
+    highlightElements(selector, type) {
+      // Legacy support - not used in v2.0
+    },
+
+    /**
+     * Highlight fields in cards
+     */
+    highlightFieldsInCards(cardSelector, fieldSelector, type) {
+      // Legacy support - not used in v2.0
     }
+  };
 
-    // Try semantic classes
-    const classes = Array.from(element.classList);
-    const semanticClass = classes.find(c => isSemanticClass(c));
+  // Expose state for debugging
+  window.__configGenState = state;
 
-    if (semanticClass) {
-      const tag = element.tagName.toLowerCase();
-      return `${tag}.${semanticClass}`;
-    }
+  // ===========================
+  // INITIALIZATION
+  // ===========================
 
-    // Use first class
-    if (classes.length > 0) {
-      const tag = element.tagName.toLowerCase();
-      return `${tag}.${classes[0]}`;
-    }
-
-    // Just use tag
-    return element.tagName.toLowerCase();
-  }
-
-  /**
-   * Build a selector relative to a parent
-   */
-  function buildRelativeSelector(element, parentSelector) {
-    // Try to find element within parent context
-    const classes = Array.from(element.classList);
-
-    // Try semantic class
-    const semanticClass = classes.find(c => isSemanticClass(c));
-    if (semanticClass) {
-      return `.${semanticClass}`;
-    }
-
-    // Try any class
-    if (classes.length > 0) {
-      return `.${classes[0]}`;
-    }
-
-    // Use tag name
-    return element.tagName.toLowerCase();
-  }
-
-  /**
-   * Check if a class name is semantic
-   */
-  function isSemanticClass(className) {
-    const patterns = [
-      /name/i, /title/i, /heading/i,
-      /email/i, /mail/i,
-      /phone/i, /tel/i,
-      /card/i, /item/i, /person/i, /contact/i,
-      /bio/i, /profile/i
-    ];
-    return patterns.some(p => p.test(className));
-  }
-
-  /**
-   * Show highlight box around an element
-   */
-  function showHighlight(element, label) {
-    if (!highlightBox) return;
-
-    const rect = element.getBoundingClientRect();
-    highlightBox.style.display = 'block';
-    highlightBox.style.left = rect.left + 'px';
-    highlightBox.style.top = rect.top + 'px';
-    highlightBox.style.width = rect.width + 'px';
-    highlightBox.style.height = rect.height + 'px';
-    highlightBox.setAttribute('data-label', label || '');
-  }
-
-  /**
-   * Hide highlight box
-   */
-  function hideHighlight() {
-    if (highlightBox) {
-      highlightBox.style.display = 'none';
-    }
-    state.hoveredElement = null;
-  }
-
-  /**
-   * Highlight all matching elements
-   */
-  function highlightAllMatches(selector) {
-    const elements = document.querySelectorAll(selector);
-    elements.forEach((el, index) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'config-gen-highlight-all';
-      overlay.setAttribute('data-index', index);
-
-      const rect = el.getBoundingClientRect();
-      Object.assign(overlay.style, {
-        position: 'fixed',
-        left: rect.left + 'px',
-        top: rect.top + 'px',
-        width: rect.width + 'px',
-        height: rect.height + 'px',
-        border: '2px solid #38ef7d',
-        background: 'rgba(56, 239, 125, 0.1)',
-        pointerEvents: 'none',
-        zIndex: '999997'
-      });
-
-      document.body.appendChild(overlay);
-    });
-  }
-
-  /**
-   * Remove all highlight overlays
-   */
-  function hideAllHighlights() {
-    document.querySelectorAll('.config-gen-highlight-all').forEach(el => {
-      el.remove();
-    });
-    hideHighlight();
-  }
-
-  // Initialize on load
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-
-  // Expose state for debugging
-  window.__configGenState = state;
 
 })();

@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Config Generator Control Panel</title>
+  <title>Visual Card Scraper - Config Generator v2.0</title>
   <style>
     * {
       box-sizing: border-box;
@@ -15,71 +15,269 @@
       font-size: 14px;
       line-height: 1.5;
       color: #333;
-      background: #f5f5f5;
     }
 
+    /* Control Panel */
     .panel {
       position: fixed;
       top: 10px;
       right: 10px;
-      width: 320px;
+      width: 380px;
       max-height: calc(100vh - 20px);
       overflow-y: auto;
       background: white;
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
       z-index: 999999;
     }
 
     .panel-header {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 15px;
-      border-radius: 8px 8px 0 0;
+      padding: 16px 20px;
+      border-radius: 12px 12px 0 0;
+      position: relative;
     }
 
     .panel-header h1 {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 600;
-      margin-bottom: 5px;
+      margin-bottom: 4px;
     }
 
-    .panel-header .phase {
+    .panel-header .subtitle {
       font-size: 12px;
       opacity: 0.9;
     }
 
     .panel-body {
-      padding: 15px;
+      padding: 20px;
     }
 
-    .step {
+    /* Hide inactive panels */
+    .panel-content {
       display: none;
     }
 
-    .step.active {
+    .panel-content.active {
       display: block;
     }
 
-    .step-title {
+    /* Instruction Panel */
+    .instruction-panel .icon-container {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .instruction-panel .icon-container svg {
+      width: 80px;
+      height: 80px;
+      stroke: #667eea;
+    }
+
+    .instruction-panel h2 {
+      font-size: 20px;
       font-weight: 600;
-      margin-bottom: 10px;
       color: #333;
+      margin-bottom: 12px;
+      text-align: center;
     }
 
-    .step-description {
-      font-size: 13px;
+    .instruction-panel p {
       color: #666;
-      margin-bottom: 15px;
+      margin-bottom: 16px;
+      text-align: center;
     }
 
+    .instruction-panel .tip {
+      background: #f0f4ff;
+      border-left: 4px solid #667eea;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 20px;
+    }
+
+    .instruction-panel .tip-icon {
+      display: inline-block;
+      margin-right: 8px;
+    }
+
+    .instruction-panel .tip-text {
+      font-size: 13px;
+      color: #555;
+    }
+
+    /* Confirmation Panel */
+    .confirmation-panel .stats-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .confirmation-panel .stat-box {
+      flex: 1;
+      text-align: center;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin: 0 4px;
+    }
+
+    .confirmation-panel .stat-box:first-child {
+      margin-left: 0;
+    }
+
+    .confirmation-panel .stat-box:last-child {
+      margin-right: 0;
+    }
+
+    .confirmation-panel .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .confirmation-panel .stat-label {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .confirmation-panel h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 12px;
+    }
+
+    .preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    .preview-table th {
+      text-align: left;
+      padding: 8px 10px;
+      background: #f8f9fa;
+      color: #666;
+      font-weight: 500;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .preview-table td {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview-table .field-name {
+      color: #333;
+      font-weight: 500;
+    }
+
+    .preview-table .field-value {
+      color: #666;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .preview-table .field-value.empty {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    /* Progress Panel */
+    .progress-panel {
+      text-align: center;
+      padding: 30px 0;
+    }
+
+    .progress-panel h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #f0f0f0;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-panel .status-message {
+      color: #666;
+      font-size: 14px;
+    }
+
+    /* Complete Panel */
+    .complete-panel {
+      text-align: center;
+    }
+
+    .complete-panel .success-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+    }
+
+    .complete-panel .success-icon svg {
+      width: 40px;
+      height: 40px;
+      stroke: white;
+    }
+
+    .complete-panel h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .complete-panel .card-count {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .complete-panel .config-path {
+      background: #f8f9fa;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #333;
+      word-break: break-all;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    /* Buttons */
     .btn {
       display: inline-block;
-      padding: 10px 20px;
+      padding: 12px 24px;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
       text-align: center;
@@ -91,8 +289,8 @@
     }
 
     .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
     }
 
     .btn-secondary {
@@ -109,11 +307,6 @@
       color: white;
     }
 
-    .btn-danger {
-      background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
-      color: white;
-    }
-
     .btn-block {
       display: block;
       width: 100%;
@@ -121,473 +314,257 @@
 
     .btn-group {
       display: flex;
-      gap: 10px;
-      margin-top: 15px;
+      gap: 12px;
+      margin-top: 16px;
     }
 
     .btn-group .btn {
       flex: 1;
     }
 
-    .selection-list {
-      margin: 15px 0;
-    }
-
-    .selection-item {
-      display: flex;
-      align-items: center;
-      padding: 10px;
-      background: #f8f9fa;
-      border-radius: 6px;
-      margin-bottom: 8px;
-    }
-
-    .selection-item .icon {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-right: 10px;
-      font-size: 14px;
-    }
-
-    .selection-item .icon.pending {
-      background: #e0e0e0;
-      color: #666;
-    }
-
-    .selection-item .icon.selected {
-      background: #38ef7d;
-      color: white;
-    }
-
-    .selection-item .icon.current {
-      background: #667eea;
-      color: white;
-      animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.1); }
-    }
-
-    .selection-item .info {
-      flex: 1;
-    }
-
-    .selection-item .label {
-      font-weight: 500;
-      color: #333;
-    }
-
-    .selection-item .value {
-      font-size: 12px;
-      color: #666;
-      font-family: monospace;
-      word-break: break-all;
-    }
-
-    .highlight-box {
+    /* Drawing Canvas */
+    #selectionCanvas {
       position: fixed;
-      border: 3px solid #667eea;
-      background: rgba(102, 126, 234, 0.1);
-      pointer-events: none;
-      z-index: 999998;
-      transition: all 0.15s ease-out;
-    }
-
-    .highlight-box::after {
-      content: attr(data-label);
-      position: absolute;
-      top: -25px;
+      top: 0;
       left: 0;
-      background: #667eea;
-      color: white;
-      padding: 2px 8px;
-      font-size: 11px;
-      border-radius: 3px;
-      white-space: nowrap;
-    }
-
-    .preview-section {
-      margin-top: 15px;
-      padding: 10px;
-      background: #f8f9fa;
-      border-radius: 6px;
-    }
-
-    .preview-section h4 {
-      font-size: 12px;
-      color: #666;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .preview-content {
-      font-family: monospace;
-      font-size: 12px;
-      color: #333;
-      max-height: 100px;
-      overflow-y: auto;
-    }
-
-    .status-badge {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 500;
-    }
-
-    .status-badge.detecting {
-      background: #fff3cd;
-      color: #856404;
-    }
-
-    .status-badge.detected {
-      background: #d4edda;
-      color: #155724;
-    }
-
-    .status-badge.not-detected {
-      background: #f8d7da;
-      color: #721c24;
-    }
-
-    .infinite-scroll-info {
-      margin-top: 15px;
-      padding: 12px;
-      background: #e7f3ff;
-      border-radius: 6px;
-      border-left: 4px solid #667eea;
-    }
-
-    .infinite-scroll-info h4 {
-      font-size: 13px;
-      color: #333;
-      margin-bottom: 5px;
-    }
-
-    .infinite-scroll-info p {
-      font-size: 12px;
-      color: #666;
-    }
-
-    .summary-table {
       width: 100%;
-      border-collapse: collapse;
-      margin: 10px 0;
-    }
-
-    .summary-table td {
-      padding: 8px;
-      border-bottom: 1px solid #eee;
-    }
-
-    .summary-table td:first-child {
-      color: #666;
-      width: 100px;
-    }
-
-    .summary-table td:last-child {
-      font-family: monospace;
-      font-size: 12px;
-      word-break: break-all;
-    }
-
-    .progress-bar {
-      height: 4px;
-      background: #e0e0e0;
-      border-radius: 2px;
-      margin: 15px 0;
-      overflow: hidden;
-    }
-
-    .progress-bar .fill {
       height: 100%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      transition: width 0.3s;
+      z-index: 999997;
+      cursor: crosshair;
+      background: rgba(0, 0, 0, 0.1);
     }
 
-    .loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    .loading .spinner {
-      width: 30px;
-      height: 30px;
-      border: 3px solid #f0f0f0;
-      border-top-color: #667eea;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .message {
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 15px;
-      font-size: 13px;
-    }
-
-    .message.info {
-      background: #e7f3ff;
-      color: #004085;
-    }
-
-    .message.success {
-      background: #d4edda;
-      color: #155724;
-    }
-
-    .message.warning {
-      background: #fff3cd;
-      color: #856404;
-    }
-
-    .message.error {
-      background: #f8d7da;
-      color: #721c24;
-    }
-
-    /* Minimize/Expand */
-    .panel.minimized .panel-body {
+    #selectionCanvas.hidden {
       display: none;
     }
 
+    /* Card Highlights Container */
+    #cardHighlights {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 999996;
+    }
+
+    .card-highlight {
+      position: absolute;
+      border: 3px solid;
+      border-radius: 4px;
+      background: rgba(102, 126, 234, 0.1);
+      transition: all 0.2s;
+    }
+
+    .card-highlight.high-confidence {
+      border-color: #38ef7d;
+      background: rgba(56, 239, 125, 0.1);
+    }
+
+    .card-highlight.medium-confidence {
+      border-color: #ffd93d;
+      background: rgba(255, 217, 61, 0.1);
+    }
+
+    .card-highlight.low-confidence {
+      border-color: #ff6b6b;
+      background: rgba(255, 107, 107, 0.1);
+    }
+
+    .card-highlight .confidence-badge {
+      position: absolute;
+      top: -24px;
+      left: 0;
+      background: inherit;
+      border: 2px solid;
+      border-color: inherit;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #333;
+      white-space: nowrap;
+    }
+
+    /* Toast Notifications */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #333;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000000;
+      opacity: 0;
+      transition: all 0.3s;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .toast.error {
+      background: #dc3545;
+    }
+
+    .toast.warning {
+      background: #ffc107;
+      color: #333;
+    }
+
+    /* Minimize Button */
     .minimize-btn {
       position: absolute;
-      top: 10px;
-      right: 10px;
+      top: 12px;
+      right: 12px;
       background: none;
       border: none;
       color: white;
-      font-size: 18px;
+      font-size: 20px;
       cursor: pointer;
       opacity: 0.8;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
     }
 
     .minimize-btn:hover {
       opacity: 1;
+      background: rgba(255,255,255,0.1);
+    }
+
+    .panel.minimized .panel-body {
+      display: none;
+    }
+
+    /* Selection Box Preview (while drawing) */
+    #selectionPreview {
+      position: fixed;
+      border: 2px dashed #667eea;
+      background: rgba(102, 126, 234, 0.1);
+      pointer-events: none;
+      z-index: 999998;
+      display: none;
+    }
+
+    #selectionPreview .dimensions {
+      position: absolute;
+      bottom: -24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #667eea;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
     }
   </style>
 </head>
 <body>
+  <!-- Control Panel -->
   <div id="controlPanel" class="panel">
     <div class="panel-header">
       <button class="minimize-btn" onclick="toggleMinimize()">−</button>
-      <h1>Config Generator</h1>
-      <div class="phase" id="currentPhase">Initializing...</div>
+      <h1>Visual Card Scraper</h1>
+      <div class="subtitle" id="panelSubtitle">Config Generator v2.0</div>
     </div>
 
     <div class="panel-body">
-      <!-- Step 0: Ready -->
-      <div id="step-ready" class="step active">
-        <div class="step-title">Welcome!</div>
-        <div class="step-description">
-          This tool will help you create a configuration file for scraping this site.
-          You'll click on elements to identify contact cards and their fields.
+      <!-- Instruction Panel (default visible) -->
+      <div id="instructionPanel" class="panel-content active instruction-panel">
+        <div class="icon-container">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <line x1="3" y1="9" x2="21" y2="9"/>
+            <line x1="9" y1="21" x2="9" y2="9"/>
+          </svg>
         </div>
-        <button class="btn btn-primary btn-block" onclick="startSelection()">
-          I'm Ready - Start Selection
+        <h2>Select a Contact Card</h2>
+        <p>Draw a rectangle around one contact card. We'll find all similar cards and extract their data.</p>
+        <div class="tip">
+          <span class="tip-icon">💡</span>
+          <span class="tip-text">Click and drag to draw a rectangle around a single card containing name, email, phone, etc.</span>
+        </div>
+        <button class="btn btn-primary btn-block" id="startSelectionBtn" onclick="startSelection()">
+          Start Drawing Selection
         </button>
       </div>
 
-      <!-- Step 1: Select Card -->
-      <div id="step-card" class="step">
-        <div class="step-title">Step 1: Select a Contact Card</div>
-        <div class="step-description">
-          Click on any contact card (the container that holds one person's info).
-          This is usually a div, article, or list item that repeats for each contact.
-        </div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 20%"></div>
-        </div>
-        <div class="selection-list">
-          <div class="selection-item">
-            <div class="icon current">1</div>
-            <div class="info">
-              <div class="label">Contact Card</div>
-              <div class="value" id="cardSelectorPreview">Click to select...</div>
-            </div>
+      <!-- Confirmation Panel (hidden) -->
+      <div id="confirmationPanel" class="panel-content confirmation-panel">
+        <div class="stats-row">
+          <div class="stat-box">
+            <div class="stat-value" id="cardCountStat">0</div>
+            <div class="stat-label">Cards Found</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="avgConfidenceStat">0%</div>
+            <div class="stat-label">Avg Confidence</div>
           </div>
         </div>
-        <button class="btn btn-secondary btn-block" onclick="skipStep('card')">
-          Skip (use auto-detection)
-        </button>
-      </div>
 
-      <!-- Step 2: Confirm Cards -->
-      <div id="step-confirm-cards" class="step">
-        <div class="step-title">Confirm Card Selection</div>
-        <div class="step-description">
-          We found <strong id="cardCount">0</strong> cards matching your selection.
-          Do these look correct?
-        </div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 30%"></div>
-        </div>
-        <div class="preview-section">
-          <h4>Selected Selector</h4>
-          <div class="preview-content" id="cardSelectorFinal"></div>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-secondary" onclick="goBack('card')">Re-select</button>
-          <button class="btn btn-primary" onclick="confirmCards()">Looks Good!</button>
-        </div>
-      </div>
-
-      <!-- Step 3: Select Fields -->
-      <div id="step-fields" class="step">
-        <div class="step-title">Step 2: Select Fields</div>
-        <div class="step-description">
-          Click on the name, email, and phone fields within a card.
-          You can skip fields that don't exist.
-        </div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 50%"></div>
-        </div>
-        <div class="selection-list">
-          <div class="selection-item" id="field-name">
-            <div class="icon current" id="icon-name">N</div>
-            <div class="info">
-              <div class="label">Name</div>
-              <div class="value" id="nameSelectorPreview">Click to select...</div>
-            </div>
-          </div>
-          <div class="selection-item" id="field-email">
-            <div class="icon pending" id="icon-email">@</div>
-            <div class="info">
-              <div class="label">Email</div>
-              <div class="value" id="emailSelectorPreview">Waiting...</div>
-            </div>
-          </div>
-          <div class="selection-item" id="field-phone">
-            <div class="icon pending" id="icon-phone">☎</div>
-            <div class="info">
-              <div class="label">Phone</div>
-              <div class="value" id="phoneSelectorPreview">Waiting...</div>
-            </div>
-          </div>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-secondary" onclick="skipCurrentField()">Skip Field</button>
-          <button class="btn btn-primary" onclick="finishFields()" id="finishFieldsBtn" style="display:none">
-            Done with Fields
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 4: Pagination Detection -->
-      <div id="step-pagination" class="step">
-        <div class="step-title">Step 3: Pagination Detection</div>
-        <div class="step-description">
-          We're checking if this site uses pagination or infinite scroll...
-        </div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 75%"></div>
-        </div>
-        <div class="loading" id="paginationLoading">
-          <div class="spinner"></div>
-        </div>
-        <div id="paginationResult" style="display:none">
-          <div class="infinite-scroll-info" id="infiniteScrollInfo" style="display:none">
-            <h4>🔄 Infinite Scroll Detected</h4>
-            <p>This site loads more content as you scroll. We'll configure the scraper to handle this automatically.</p>
-            <table class="summary-table">
-              <tr>
-                <td>Initial cards:</td>
-                <td id="initialCardCount">-</td>
-              </tr>
-              <tr>
-                <td>After scroll:</td>
-                <td id="afterScrollCount">-</td>
-              </tr>
-              <tr>
-                <td>Confidence:</td>
-                <td id="scrollConfidence">-</td>
-              </tr>
-            </table>
-          </div>
-          <div class="message info" id="noPaginationInfo" style="display:none">
-            No pagination detected. This appears to be a single-page listing.
-          </div>
-        </div>
-        <button class="btn btn-primary btn-block" onclick="proceedToSummary()" id="paginationContinueBtn" style="display:none">
-          Continue
-        </button>
-      </div>
-
-      <!-- Step 5: Summary -->
-      <div id="step-summary" class="step">
-        <div class="step-title">Step 4: Review & Save</div>
-        <div class="step-description">
-          Review your configuration before saving.
-        </div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 90%"></div>
-        </div>
-        <table class="summary-table">
-          <tr>
-            <td>Card:</td>
-            <td id="summaryCard">-</td>
-          </tr>
-          <tr>
-            <td>Name:</td>
-            <td id="summaryName">-</td>
-          </tr>
-          <tr>
-            <td>Email:</td>
-            <td id="summaryEmail">-</td>
-          </tr>
-          <tr>
-            <td>Phone:</td>
-            <td id="summaryPhone">-</td>
-          </tr>
-          <tr>
-            <td>Pagination:</td>
-            <td id="summaryPagination">-</td>
-          </tr>
+        <h3>Preview: First Card Data</h3>
+        <table class="preview-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="previewTableBody">
+            <!-- Filled dynamically -->
+          </tbody>
         </table>
+
         <div class="btn-group">
-          <button class="btn btn-secondary" onclick="startOver()">Start Over</button>
-          <button class="btn btn-success" onclick="saveConfig()">Save Config</button>
+          <button class="btn btn-secondary" onclick="retrySelection()">Select Different Card</button>
+          <button class="btn btn-success" onclick="confirmAndGenerate()">Confirm & Generate</button>
         </div>
       </div>
 
-      <!-- Step 6: Complete -->
-      <div id="step-complete" class="step">
-        <div class="step-title">✓ Configuration Saved!</div>
-        <div class="progress-bar">
-          <div class="fill" style="width: 100%"></div>
+      <!-- Progress Panel (hidden) -->
+      <div id="progressPanel" class="panel-content progress-panel">
+        <h2 id="progressTitle">Processing...</h2>
+        <div class="spinner"></div>
+        <div class="status-message" id="progressMessage">Analyzing page structure...</div>
+      </div>
+
+      <!-- Complete Panel (hidden) -->
+      <div id="completePanel" class="panel-content complete-panel">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
         </div>
-        <div class="message success">
-          Your configuration has been saved successfully.
-        </div>
-        <div class="preview-section">
-          <h4>Config File</h4>
-          <div class="preview-content" id="savedConfigPath">-</div>
-        </div>
-        <button class="btn btn-primary btn-block" onclick="closePanel()">
-          Close
-        </button>
+        <h2>Config Generated!</h2>
+        <div class="card-count" id="completeCardCount">24 cards detected</div>
+        <div class="config-path" id="completeConfigPath">configs/example.json</div>
+        <button class="btn btn-primary btn-block" onclick="closePanel()">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Highlight overlay for selected elements -->
-  <div id="highlightBox" class="highlight-box" style="display:none"></div>
+  <!-- Selection Canvas (for drawing rectangles) -->
+  <canvas id="selectionCanvas" class="hidden"></canvas>
 
-  <script src="overlay-client.js"></script>
+  <!-- Selection Preview (shows dimensions while drawing) -->
+  <div id="selectionPreview">
+    <div class="dimensions" id="selectionDimensions">0 x 0</div>
+  </div>
+
+  <!-- Card Highlights Container -->
+  <div id="cardHighlights"></div>
+
+  <!-- Toast Container -->
+  <div id="toast" class="toast"></div>
 </body>
 </html>
