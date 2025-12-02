@@ -24,6 +24,27 @@ process.on('unhandledRejection', (error) => {
   process.exit(1);
 });
 
+// ===========================
+// CLI ARGUMENT PARSING
+// ===========================
+const { Command } = require('commander');
+
+const program = new Command();
+program
+  .name('infinite-scroll-test')
+  .description('Test infinite scroll scraper - supports test suite mode and ad-hoc URL testing')
+  .option('-u, --url <url>', 'Target URL to test (enables ad-hoc mode)')
+  .option('--max-scroll <number>', 'Max scroll attempts', '50')
+  .option('--scroll-delay <ms>', 'Delay between scrolls in ms', '1500')
+  .option('--expected-min <number>', 'Minimum expected contacts', '1')
+  .option('--expected-max <number>', 'Maximum expected contacts', '1000')
+  .option('--min-names <number>', 'Minimum names required', '0')
+  .option('--headless <value>', 'Run browser in headless mode (true/false)', 'false')
+  .option('--timeout <ms>', 'Test timeout in milliseconds', '180000')
+  .parse(process.argv);
+
+const cliOptions = program.opts();
+
 console.log('='.repeat(70));
 console.log('INFINITE SCROLL TEST RUNNER - LOADING');
 console.log('='.repeat(70));
@@ -568,12 +589,55 @@ module.exports = TestRunner;
 if (require.main === module) {
   console.log('');
   console.log('[Main] Test runner invoked directly');
-  console.log('[Main] Creating TestRunner instance...');
 
   try {
     const runner = new TestRunner();
     console.log('[Main] ✓ TestRunner created');
-    console.log('[Main] Starting tests...');
+
+    // Detect mode: Ad-hoc (--url provided) vs Test Suite (no --url)
+    if (cliOptions.url) {
+      console.log('');
+      console.log('='.repeat(70));
+      console.log('  AD-HOC TEST MODE');
+      console.log('='.repeat(70));
+      console.log(`[Main] Target URL: ${cliOptions.url}`);
+      console.log(`[Main] Max scrolls: ${cliOptions.maxScroll}`);
+      console.log(`[Main] Scroll delay: ${cliOptions.scrollDelay}ms`);
+      console.log(`[Main] Expected contacts: ${cliOptions.expectedMin}-${cliOptions.expectedMax}`);
+      console.log(`[Main] Min names required: ${cliOptions.minNames}`);
+      console.log(`[Main] Headless: ${cliOptions.headless}`);
+      console.log(`[Main] Timeout: ${cliOptions.timeout}ms`);
+      console.log('');
+
+      // Create ad-hoc test configuration
+      const adHocTest = {
+        name: 'ad-hoc-test',
+        url: cliOptions.url,
+        description: `Ad-hoc test for ${cliOptions.url}`,
+        expectedMin: parseInt(cliOptions.expectedMin),
+        expectedMax: parseInt(cliOptions.expectedMax),
+        minNamesRequired: parseInt(cliOptions.minNames),
+        scrollOptions: {
+          maxScrolls: parseInt(cliOptions.maxScroll),
+          scrollDelay: parseInt(cliOptions.scrollDelay),
+          noChangeThreshold: 3,
+          limit: null
+        }
+      };
+
+      // Override testConfig.tests with single ad-hoc test
+      testConfig.tests = [adHocTest];
+
+      // Override settings
+      testConfig.settings.browserHeadless = cliOptions.headless === 'true';
+      testConfig.settings.timeout = parseInt(cliOptions.timeout);
+
+      console.log('[Main] Starting ad-hoc test...');
+    } else {
+      console.log('[Main] Test suite mode - running all tests from config');
+      console.log(`[Main] Tests to run: ${testConfig.tests.length}`);
+    }
+
     console.log('');
 
     runner.runAllTests()
