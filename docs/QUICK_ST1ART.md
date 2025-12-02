@@ -265,7 +265,6 @@ Much cleaner! From ~30+ files down to 11 core files.
 
 ### Week 5: Pagination
 - Handle multi-page directories
-- Infinite scroll support
 - "Load More" buttons
 
 ### Week 6: Site-Specific Adapters

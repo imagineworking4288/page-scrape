@@ -11,7 +11,7 @@ const UrlGenerator = require('./url-generator');
  * - Auto-detects pagination patterns (URL params, path segments, offsets, cursors)
  * - Validates page content to prevent infinite loops
  * - Detects duplicate/empty pages
- * - Supports infinite scroll detection
+ * - Detects infinite scroll (returns "not supported" error)
  * - Caches discovered patterns
  *
  * Delegates to specialized modules:

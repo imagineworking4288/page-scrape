@@ -72,12 +72,6 @@ echo     --start-page ^<number^>        Resume from specific page (default: 1)
 echo     --min-contacts ^<number^>      Min contacts per page to continue
 echo     --discover-only              Detect pagination pattern without scraping
 echo.
-echo   INFINITE SCROLL:
-echo     --infinite-scroll            Enable infinite scroll mode
-echo     --card-selector ^<sel^>        CSS selector for contact cards
-echo     --max-scroll ^<number^>        Max scroll attempts (default: 50)
-echo     --scroll-delay ^<ms^>          Delay between scrolls (default: 1500)
-echo.
 echo   OUTPUT:
 echo     -o, --output ^<format^>        json ^| csv ^| sqlite ^| all (default: json)
 echo     --no-export                  Skip Google Sheets export
@@ -115,12 +109,6 @@ echo   node orchestrator.js --url "https://www.compass.com/agents/locations/manh
 echo.
 echo   # Debug mode (visible browser, keep files)
 echo   node orchestrator.js --url "URL" --method hybrid --headless false --keep
-echo.
-echo   # Infinite scroll (e.g., Sullivan ^& Cromwell lawyers)
-echo   node orchestrator.js --url "URL" --infinite-scroll --max-scroll 30 --scroll-delay 2000
-echo.
-echo   # Infinite scroll test
-echo   node tests/infinite-scroll-test.js
 echo.
 color 0A
 echo --------------------------------------------------------------------------------
@@ -189,8 +177,7 @@ echo ---------------------------------------------------------------------------
 echo [CONFIG GENERATOR - VISUAL TOOL]
 echo --------------------------------------------------------------------------------
 echo   Interactive tool to generate site-specific configs by clicking on elements.
-echo   Automatically detects infinite scroll (e.g., Sullivan ^& Cromwell) or
-echo   traditional pagination. Creates configs for the SELECT scraping method.
+echo   Creates configs for the SELECT scraping method.
 echo.
 echo   USAGE:
 echo     node tools/config-generator.js --url "URL"               Generate config
@@ -208,10 +195,8 @@ echo   WORKFLOW:
 echo     1. Browser opens in visible mode with control panel
 echo     2. Click on a contact card (the repeating container)
 echo     3. Click on name, email, phone fields within a card
-echo     4. Tool auto-detects infinite scroll vs traditional pagination
-echo     5. Config saved to configs/^<domain^>.json
+echo     4. Config saved to configs/^<domain^>.json
 echo.
-echo   INFINITE SCROLL: Detected by scrolling and checking if new cards load
 echo   OUTPUT: JSON config file ready for --method select scraping
 echo.
 echo --------------------------------------------------------------------------------
@@ -230,8 +215,6 @@ echo         paginator.js          - Main pagination orchestrator
 echo         pattern-detector.js   - Visual pagination control detection
 echo         binary-searcher.js    - Binary search for max page
 echo         url-generator.js      - URL generation from patterns
-echo       infinite-scroll/        - Infinite scroll handling
-echo         infinite-scroll-handler.js - Scroll and collect handler
 echo       workflows/              - Complete scraping workflows
 echo         scraping-workflow.js  - Multi-page scraping orchestration
 echo         export-workflow.js    - Output formatting and export
@@ -245,7 +228,7 @@ echo     tools/                    - Developer tools
 echo       site-tester.js          - Diagnostic tool for URL testing
 echo       config-generator.js     - Visual config generation tool
 echo   configs/                     - Site-specific JSON configurations
-echo   tests/                       - Test suites (pagination, infinite-scroll)
+echo   tests/                       - Test suites (pagination)
 echo   output/                      - JSON output files
 echo.
 echo ================================================================================

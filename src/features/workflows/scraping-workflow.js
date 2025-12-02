@@ -228,25 +228,24 @@ class ScrapingWorkflow {
 
     if (!paginationResult.success) {
       this.logger.warn(`Pagination discovery failed: ${paginationResult.error}`);
+    }
 
-      // Check if it's an infinite scroll page
-      if (paginationResult.paginationType === 'infinite-scroll') {
-        this.logger.info('Detected infinite scroll - use the standalone infinite-scroll scraper');
-        // Return with hint to use infinite scroll scraper
-        return {
-          discoveryOnly: false,
-          pagination: paginationResult,
-          contacts: [],
-          stats: {
-            totalExtracted: 0,
-            duplicatesRemoved: 0,
-            pagesScraped: 0,
-            uniqueContacts: 0
-          },
-          domainStats: null,
-          hint: 'Use infinite-scroll/infinite-scroll-scraper.js for this site'
-        };
-      }
+    // Infinite scroll not supported
+    if (paginationResult.paginationType === 'infinite-scroll') {
+      this.logger.warn('Infinite scroll detected - not currently supported');
+      return {
+        discoveryOnly: false,
+        pagination: paginationResult,
+        contacts: [],
+        stats: {
+          totalExtracted: 0,
+          duplicatesRemoved: 0,
+          pagesScraped: 0,
+          uniqueContacts: 0
+        },
+        domainStats: null,
+        error: 'Infinite scroll pages not supported'
+      };
     }
 
     // Check if discovery-only mode

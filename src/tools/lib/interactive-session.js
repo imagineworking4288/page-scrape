@@ -4,9 +4,6 @@
  * Core workflow orchestrator for the config generator.
  * Manages browser page lifecycle, injects overlay UI, and coordinates
  * the element selection workflow.
- *
- * CRITICAL: Includes infinite scroll detection for sites that load
- * content dynamically as user scrolls.
  */
 
 const fs = require('fs');

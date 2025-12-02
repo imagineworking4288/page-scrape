@@ -19,7 +19,6 @@
 |____package.json
 |____pagination
 | |____detector.js
-| |____infinite-scroll.js
 | |____navigator.js
 |____scrapers
 | |____click-handler-scraper.js

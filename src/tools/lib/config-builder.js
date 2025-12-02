@@ -2,7 +2,7 @@
  * Config Builder
  *
  * Builds site-specific configuration files from interactive selections.
- * Supports traditional pagination and infinite scroll configurations.
+ * Supports traditional pagination configurations.
  */
 
 const fs = require('fs');

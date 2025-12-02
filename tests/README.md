@@ -56,7 +56,6 @@ node tests/pagination-test.js \
 ### Phase 1: Pre-Detection Checks
 - Verifies page has content
 - Counts initial contacts/emails
-- Detects infinite scroll indicators
 - Checks for pagination UI elements
 
 ### Phase 2: Pattern Detection
@@ -130,7 +129,6 @@ Validate sample: 10
 Page loaded: YES
 Emails found: 42
 Contact estimate: 42
-Infinite scroll: NO
 
 ═══════════════════════════════════════════════════════
   PHASE 2: PATTERN DETECTION

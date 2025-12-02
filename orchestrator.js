@@ -40,10 +40,6 @@ program
   .option('--start-page <number>', 'Start from specific page number (for resume)', parseInt, 1)
   .option('--min-contacts <number>', 'Minimum contacts per page to continue', parseInt)
   .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
-  .option('--infinite-scroll', 'Enable infinite scroll mode for pages that load content on scroll')
-  .option('--card-selector <selector>', 'CSS selector for contact cards (for infinite scroll)')
-  .option('--max-scroll <number>', 'Maximum scroll attempts for infinite scroll', parseInt, 50)
-  .option('--scroll-delay <ms>', 'Delay between scrolls in ms', parseInt, 1500)
   .option('--no-export', 'Skip Google Sheets export (only output JSON)')
   .parse(process.argv);
 
@@ -291,63 +287,6 @@ async function main() {
     // Scrape all pages
     let allContacts = [];
     let pageNumber = startPage;
-
-    // Determine if infinite scroll mode should be used
-    let useInfiniteScroll = false;
-    let infiniteScrollReason = '';
-
-    // Check 1: Explicit CLI flag
-    if (options.infiniteScroll) {
-      useInfiniteScroll = true;
-      infiniteScrollReason = '--infinite-scroll flag';
-    }
-
-    // Check 2: Site config indicates infinite scroll
-    if (!useInfiniteScroll && siteConfig) {
-      if (siteConfig.pagination?.type === 'infinite-scroll' ||
-          siteConfig.infiniteScroll?.enabled === true) {
-        useInfiniteScroll = true;
-        infiniteScrollReason = 'site config';
-      }
-    }
-
-    // Check 3: Pagination discovery detected infinite scroll
-    if (!useInfiniteScroll && paginationResult?.paginationType === 'infinite-scroll') {
-      useInfiniteScroll = true;
-      infiniteScrollReason = 'auto-detection';
-    }
-
-    // Execute infinite scroll mode if enabled
-    if (useInfiniteScroll) {
-      logger.info('');
-      logger.info('═══════════════════════════════════════');
-      logger.info('  INFINITE SCROLL MODE');
-      logger.info('═══════════════════════════════════════');
-      logger.info(`Enabled via: ${infiniteScrollReason}`);
-      logger.info(`Card selector: ${options.cardSelector || siteConfig?.selectors?.container || 'auto-detect'}`);
-      logger.info(`Max scroll attempts: ${options.maxScroll || siteConfig?.infiniteScroll?.maxScrollAttempts || 50}`);
-      logger.info(`Scroll delay: ${options.scrollDelay || siteConfig?.infiniteScroll?.scrollDelay || 1500}ms`);
-      logger.info('');
-
-      // Use dedicated InfiniteScrollScraper
-      const InfiniteScrollScraper = require('./src/scrapers/infinite-scroll-scraper');
-      const infiniteScrollScraper = new InfiniteScrollScraper(browserManager, rateLimiter, logger, {
-        cardSelector: options.cardSelector || siteConfig?.selectors?.container || null,
-        maxScrolls: parseInt(options.maxScroll) || siteConfig?.infiniteScroll?.maxScrollAttempts || 50,
-        scrollDelay: parseInt(options.scrollDelay) || siteConfig?.infiniteScroll?.scrollDelay || 1500,
-        noNewContentThreshold: siteConfig?.infiniteScroll?.noNewContentThreshold || 3,
-        extractionMethod: options.method || siteConfig?.infiniteScroll?.extractionMethod || 'html',
-        completenessThreshold: siteConfig?.fallback?.completenessThreshold || 0.3,
-        enableFallback: siteConfig?.fallback?.enabled !== false,
-        fallbackMethods: siteConfig?.fallback?.methods || ['select', 'pdf']
-      });
-
-      const contacts = await infiniteScrollScraper.scrape(options.url, siteConfig || {});
-      allContacts = contacts;
-
-      // Skip the pagination loop since we used infinite scroll
-      pageUrls = [];
-    }
 
     // Create scraper instance
     let scraper;

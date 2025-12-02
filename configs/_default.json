@@ -45,7 +45,7 @@
   "pagination": {
     "enabled": true,
     "type": "auto",
-    "comment": "Auto-detect pagination pattern. Can be overridden with: 'parameter', 'path', 'offset', 'cursor', 'infinite-scroll', or 'none'",
+    "comment": "Auto-detect pagination pattern. Can be overridden with: 'parameter', 'path', 'offset', 'cursor', or 'none'",
     "discovery": {
       "timeout": 30000,
       "minContactsPerPage": 1,
@@ -73,17 +73,6 @@
       "minEmailsPerPage": 1,
       "comment": "Validation rules to detect when pagination should stop"
     }
-  },
-  "infiniteScroll": {
-    "enabled": false,
-    "scrollDelay": 1500,
-    "maxScrollAttempts": 50,
-    "noNewContentThreshold": 3,
-    "scrollStrategy": "viewport",
-    "networkIdleTimeout": 5000,
-    "minCardIncrement": 1,
-    "extractionMethod": "universal",
-    "comment": "Settings for infinite scroll detection and extraction. Set enabled: true to use infinite scroll mode."
   },
   "profileVisiting": {
     "enabled": false,

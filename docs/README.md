@@ -12,7 +12,7 @@ This scraper uses three progressive levels to handle different website structure
 
 ### Key Features
 
-- **Pattern-Based Pagination** - Detects 6 different pagination formats plus infinite scroll
+- **Pattern-Based Pagination** - Detects 6 different pagination formats
 - **Template Adapters** - Site-specific configurations for optimal extraction
 - **Memory Management** - Automatic page recycling to prevent memory leaks
 - **Rate Limiting** - Exponential backoff with human-like delays
@@ -158,8 +158,7 @@ universal-scraper/
 │   └── profile-resolver-scraper.js
 ├── pagination/             # Pagination detection and navigation
 │   ├── detector.js
-│   ├── navigator.js
-│   └── infinite-scroll.js
+│   └── navigator.js
 ├── adapters/               # Site-specific configurations
 │   ├── registry.json
 │   ├── loader.js

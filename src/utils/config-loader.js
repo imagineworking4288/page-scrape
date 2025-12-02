@@ -86,14 +86,7 @@ class ConfigLoader {
       throw new Error(`Config for ${domain} missing required field: domain`);
     }
 
-    // For infinite scroll configs, markers are not required
-    if (config.infiniteScroll?.enabled === true) {
-      // Infinite scroll config - markers optional
-      this.logger.info(`Config for ${domain} uses infinite scroll mode`);
-      return;
-    }
-
-    // For traditional select scraping, markers are required
+    // For select scraping, markers are required
     if (!config.markers) {
       throw new Error(`Config for ${domain} missing required field: markers`);
     }
