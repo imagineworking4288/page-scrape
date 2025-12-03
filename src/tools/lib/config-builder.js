@@ -1,11 +1,17 @@
 /**
- * Config Builder v2.0
+ * Config Builder v2.1
  *
  * Builds site-specific configuration files from visual card selection.
- * Supports both legacy v1.0 format and new v2.0 format with:
- * - Card pattern matching (structural + visual signatures)
- * - Smart field extraction rules
- * - Enhanced pagination support
+ * Supports legacy v1.0, v2.0, and new v2.1 formats:
+ * - v1.0: Basic selectors
+ * - v2.0: Card pattern matching (structural + visual signatures)
+ * - v2.1: Multi-method extraction strategies with priorities and fallbacks
+ *
+ * v2.1 Features:
+ * - Site-specific extraction methods stored per field
+ * - Priority-ordered fallback strategies
+ * - Captured element snapshots for runtime matching
+ * - Site characteristics for adaptive behavior
  */
 
 const fs = require('fs');
@@ -193,6 +199,508 @@ class ConfigBuilder {
     }
 
     return notes;
+  }
+
+  // ===========================
+  // V2.1 CONFIG BUILDER
+  // ===========================
+
+  /**
+   * Build v2.1 configuration from enhanced capture data
+   * @param {Object} captureData - Result from EnhancedCapture.capture()
+   * @param {Object} matchResult - Result from CardMatcher.findSimilarCards()
+   * @param {Object} metadata - Site metadata (url, domain, pagination)
+   * @returns {Object} - Configuration v2.1 object
+   */
+  buildConfigV21(captureData, matchResult, metadata) {
+    const config = {
+      // Metadata
+      name: this.generateConfigName(metadata.url),
+      version: '2.1',
+      createdAt: new Date().toISOString(),
+      sourceUrl: metadata.url,
+      domain: metadata.domain,
+
+      // Card pattern with fallback selectors
+      cardPattern: this.buildCardPatternV21(captureData, matchResult),
+
+      // Multi-method field extraction
+      fieldExtraction: this.buildFieldExtractionV21(captureData),
+
+      // Site characteristics
+      siteCharacteristics: captureData.siteCharacteristics || {},
+
+      // Spatial relationships
+      relationships: captureData.relationships || {},
+
+      // Captured element snapshot (for debugging/refinement)
+      capturedElements: {
+        card: captureData.card || {},
+        links: captureData.links || {}
+      },
+
+      // Pagination configuration
+      pagination: this.buildPaginationConfig(metadata.pagination || {}, metadata),
+
+      // Extraction settings
+      extraction: {
+        waitFor: captureData.card?.selector || matchResult?.selector,
+        waitTimeout: 15000,
+        scrollToLoad: captureData.siteCharacteristics?.dynamicLoading === 'lazy',
+        stripHtml: true,
+        trimWhitespace: true,
+        deduplicateBy: 'email'
+      },
+
+      // Site-specific options
+      options: {
+        minDelay: 2000,
+        maxDelay: 5000,
+        userAgent: null,
+        viewport: { width: 1920, height: 1080 }
+      },
+
+      // Detection statistics
+      detectionStats: {
+        totalCardsFound: matchResult?.totalFound || 0,
+        avgConfidence: this.calculateAverageConfidence(matchResult?.matches || []),
+        fieldsDetected: this.countDetectedFields(captureData),
+        timestamp: new Date().toISOString()
+      },
+
+      // Notes
+      notes: this.generateNotesV21(captureData, matchResult, metadata)
+    };
+
+    return config;
+  }
+
+  /**
+   * Build card pattern with fallback selectors for v2.1
+   * @param {Object} captureData - Enhanced capture data
+   * @param {Object} matchResult - Card matcher result
+   * @returns {Object} - Card pattern configuration
+   */
+  buildCardPatternV21(captureData, matchResult) {
+    const card = captureData.card || {};
+    const ref = matchResult?.referenceElement || {};
+
+    // Build fallback selectors from captured strategies
+    const fallbackSelectors = [];
+    if (card.selectorStrategies) {
+      card.selectorStrategies.forEach(strategy => {
+        if (strategy.selector && !fallbackSelectors.includes(strategy.selector)) {
+          fallbackSelectors.push(strategy.selector);
+        }
+      });
+    }
+
+    return {
+      // Primary selector
+      primarySelector: card.selector || matchResult?.selector,
+
+      // Fallback selectors (ordered by specificity)
+      fallbackSelectors: fallbackSelectors.slice(0, 5),
+
+      // Structural signature
+      structural: {
+        tagName: card.tagName || ref.structural?.tagName,
+        classes: card.classes || [],
+        parentChain: ref.structural?.parentChain || [],
+        childCount: card.childCount || ref.structural?.childCount || 0,
+        childTags: card.childTags || ref.structural?.childTags || {},
+        classPatterns: ref.structural?.classPatterns || [],
+        hasLinks: ref.structural?.hasLinks || false,
+        hasImages: ref.structural?.hasImages || false
+      },
+
+      // Visual properties
+      visual: {
+        width: card.dimensions?.width || ref.visual?.box?.width,
+        height: card.dimensions?.height || ref.visual?.box?.height,
+        aspectRatio: ref.visual?.aspectRatio,
+        display: card.styles?.display || ref.visual?.display
+      },
+
+      // Element attributes for additional matching
+      attributes: card.attributes || {},
+
+      // Matching thresholds
+      matching: {
+        structuralWeight: 0.6,
+        visualWeight: 0.4,
+        minConfidence: 65
+      }
+    };
+  }
+
+  /**
+   * Build multi-method field extraction rules for v2.1
+   * @param {Object} captureData - Enhanced capture data
+   * @returns {Object} - Field extraction configuration
+   */
+  buildFieldExtractionV21(captureData) {
+    const fields = captureData.fields || {};
+
+    return {
+      version: '2.1',
+      strategy: 'multi-method',
+
+      fields: {
+        name: this.buildFieldMethodsV21(fields.name, 'name'),
+        email: this.buildFieldMethodsV21(fields.email, 'email'),
+        phone: this.buildFieldMethodsV21(fields.phone, 'phone'),
+        title: this.buildFieldMethodsV21(fields.title, 'title'),
+        profileUrl: this.buildFieldMethodsV21(fields.profileUrl, 'profileUrl')
+      },
+
+      // Social links configuration
+      socialLinks: {
+        enabled: true,
+        platforms: ['linkedin', 'twitter', 'facebook', 'github']
+      }
+    };
+  }
+
+  /**
+   * Build extraction methods for a single field
+   * @param {Object} fieldData - Field data with methods array
+   * @param {string} fieldName - Name of the field
+   * @returns {Object} - Field extraction methods
+   */
+  buildFieldMethodsV21(fieldData, fieldName) {
+    if (!fieldData || !fieldData.methods || fieldData.methods.length === 0) {
+      return this.getDefaultFieldMethods(fieldName);
+    }
+
+    // Convert captured methods to config format
+    const methods = fieldData.methods.map((method, index) => ({
+      priority: method.priority || index + 1,
+      type: method.type,
+      selector: method.selector || null,
+      attribute: method.attribute || 'textContent',
+      confidence: method.confidence || 0.5,
+      // Include additional method-specific data
+      ...(method.pattern && { pattern: method.pattern }),
+      ...(method.anchorField && { anchorField: method.anchorField }),
+      ...(method.direction && { direction: method.direction }),
+      ...(method.distance && { maxDistance: Math.ceil(method.distance * 1.5) }),
+      ...(method.keywords && { keywords: method.keywords })
+    }));
+
+    return {
+      required: fieldName === 'email' || fieldName === 'name',
+      capturedValue: fieldData.value,
+      methods: methods,
+      validation: this.getFieldValidation(fieldName)
+    };
+  }
+
+  /**
+   * Get default extraction methods for a field
+   * @param {string} fieldName - Field name
+   * @returns {Object} - Default field methods
+   */
+  getDefaultFieldMethods(fieldName) {
+    const defaults = {
+      name: {
+        required: true,
+        methods: [
+          { priority: 1, type: 'selector', selector: '[class*="name"]', attribute: 'textContent', confidence: 0.8 },
+          { priority: 2, type: 'selector', selector: 'h1, h2, h3, h4', attribute: 'textContent', confidence: 0.7 },
+          { priority: 3, type: 'proximity', anchorField: 'email', direction: 'above', maxDistance: 300, confidence: 0.6 },
+          { priority: 4, type: 'firstText', confidence: 0.4 }
+        ],
+        validation: 'name'
+      },
+      email: {
+        required: true,
+        methods: [
+          { priority: 1, type: 'mailto', selector: 'a[href^="mailto:"]', attribute: 'href', confidence: 1.0 },
+          { priority: 2, type: 'linkText', selector: 'a', attribute: 'textContent', confidence: 0.9 },
+          { priority: 3, type: 'textPattern', confidence: 0.7 }
+        ],
+        validation: 'email'
+      },
+      phone: {
+        required: false,
+        methods: [
+          { priority: 1, type: 'tel', selector: 'a[href^="tel:"]', attribute: 'href', confidence: 1.0 },
+          { priority: 2, type: 'selector', selector: '[class*="phone"], [class*="tel"]', attribute: 'textContent', confidence: 0.8 },
+          { priority: 3, type: 'textPattern', confidence: 0.6 }
+        ],
+        validation: 'phone'
+      },
+      title: {
+        required: false,
+        methods: [
+          { priority: 1, type: 'selector', selector: '[class*="title"], [class*="position"], [class*="role"]', attribute: 'textContent', confidence: 0.9 },
+          { priority: 2, type: 'keyword', keywords: ['Partner', 'Associate', 'Director', 'Manager', 'Attorney', 'Counsel'], confidence: 0.7 }
+        ],
+        validation: 'title'
+      },
+      profileUrl: {
+        required: false,
+        methods: [
+          { priority: 1, type: 'urlPattern', patterns: ['/profile/', '/people/', '/attorney/', '/lawyer/', '/bio/'], confidence: 0.95 },
+          { priority: 2, type: 'linkText', keywords: ['view profile', 'read more', 'learn more'], confidence: 0.8 },
+          { priority: 3, type: 'firstInternalLink', confidence: 0.4 }
+        ],
+        validation: 'url'
+      }
+    };
+
+    return defaults[fieldName] || { required: false, methods: [] };
+  }
+
+  /**
+   * Get field validation type
+   * @param {string} fieldName - Field name
+   * @returns {string} - Validation type
+   */
+  getFieldValidation(fieldName) {
+    const validations = {
+      name: 'name',
+      email: 'email',
+      phone: 'phone',
+      title: 'title',
+      profileUrl: 'url',
+      location: 'location'
+    };
+    return validations[fieldName] || null;
+  }
+
+  /**
+   * Count detected fields with values
+   * @param {Object} captureData - Capture data
+   * @returns {Object} - Field detection counts
+   */
+  countDetectedFields(captureData) {
+    const fields = captureData.fields || {};
+    return {
+      name: !!fields.name?.value,
+      email: !!fields.email?.value,
+      phone: !!fields.phone?.value,
+      title: !!fields.title?.value,
+      profileUrl: !!fields.profileUrl?.value,
+      methodsRecorded: Object.values(fields).reduce((sum, f) => sum + (f?.methods?.length || 0), 0)
+    };
+  }
+
+  /**
+   * Generate notes for v2.1 config
+   * @param {Object} captureData - Capture data
+   * @param {Object} matchResult - Match result
+   * @param {Object} metadata - Metadata
+   * @returns {Array} - Notes array
+   */
+  generateNotesV21(captureData, matchResult, metadata) {
+    const notes = [];
+    const preview = captureData.preview || {};
+
+    notes.push(`Config v2.1 generated on ${new Date().toLocaleString()}`);
+    notes.push(`Source: ${metadata.url}`);
+    notes.push(`Cards detected: ${matchResult?.totalFound || 0}`);
+
+    if (matchResult?.matches && matchResult.matches.length > 0) {
+      const avgConf = this.calculateAverageConfidence(matchResult.matches);
+      notes.push(`Average card confidence: ${avgConf}%`);
+    }
+
+    // Field detection summary
+    const detectedFields = [];
+    if (preview.name) detectedFields.push('name');
+    if (preview.email) detectedFields.push('email');
+    if (preview.phone) detectedFields.push('phone');
+    if (preview.title) detectedFields.push('title');
+    if (preview.profileUrl) detectedFields.push('profileUrl');
+    notes.push(`Fields detected: ${detectedFields.join(', ') || 'none'}`);
+
+    // Site characteristics
+    const site = captureData.siteCharacteristics || {};
+    if (site.isSPA) notes.push('Site is SPA');
+    if (site.framework !== 'unknown') notes.push(`Framework: ${site.framework}`);
+    if (site.dynamicLoading !== 'eager') notes.push(`Loading: ${site.dynamicLoading}`);
+
+    // Methods summary
+    const totalMethods = Object.values(captureData.fields || {})
+      .reduce((sum, f) => sum + (f?.methods?.length || 0), 0);
+    notes.push(`Extraction methods captured: ${totalMethods}`);
+
+    return notes;
+  }
+
+  /**
+   * Validate v2.1 configuration completeness
+   * @param {Object} config - Configuration v2.1 to validate
+   * @returns {Object} - Validation result
+   */
+  validateConfigV21(config) {
+    const errors = [];
+    const warnings = [];
+
+    // Version check
+    if (config.version !== '2.1') {
+      warnings.push('Config version is not 2.1');
+    }
+
+    // Required: card pattern
+    if (!config.cardPattern?.primarySelector) {
+      errors.push('Missing primary card selector');
+    }
+
+    // Required: field extraction
+    if (!config.fieldExtraction) {
+      errors.push('Missing field extraction configuration');
+    }
+
+    // Check email extraction
+    const emailMethods = config.fieldExtraction?.fields?.email?.methods || [];
+    if (emailMethods.length === 0) {
+      warnings.push('No email extraction methods - will use defaults');
+    }
+
+    // Check name extraction
+    const nameMethods = config.fieldExtraction?.fields?.name?.methods || [];
+    if (nameMethods.length === 0) {
+      warnings.push('No name extraction methods - will use defaults');
+    }
+
+    // Check detection stats
+    if (config.detectionStats?.totalCardsFound < 2) {
+      warnings.push('Only one card detected - verify card pattern');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors: errors,
+      warnings: warnings,
+      score: this.calculateConfigScoreV21(config, errors, warnings)
+    };
+  }
+
+  /**
+   * Calculate quality score for v2.1 config
+   * @param {Object} config - Configuration v2.1
+   * @param {Array} errors - Validation errors
+   * @param {Array} warnings - Validation warnings
+   * @returns {number} - Score 0-100
+   */
+  calculateConfigScoreV21(config, errors, warnings) {
+    let score = 100;
+
+    // Deduct for errors
+    score -= errors.length * 30;
+
+    // Deduct for warnings
+    score -= warnings.length * 5;
+
+    // Bonus for field completeness and methods
+    const fields = config.fieldExtraction?.fields || {};
+
+    // Email methods bonus
+    const emailMethods = fields.email?.methods?.length || 0;
+    score += Math.min(emailMethods * 3, 15);
+
+    // Name methods bonus
+    const nameMethods = fields.name?.methods?.length || 0;
+    score += Math.min(nameMethods * 3, 15);
+
+    // Other fields bonus
+    if (fields.phone?.methods?.length > 0) score += 5;
+    if (fields.title?.methods?.length > 0) score += 5;
+    if (fields.profileUrl?.methods?.length > 0) score += 5;
+
+    // Fallback selectors bonus
+    const fallbacks = config.cardPattern?.fallbackSelectors?.length || 0;
+    score += Math.min(fallbacks * 2, 10);
+
+    // Site characteristics captured
+    if (config.siteCharacteristics && Object.keys(config.siteCharacteristics).length > 0) {
+      score += 5;
+    }
+
+    // Card detection confidence
+    const avgConf = config.detectionStats?.avgConfidence || 0;
+    if (avgConf >= 80) score += 10;
+    else if (avgConf >= 60) score += 5;
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * Check if config is v2.1 format
+   * @param {Object} config - Configuration to check
+   * @returns {boolean} - True if v2.1
+   */
+  isV21Config(config) {
+    return config.version === '2.1' ||
+           (config.fieldExtraction?.version === '2.1') ||
+           (config.fieldExtraction?.strategy === 'multi-method');
+  }
+
+  /**
+   * Migrate v2.0 config to v2.1 format
+   * @param {Object} v2Config - V2.0 configuration
+   * @returns {Object} - V2.1 configuration
+   */
+  migrateToV21(v2Config) {
+    return {
+      name: v2Config.name,
+      version: '2.1',
+      createdAt: v2Config.createdAt,
+      updatedAt: new Date().toISOString(),
+      sourceUrl: v2Config.sourceUrl,
+      domain: v2Config.domain,
+
+      cardPattern: {
+        primarySelector: v2Config.cardPattern?.selector,
+        fallbackSelectors: [],
+        structural: v2Config.cardPattern?.structural || {},
+        visual: v2Config.cardPattern?.visual || {},
+        attributes: {},
+        matching: v2Config.cardPattern?.matching || {
+          structuralWeight: 0.6,
+          visualWeight: 0.4,
+          minConfidence: 65
+        }
+      },
+
+      fieldExtraction: {
+        version: '2.1',
+        strategy: 'multi-method',
+        fields: {
+          name: this.getDefaultFieldMethods('name'),
+          email: this.getDefaultFieldMethods('email'),
+          phone: this.getDefaultFieldMethods('phone'),
+          title: this.getDefaultFieldMethods('title'),
+          profileUrl: this.getDefaultFieldMethods('profileUrl')
+        },
+        socialLinks: {
+          enabled: true,
+          platforms: ['linkedin', 'twitter', 'facebook', 'github']
+        }
+      },
+
+      siteCharacteristics: {},
+      relationships: {},
+      capturedElements: {},
+
+      pagination: v2Config.pagination,
+      extraction: v2Config.extraction,
+      options: v2Config.options,
+
+      detectionStats: {
+        ...v2Config.detectionStats,
+        migratedFromV2: true
+      },
+
+      notes: [
+        `Migrated from v2.0 on ${new Date().toLocaleString()}`,
+        'Default extraction methods applied - recommend re-generating config',
+        ...(v2Config.notes || [])
+      ]
+    };
   }
 
   /**

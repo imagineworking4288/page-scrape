@@ -108,8 +108,8 @@ echo   # Compass.com example (full workflow)
 echo   node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 5
 echo.
 echo   # Debug mode (visible browser, keep files)
-echo   node orchestrator.js --url "URL" --method hybrid --headless false --keep
-echo.
+echo   node orchestrator.js --url "URL" --method hybrid --headless false --keepe
+echo.  
 color 0A
 echo --------------------------------------------------------------------------------
 echo [SITE CONFIGURATION]
@@ -247,6 +247,9 @@ echo     node orchestrator.js --url "https://www.compass.com/agents/locations/ma
 echo.
 echo   FULL SCRAPE:
 echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
+echo.
+echo   # Debug mode (visible browser, keep files)
+echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_s_lastname=%2F%5BaA%5D.*%2F&custom_is_office=27567"
 echo.
 color 0A
 echo ================================================================================

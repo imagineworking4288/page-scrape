@@ -1,5 +1,5 @@
 /**
- * Universal Profile Visitor
+ * Universal Profile Visitor v2.1
  *
  * Visits individual profile pages to extract emails and other contact information
  * that may not be visible on listing pages.
@@ -8,6 +8,11 @@
  * - Email is hidden behind "Email" links with mailto: hrefs
  * - Email only appears on individual profile pages
  * - Additional contact details need enrichment
+ *
+ * v2.1 Features:
+ * - Uses config-stored profile URL patterns
+ * - Multi-method extraction on profile pages
+ * - Better handling of mailto: links with non-email text
  */
 
 const { getUniversalExtractionCode } = require('./contact-extractor');

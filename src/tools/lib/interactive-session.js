@@ -1,15 +1,16 @@
 /**
- * Interactive Session v2.0
+ * Interactive Session v2.1
  *
  * Core workflow orchestrator for the config generator.
  * Manages browser page lifecycle, injects overlay UI, and coordinates
  * the visual card selection workflow.
  *
- * v2.0 Features:
+ * v2.1 Features:
  * - Rectangle-based card selection
  * - Hybrid pattern matching (structural + visual)
- * - Smart field extraction
+ * - Enhanced capture with multi-method extraction strategies
  * - Card highlighting with confidence scores
+ * - v2.1 config generation with fallbacks
  */
 
 const fs = require('fs');
@@ -22,6 +23,7 @@ const ConfigBuilder = require('./config-builder');
 const ConfigValidator = require('./config-validator');
 const CardMatcher = require('./card-matcher');
 const SmartFieldExtractor = require('./smart-field-extractor');
+const EnhancedCapture = require('./enhanced-capture');
 
 class InteractiveSession {
   constructor(browserManager, rateLimiter, logger, configLoader, options = {}) {
@@ -46,6 +48,10 @@ class InteractiveSession {
     this.previewData = null;
     this.extractionRules = null;
 
+    // v2.1 state
+    this.captureData = null;
+    this.configVersion = options.configVersion || '2.1';
+
     // Helper modules
     this.selectorGenerator = new SelectorGenerator(logger);
     this.elementAnalyzer = new ElementAnalyzer(logger);
@@ -55,6 +61,9 @@ class InteractiveSession {
     // v2.0 modules
     this.cardMatcher = new CardMatcher(logger);
     this.fieldExtractor = new SmartFieldExtractor(logger);
+
+    // v2.1 modules
+    this.enhancedCapture = new EnhancedCapture(logger);
 
     // Session state
     this.page = null;
@@ -303,16 +312,17 @@ class InteractiveSession {
   }
 
   // ===========================
-  // v2.0 Rectangle Selection Handlers
+  // v2.1 Rectangle Selection Handlers
   // ===========================
 
   /**
    * Handle rectangle selection from user
+   * Uses enhanced capture for v2.1 configs
    * @param {Object} box - {x, y, width, height} of selection
    * @returns {Promise<Object>} - Result with matches
    */
   async handleRectangleSelection(box) {
-    this.logger.info('[v2.0] Processing rectangle selection...');
+    this.logger.info('[v2.1] Processing rectangle selection...');
 
     try {
       // Step 1: Find similar cards using CardMatcher
@@ -337,18 +347,35 @@ class InteractiveSession {
       this.matchResult = matchResult;
       this.selections.cardSelector = matchResult.selector;
 
-      this.logger.info(`[v2.0] Found ${matchResult.totalFound} matching cards`);
+      this.logger.info(`[v2.1] Found ${matchResult.totalFound} matching cards`);
 
-      // Step 2: Extract fields from reference card for preview
-      const previewResult = await this.fieldExtractor.extractFromSelection(this.page, box);
+      // Step 2: Enhanced capture for v2.1 (comprehensive DOM capture)
+      this.logger.info('[v2.1] Running enhanced capture...');
+      const captureResult = await this.enhancedCapture.capture(this.page, box);
 
-      if (previewResult.success) {
-        this.previewData = previewResult.data;
+      if (captureResult.success) {
+        this.captureData = captureResult;
+        this.previewData = captureResult.preview || {};
+
+        // Log captured methods
+        const fields = captureResult.fields || {};
+        const methodCounts = {
+          name: fields.name?.methods?.length || 0,
+          email: fields.email?.methods?.length || 0,
+          phone: fields.phone?.methods?.length || 0,
+          title: fields.title?.methods?.length || 0,
+          profileUrl: fields.profileUrl?.methods?.length || 0
+        };
+        this.logger.info(`[v2.1] Captured extraction methods: ${JSON.stringify(methodCounts)}`);
       } else {
-        this.previewData = {};
+        this.logger.warn('[v2.1] Enhanced capture failed, falling back to basic extraction');
+        // Fallback to legacy extraction
+        const previewResult = await this.fieldExtractor.extractFromSelection(this.page, box);
+        this.previewData = previewResult.success ? previewResult.data : {};
+        this.captureData = null;
       }
 
-      // Step 3: Generate extraction rules
+      // Step 3: Generate extraction rules (for backward compatibility)
       this.extractionRules = this.fieldExtractor.generateExtractionRules(this.previewData);
 
       // Send result to overlay
@@ -357,7 +384,11 @@ class InteractiveSession {
         matches: matchResult.matches,
         totalFound: matchResult.totalFound,
         selector: matchResult.selector,
-        previewData: this.previewData
+        previewData: this.previewData,
+        // v2.1 additional data
+        captureVersion: this.captureData ? '2.1' : '2.0',
+        methodsCount: this.captureData ? Object.values(this.captureData.fields || {})
+          .reduce((sum, f) => sum + (f?.methods?.length || 0), 0) : 0
       };
 
       await this.page.evaluate((res) => {
@@ -369,7 +400,7 @@ class InteractiveSession {
       return result;
 
     } catch (error) {
-      this.logger.error(`[v2.0] Rectangle selection error: ${error.message}`);
+      this.logger.error(`[v2.1] Rectangle selection error: ${error.message}`);
 
       await this.page.evaluate((err) => {
         if (window.handleCardDetectionResult) {
@@ -382,11 +413,15 @@ class InteractiveSession {
   }
 
   /**
-   * Handle confirm and generate config (v2.0)
+   * Handle confirm and generate config (v2.1 with v2.0 fallback)
    * @returns {Promise<Object>} - Result with config path
    */
   async handleConfirmAndGenerate() {
-    this.logger.info('[v2.0] Generating config...');
+    // Determine which version to generate
+    const generateV21 = this.captureData && this.configVersion === '2.1';
+    const version = generateV21 ? '2.1' : '2.0';
+
+    this.logger.info(`[v${version}] Generating config...`);
 
     try {
       if (!this.matchResult) {
@@ -400,34 +435,59 @@ class InteractiveSession {
         pagination: this.selections.paginationPattern || { type: 'none' }
       };
 
-      // Build v2.0 config
-      const config = this.configBuilder.buildConfigV2(
-        this.matchResult,
-        this.extractionRules,
-        metadata
-      );
+      let config, validation;
 
-      // Validate config
-      const validation = this.configBuilder.validateConfigV2(config);
+      if (generateV21) {
+        // Build v2.1 config with enhanced capture data
+        this.logger.info('[v2.1] Building config with multi-method extraction strategies...');
+
+        config = this.configBuilder.buildConfigV21(
+          this.captureData,
+          this.matchResult,
+          metadata
+        );
+
+        // Validate v2.1 config
+        validation = this.configBuilder.validateConfigV21(config);
+
+        // Log method counts
+        const fields = config.fieldExtraction?.fields || {};
+        const totalMethods = Object.values(fields).reduce((sum, f) => sum + (f?.methods?.length || 0), 0);
+        this.logger.info(`[v2.1] Config generated with ${totalMethods} extraction methods`);
+      } else {
+        // Fallback to v2.0 config
+        this.logger.info('[v2.0] Building config with standard extraction rules...');
+
+        config = this.configBuilder.buildConfigV2(
+          this.matchResult,
+          this.extractionRules,
+          metadata
+        );
+
+        // Validate v2.0 config
+        validation = this.configBuilder.validateConfigV2(config);
+      }
 
       if (!validation.valid) {
-        this.logger.warn(`[v2.0] Config validation errors: ${validation.errors.join(', ')}`);
+        this.logger.warn(`[v${version}] Config validation errors: ${validation.errors.join(', ')}`);
       }
 
       if (validation.warnings.length > 0) {
-        this.logger.warn(`[v2.0] Config validation warnings: ${validation.warnings.join(', ')}`);
+        this.logger.warn(`[v${version}] Config validation warnings: ${validation.warnings.join(', ')}`);
       }
 
       // Save config
       const configPath = this.configBuilder.saveConfig(config, this.options.outputDir);
 
-      this.logger.info(`[v2.0] Config saved to: ${configPath}`);
+      this.logger.info(`[v${version}] Config saved to: ${configPath}`);
+      this.logger.info(`[v${version}] Config score: ${validation.score}/100`);
 
       // Send result to overlay
       const result = {
         success: true,
         configPath: configPath,
         configName: config.name,
+        configVersion: config.version,
         validation: validation
       };
 
@@ -453,7 +513,7 @@ class InteractiveSession {
       return result;
 
     } catch (error) {
-      this.logger.error(`[v2.0] Generate config error: ${error.message}`);
+      this.logger.error(`[v${this.configVersion}] Generate config error: ${error.message}`);
 
       await this.page.evaluate((err) => {
         if (window.handleConfigComplete) {
