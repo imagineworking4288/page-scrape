@@ -27,7 +27,23 @@ class ElementCapture {
    * @returns {Object} Processed extraction data
    */
   async processManualSelections(page, selections, cardBox) {
-    this.logger.info('[ElementCapture] Processing manual selections...');
+    this.logger.info('[v2.2-CAPTURE] ========================================');
+    this.logger.info('[v2.2-CAPTURE] PROCESSING MANUAL SELECTIONS');
+    this.logger.info('[v2.2-CAPTURE] Selections type:', typeof selections);
+    this.logger.info('[v2.2-CAPTURE] Selections keys:', Object.keys(selections || {}));
+    this.logger.info('[v2.2-CAPTURE] CardBox:', JSON.stringify(cardBox));
+
+    // Log each incoming selection
+    if (selections) {
+      Object.entries(selections).forEach(([fieldName, sel]) => {
+        this.logger.info(`[v2.2-CAPTURE] Input field "${fieldName}":`, JSON.stringify({
+          value: sel?.value,
+          selector: sel?.selector,
+          hasCoordinates: !!sel?.coordinates,
+          source: sel?.source
+        }));
+      });
+    }
 
     const result = {
       fields: {},
@@ -37,16 +53,25 @@ class ElementCapture {
     };
 
     // Process each field selection
-    for (const [fieldName, selection] of Object.entries(selections)) {
+    for (const [fieldName, selection] of Object.entries(selections || {})) {
       try {
+        this.logger.info(`[v2.2-CAPTURE] Processing field: ${fieldName}`);
         const fieldData = await this.captureFieldElement(page, fieldName, selection, cardBox);
         if (fieldData) {
           result.fields[fieldName] = fieldData;
           result.capturedElements[fieldName] = fieldData.element;
           result.extractionMethods[fieldName] = fieldData.methods;
+          this.logger.info(`[v2.2-CAPTURE] Field "${fieldName}" captured successfully:`, JSON.stringify({
+            value: fieldData.value,
+            methodCount: fieldData.methods?.length || 0,
+            source: fieldData.source
+          }));
+        } else {
+          this.logger.warn(`[v2.2-CAPTURE] Field "${fieldName}" returned null/empty`);
         }
       } catch (error) {
-        this.logger.warn(`[ElementCapture] Failed to capture ${fieldName}: ${error.message}`);
+        this.logger.error(`[v2.2-CAPTURE] Failed to capture ${fieldName}: ${error.message}`);
+        this.logger.error(`[v2.2-CAPTURE] Error stack: ${error.stack}`);
       }
     }
 
@@ -57,7 +82,12 @@ class ElementCapture {
     const validation = this.validateCapture(result.fields);
     result.validation = validation;
 
-    this.logger.info(`[ElementCapture] Captured ${Object.keys(result.fields).length} fields`);
+    this.logger.info('[v2.2-CAPTURE] ========================================');
+    this.logger.info(`[v2.2-CAPTURE] CAPTURE COMPLETE`);
+    this.logger.info(`[v2.2-CAPTURE] Captured ${Object.keys(result.fields).length} fields`);
+    this.logger.info('[v2.2-CAPTURE] Validation:', JSON.stringify(validation));
+    this.logger.info('[v2.2-CAPTURE] ========================================');
+
     return result;
   }
 

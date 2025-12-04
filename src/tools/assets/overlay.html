@@ -946,6 +946,61 @@
       color: #888;
       flex: 1;
     }
+
+    /* ===========================
+       v2.2 Field Status Indicators
+       =========================== */
+
+    .field-status-container {
+      margin-bottom: 12px;
+    }
+
+    .field-status-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 0;
+    }
+
+    .field-status-item {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: help;
+      transition: all 0.2s ease;
+    }
+
+    .field-status-item.captured {
+      background: #28a745;
+      color: white;
+      box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+    }
+
+    .field-status-item.required {
+      background: #f8f9fa;
+      color: #dc3545;
+      border: 2px solid #dc3545;
+    }
+
+    .field-status-item.optional {
+      background: #f8f9fa;
+      color: #6c757d;
+      border: 2px solid #dee2e6;
+    }
+
+    .field-status-item.current {
+      transform: scale(1.2);
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+    }
+
+    .field-status-item.captured.current {
+      box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.3);
+    }
   </style>
 </head>
 <body>

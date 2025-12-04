@@ -560,28 +560,41 @@ class InteractiveSession {
    * @returns {Promise<Object>} - Result with config path
    */
   async handleConfirmWithSelections(selections) {
-    this.logger.info('[v2.2] Processing manual selections...');
+    this.logger.info('========================================');
+    this.logger.info('[v2.2-BACKEND] RECEIVED CONFIRM WITH SELECTIONS');
+    this.logger.info('========================================');
+    this.logger.info('[v2.2-BACKEND] Selections type:', typeof selections);
+    this.logger.info('[v2.2-BACKEND] Selections received:', JSON.stringify(selections, null, 2));
+    this.logger.info('[v2.2-BACKEND] Field keys:', Object.keys(selections || {}));
+    this.logger.info('[v2.2-BACKEND] Field count:', Object.keys(selections || {}).length);
+    this.logger.info('[v2.2-BACKEND] matchResult exists:', !!this.matchResult);
+    this.logger.info('[v2.2-BACKEND] matchResult.referenceBox:', JSON.stringify(this.matchResult?.referenceBox, null, 2));
 
     try {
       if (!this.matchResult) {
+        this.logger.error('[v2.2-BACKEND] ERROR: No matchResult available!');
         throw new Error('No card selection to confirm');
       }
 
       // Store manual selections
       this.manualSelections = selections;
+      this.logger.info('[v2.2-BACKEND] Stored manual selections');
 
       // Process selections with ElementCapture
+      this.logger.info('[v2.2-BACKEND] Calling elementCapture.processManualSelections...');
       const capturedData = await this.elementCapture.processManualSelections(
         this.page,
         selections,
         this.matchResult.referenceBox
       );
+      this.logger.info('[v2.2-BACKEND] ElementCapture returned capturedData');
+      this.logger.info('[v2.2-BACKEND] capturedData.fields keys:', Object.keys(capturedData?.fields || {}));
 
       // Log capture results
-      this.logger.info(`[v2.2] Captured fields: ${Object.keys(capturedData.fields).join(', ')}`);
+      this.logger.info(`[v2.2-BACKEND] Captured fields: ${Object.keys(capturedData.fields).join(', ')}`);
 
       if (!capturedData.validation.valid) {
-        this.logger.warn(`[v2.2] Missing required fields: ${capturedData.validation.missingRequired.join(', ')}`);
+        this.logger.warn(`[v2.2-BACKEND] Missing required fields: ${capturedData.validation.missingRequired.join(', ')}`);
       }
 
       // Prepare metadata
@@ -590,22 +603,26 @@ class InteractiveSession {
         domain: this.domain,
         pagination: this.selections.paginationPattern || { type: 'none' }
       };
+      this.logger.info('[v2.2-BACKEND] Metadata prepared:', JSON.stringify(metadata, null, 2));
 
       // Build v2.2 config with manual selections
       let config, validation;
 
       // Check if configBuilder has v2.2 method, else use v2.1
+      this.logger.info('[v2.2-BACKEND] configBuilder.buildConfigV22 exists:', typeof this.configBuilder.buildConfigV22 === 'function');
+
       if (typeof this.configBuilder.buildConfigV22 === 'function') {
-        this.logger.info('[v2.2] Building config with manual selections...');
+        this.logger.info('[v2.2-BACKEND] Building config with buildConfigV22...');
         config = this.configBuilder.buildConfigV22(
           capturedData,
           this.matchResult,
           metadata
         );
+        this.logger.info('[v2.2-BACKEND] buildConfigV22 returned config');
         validation = this.configBuilder.validateConfigV21(config);
       } else {
         // Fallback: Use v2.1 builder with captured data merged
-        this.logger.info('[v2.2] Using v2.1 builder with manual selections...');
+        this.logger.info('[v2.2-BACKEND] Using v2.1 builder with manual selections (fallback)...');
 
         // Merge manual capture into captureData format
         const mergedCaptureData = {
@@ -631,28 +648,41 @@ class InteractiveSession {
         validation = this.configBuilder.validateConfigV21(config);
       }
 
+      this.logger.info('[v2.2-BACKEND] Config built successfully');
+      this.logger.info('[v2.2-BACKEND] Config version:', config?.version);
+      this.logger.info('[v2.2-BACKEND] Config name:', config?.name);
+
       // Add extraction rules from manual selections
+      this.logger.info('[v2.2-BACKEND] Building extraction rules...');
       const extractionRules = this.elementCapture.buildExtractionRules(capturedData);
       config.fieldExtraction = extractionRules;
+      this.logger.info('[v2.2-BACKEND] Extraction rules added');
 
       // Log method counts
       const fields = config.fieldExtraction?.fields || {};
       const totalMethods = Object.values(fields).reduce((sum, f) => sum + (f?.methods?.length || 0), 0);
-      this.logger.info(`[v2.2] Config generated with ${totalMethods} extraction methods`);
+      this.logger.info(`[v2.2-BACKEND] Config generated with ${totalMethods} extraction methods`);
 
       if (!validation.valid) {
-        this.logger.warn(`[v2.2] Config validation errors: ${validation.errors.join(', ')}`);
+        this.logger.warn(`[v2.2-BACKEND] Config validation errors: ${validation.errors.join(', ')}`);
       }
 
       if (validation.warnings.length > 0) {
-        this.logger.warn(`[v2.2] Config validation warnings: ${validation.warnings.join(', ')}`);
+        this.logger.warn(`[v2.2-BACKEND] Config validation warnings: ${validation.warnings.join(', ')}`);
       }
 
       // Save config
+      this.logger.info('========================================');
+      this.logger.info('[v2.2-BACKEND] SAVING CONFIG FILE');
+      this.logger.info('========================================');
+      this.logger.info('[v2.2-BACKEND] Output directory:', this.options?.outputDir);
+      this.logger.info('[v2.2-BACKEND] Config size:', JSON.stringify(config).length, 'characters');
+
       const configPath = this.configBuilder.saveConfig(config, this.options.outputDir);
 
-      this.logger.info(`[v2.2] Config saved to: ${configPath}`);
-      this.logger.info(`[v2.2] Config score: ${validation.score}/100`);
+      this.logger.info('[v2.2-BACKEND] Config saved successfully!');
+      this.logger.info(`[v2.2-BACKEND] Config saved to: ${configPath}`);
+      this.logger.info(`[v2.2-BACKEND] Config score: ${validation.score}/100`);
 
       // Send result to overlay
       const result = {
@@ -664,11 +694,18 @@ class InteractiveSession {
         selectionMethod: 'manual'
       };
 
+      this.logger.info('[v2.2-BACKEND] Sending result to overlay:', JSON.stringify(result, null, 2));
+
       await this.page.evaluate((res) => {
+        console.log('[v2.2-DEBUG] handleConfigComplete called with:', res);
         if (window.handleConfigComplete) {
           window.handleConfigComplete(res);
+        } else {
+          console.error('[v2.2-DEBUG] window.handleConfigComplete not found!');
         }
       }, result);
+
+      this.logger.info('[v2.2-BACKEND] Result sent to overlay');
 
       // Mark session complete
       this.sessionComplete = true;
@@ -681,15 +718,25 @@ class InteractiveSession {
       };
 
       if (this.resolveSession) {
+        this.logger.info('[v2.2-BACKEND] Resolving session promise');
         this.resolveSession(this.sessionResult);
       }
+
+      this.logger.info('========================================');
+      this.logger.info('[v2.2-BACKEND] MANUAL SELECTION COMPLETE');
+      this.logger.info('========================================');
 
       return result;
 
     } catch (error) {
-      this.logger.error(`[v2.2] Generate config with selections error: ${error.message}`);
+      this.logger.error('========================================');
+      this.logger.error('[v2.2-BACKEND] ERROR IN handleConfirmWithSelections');
+      this.logger.error('========================================');
+      this.logger.error(`[v2.2-BACKEND] Error message: ${error.message}`);
+      this.logger.error(`[v2.2-BACKEND] Error stack: ${error.stack}`);
 
       await this.page.evaluate((err) => {
+        console.error('[v2.2-DEBUG] handleConfigComplete called with error:', err);
         if (window.handleConfigComplete) {
           window.handleConfigComplete({ success: false, error: err });
         }

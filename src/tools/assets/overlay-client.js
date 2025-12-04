@@ -598,13 +598,30 @@
    * Called by backend via page.evaluate
    */
   window.handleConfigComplete = function(result) {
-    console.log('[ConfigGen v2.2] Config complete:', result);
+    console.log('');
+    console.log('========================================');
+    console.log('[v2.2-UI] CONFIG GENERATION COMPLETE');
+    console.log('========================================');
+    console.log('[v2.2-UI] Timestamp:', new Date().toISOString());
+    console.log('[v2.2-UI] Result received:', result);
+    console.log('[v2.2-UI] Success status:', result?.success);
+    console.log('[v2.2-UI] Config path:', result?.configPath);
+    console.log('[v2.2-UI] Config name:', result?.configName);
+    console.log('[v2.2-UI] Config version:', result?.configVersion);
+    console.log('[v2.2-UI] Selection method:', result?.selectionMethod);
+    console.log('[v2.2-UI] Validation:', result?.validation);
+    console.log('========================================');
+    console.log('');
 
     if (!result.success) {
+      console.error('[v2.2-UI] Config generation FAILED');
+      console.error('[v2.2-UI] Error:', result.error);
       showToast(result.error || 'Config generation failed', 'error');
       showPanel('confirmationPanel');
       return;
     }
+
+    console.log('[v2.2-UI] Config generation SUCCEEDED!');
 
     // Clear highlights
     clearHighlights();
@@ -618,6 +635,8 @@
     // Show complete panel
     showPanel('completePanel');
     document.getElementById('panelSubtitle').textContent = 'Complete!';
+
+    console.log('[v2.2-UI] Complete panel displayed');
   };
 
   /**
@@ -1005,10 +1024,66 @@
    * Finish manual selection and generate config
    */
   window.finishManualSelection = function() {
-    console.log('[ConfigGen v2.2] Finishing manual selection');
-    exitFieldRectangleSelection();
-    state.currentState = STATES.GENERATING;
-    confirmAndGenerateWithSelections();
+    console.log('[v2.2-DEBUG] ========================================');
+    console.log('[v2.2-DEBUG] FINISH SELECTION CLICKED');
+    console.log('[v2.2-DEBUG] ========================================');
+    console.log('[v2.2-DEBUG] state.manualSelections:', JSON.stringify(state.manualSelections, null, 2));
+    console.log('[v2.2-DEBUG] Object.keys:', Object.keys(state.manualSelections || {}));
+    console.log('[v2.2-DEBUG] Field count:', Object.keys(state.manualSelections || {}).length);
+    console.log('[v2.2-DEBUG] state.detectedCards count:', state.detectedCards?.length);
+    console.log('[v2.2-DEBUG] state.selectionBox:', state.selectionBox);
+    console.log('[v2.2-DEBUG] state.previewData:', state.previewData);
+
+    try {
+      // ==========================================
+      // TEMPORARY: Bypass required field validation for pipeline testing
+      // ==========================================
+      // const missingRequired = REQUIRED_FIELDS.filter(f => !state.manualSelections[f]);
+      // if (missingRequired.length > 0) {
+      //   const missingNames = missingRequired.map(f => FIELD_METADATA[f].label).join(', ');
+      //   showToast(`Missing required fields: ${missingNames}`, 'error');
+      //   console.log('[v2.2-DEBUG] Cannot finish - missing required fields:', missingRequired);
+      //   return;
+      // }
+      // ==========================================
+
+      const fieldCount = Object.keys(state.manualSelections || {}).length;
+      console.log('[v2.2-VALIDATION-BYPASS] Required field validation disabled for testing');
+      console.log('[v2.2-VALIDATION-BYPASS] Proceeding with', fieldCount, 'fields');
+
+      if (fieldCount === 0) {
+        showToast('Please capture at least one field', 'error');
+        console.log('[v2.2-DEBUG] Cannot finish - no fields captured');
+        return;
+      }
+
+      // Log what we're sending to backend
+      console.log('[v2.2-DEBUG] Proceeding to config generation with', fieldCount, 'fields');
+      Object.entries(state.manualSelections).forEach(([field, data]) => {
+        console.log(`[v2.2-DEBUG] Field ${field}:`);
+        console.log(`  - value: "${data.value?.substring(0, 50)}..."`);
+        console.log(`  - selector: ${data.selector}`);
+        console.log(`  - coordinates:`, data.coordinates);
+        console.log(`  - source: ${data.source}`);
+      });
+
+      // Exit field rectangle selection mode
+      exitFieldRectangleSelection();
+
+      // Update state and show progress
+      state.currentState = STATES.GENERATING;
+      showProgress('Generating Config', 'Building config with manual selections...');
+
+      // Call backend with complete selections
+      console.log('[v2.2-DEBUG] About to call confirmAndGenerateWithSelections()...');
+      confirmAndGenerateWithSelections();
+
+    } catch (error) {
+      console.error('[v2.2-DEBUG] ERROR in finishManualSelection:', error);
+      console.error('[v2.2-DEBUG] Error stack:', error.stack);
+      showToast('Error finishing selection: ' + error.message, 'error');
+      showPanel('manualPanel');
+    }
   };
 
   /**
@@ -1016,14 +1091,107 @@
    */
   function updateFinishButton() {
     const btn = document.getElementById('finishManualBtn');
-    const hasAllRequired = REQUIRED_FIELDS.every(f => state.manualSelections[f]);
-    btn.disabled = !hasAllRequired;
 
-    if (!hasAllRequired) {
-      const missing = REQUIRED_FIELDS.filter(f => !state.manualSelections[f]);
-      btn.title = `Missing required: ${missing.map(f => FIELD_METADATA[f].label).join(', ')}`;
+    // ==========================================
+    // TEMPORARY: Bypass validation for pipeline testing
+    // ==========================================
+    // Enable "Finish Selection" if ANY field is captured
+    // This allows testing config generation with partial data
+    //
+    // TODO: After confirming pipeline works, restore validation:
+    // const hasAllRequired = REQUIRED_FIELDS.every(f => state.manualSelections[f]);
+    // btn.disabled = !hasAllRequired;
+    // ==========================================
+
+    const hasSomeFields = Object.keys(state.manualSelections || {}).length > 0;
+    btn.disabled = !hasSomeFields;
+
+    console.log('[v2.2-VALIDATION-BYPASS] Finish button enabled:', !btn.disabled);
+    console.log('[v2.2-VALIDATION-BYPASS] Fields captured:', Object.keys(state.manualSelections || {}).length);
+
+    if (!hasSomeFields) {
+      btn.title = 'Capture at least one field to generate config';
     } else {
-      btn.title = 'Generate config with selected fields';
+      const missing = REQUIRED_FIELDS.filter(f => !state.manualSelections[f]);
+      if (missing.length > 0) {
+        btn.title = `Generate config (missing optional: ${missing.map(f => FIELD_METADATA[f].label).join(', ')})`;
+      } else {
+        btn.title = 'Generate config with all fields';
+      }
+    }
+  }
+
+  /**
+   * Update field completion UI with checkmarks and progress
+   * Called after each field capture to show visual feedback
+   */
+  function updateFieldCompletionUI() {
+    const capturedCount = Object.keys(state.manualSelections).length;
+    const totalFields = FIELD_ORDER.length;
+
+    // Update progress counter
+    const fieldsCompleteLabel = document.getElementById('fieldsCompleteLabel');
+    if (fieldsCompleteLabel) {
+      fieldsCompleteLabel.textContent = `${capturedCount} captured`;
+    }
+
+    // Update progress bar
+    const progressBar = document.getElementById('manualProgressBar');
+    if (progressBar) {
+      const progress = (capturedCount / totalFields) * 100;
+      progressBar.style.width = `${progress}%`;
+    }
+
+    // Update field status indicators in step indicator area
+    updateFieldStatusIndicators();
+
+    // Update finish button state
+    updateFinishButton();
+
+    console.log(`[v2.2] Field completion: ${capturedCount}/${totalFields} fields captured`);
+  }
+
+  /**
+   * Update individual field status indicators
+   */
+  function updateFieldStatusIndicators() {
+    // Create or update field status container
+    let statusContainer = document.getElementById('fieldStatusContainer');
+
+    if (!statusContainer) {
+      // Create status container after step indicator
+      const stepIndicator = document.querySelector('.manual-panel .step-indicator');
+      if (stepIndicator) {
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'fieldStatusContainer';
+        statusContainer.className = 'field-status-container';
+        stepIndicator.parentNode.insertBefore(statusContainer, stepIndicator.nextSibling);
+      }
+    }
+
+    if (statusContainer) {
+      // Build status indicators for each field
+      let html = '<div class="field-status-row">';
+
+      FIELD_ORDER.forEach(fieldName => {
+        const meta = FIELD_METADATA[fieldName];
+        const isCaptured = !!state.manualSelections[fieldName];
+        const isRequired = REQUIRED_FIELDS.includes(fieldName);
+        const isCurrent = fieldName === state.currentField;
+
+        let statusClass = isCaptured ? 'captured' : (isRequired ? 'required' : 'optional');
+        if (isCurrent) statusClass += ' current';
+
+        const icon = isCaptured ? '✓' : (isRequired ? '○' : '·');
+        const tooltip = isCaptured
+          ? `${meta.label}: ${truncate(state.manualSelections[fieldName].value, 20)}`
+          : `${meta.label}: ${isRequired ? 'Required' : 'Optional'}`;
+
+        html += `<span class="field-status-item ${statusClass}" title="${escapeHtml(tooltip)}">${icon}</span>`;
+      });
+
+      html += '</div>';
+      statusContainer.innerHTML = html;
     }
   }
 
@@ -1322,8 +1490,8 @@
       return;
     }
 
-    // Store the capture
-    state.pendingFieldCapture = {
+    // Create capture data object
+    const captureData = {
       value: result.value,
       selector: result.selector,
       coordinates: result.coordinates,
@@ -1332,8 +1500,19 @@
       confidence: 1.0
     };
 
+    // Store the capture in both places for reliable access
+    state.pendingFieldCapture = captureData;
+
+    // CRITICAL: Store directly in manualSelections for persistence
+    state.manualSelections[fieldName] = captureData;
+    console.log('[v2.2] Stored field in manualSelections:', fieldName, state.manualSelections[fieldName]);
+    console.log('[v2.2] Current manualSelections:', Object.keys(state.manualSelections));
+
     // Show success feedback
     showCapturedFeedback(result.value);
+
+    // Update field completion UI
+    updateFieldCompletionUI();
   };
 
   /**
@@ -1355,8 +1534,9 @@
    */
   function selectProfileLink(link) {
     const value = link.href;
+    const fieldName = 'profileUrl';
 
-    state.pendingFieldCapture = {
+    const captureData = {
       value: value,
       selector: link.selector || generateSelector(link.element),
       coordinates: link.coordinates || getElementCoordinates(link.element),
@@ -1371,10 +1551,21 @@
       confidence: link.classification?.confidence || 0.8
     };
 
+    // Store in both places for reliable access
+    state.pendingFieldCapture = captureData;
+
+    // CRITICAL: Store directly in manualSelections for persistence
+    state.manualSelections[fieldName] = captureData;
+    console.log('[v2.2] Stored profileUrl from disambiguation:', captureData.value);
+
     // Close modal if open
     hideModal();
 
+    // Show success feedback
     showCapturedFeedback(truncate(value, 50));
+
+    // Update field completion UI
+    updateFieldCompletionUI();
   }
 
   /**
@@ -1692,17 +1883,65 @@
    * Generate config with manual selections
    */
   function confirmAndGenerateWithSelections() {
-    console.log('[ConfigGen v2.2] Generating config with selections:', state.manualSelections);
+    console.log('[v2.2-DEBUG] ========================================');
+    console.log('[v2.2-DEBUG] CONFIRM AND GENERATE WITH SELECTIONS');
+    console.log('[v2.2-DEBUG] ========================================');
+    console.log('[v2.2-DEBUG] Manual selections to send:', JSON.stringify(state.manualSelections, null, 2));
 
-    showProgress('Generating Config', 'Building config with selected fields...');
+    // Verify we have selections
+    const fieldCount = Object.keys(state.manualSelections).length;
+    console.log('[v2.2-DEBUG] Field count:', fieldCount);
+
+    if (fieldCount === 0) {
+      console.error('[v2.2-DEBUG] ERROR: No fields captured in manualSelections!');
+      showToast('No fields captured. Please capture at least the required fields.', 'error');
+      showPanel('manualPanel');
+      return;
+    }
+
+    console.log(`[v2.2-DEBUG] Sending ${fieldCount} fields to backend for config generation`);
+
+    // Check backend function availability
+    console.log('[v2.2-DEBUG] __configGen_confirmWithSelections exists:', typeof __configGen_confirmWithSelections === 'function');
+    console.log('[v2.2-DEBUG] __configGen_confirmAndGenerate exists:', typeof __configGen_confirmAndGenerate === 'function');
 
     // Call backend with selections
     if (typeof __configGen_confirmWithSelections === 'function') {
-      __configGen_confirmWithSelections(state.manualSelections);
+      console.log('[v2.2-DEBUG] Calling __configGen_confirmWithSelections with selections...');
+      console.log('[v2.2-DEBUG] Selections being sent:', state.manualSelections);
+
+      try {
+        __configGen_confirmWithSelections(state.manualSelections)
+          .then(result => {
+            console.log('[v2.2-DEBUG] ========================================');
+            console.log('[v2.2-DEBUG] BACKEND PROMISE RESOLVED');
+            console.log('[v2.2-DEBUG] ========================================');
+            console.log('[v2.2-DEBUG] Backend returned:', result);
+            console.log('[v2.2-DEBUG] Result success:', result?.success);
+            console.log('[v2.2-DEBUG] Config path:', result?.configPath);
+          })
+          .catch(err => {
+            console.error('[v2.2-DEBUG] ========================================');
+            console.error('[v2.2-DEBUG] BACKEND PROMISE REJECTED');
+            console.error('[v2.2-DEBUG] ========================================');
+            console.error('[v2.2-DEBUG] Backend error:', err);
+            console.error('[v2.2-DEBUG] Error message:', err?.message);
+            console.error('[v2.2-DEBUG] Error stack:', err?.stack);
+            showToast('Config generation failed: ' + err.message, 'error');
+            showPanel('manualPanel');
+          });
+        console.log('[v2.2-DEBUG] Backend function called, waiting for promise...');
+      } catch (syncError) {
+        console.error('[v2.2-DEBUG] Synchronous error calling backend:', syncError);
+        console.error('[v2.2-DEBUG] Sync error stack:', syncError.stack);
+      }
     } else if (typeof __configGen_confirmAndGenerate === 'function') {
       // Fallback to v2.0 method
+      console.log('[v2.2-DEBUG] WARNING: Using fallback v2.0 method (manual selections may not be saved)');
       __configGen_confirmAndGenerate();
     } else {
+      console.error('[v2.2-DEBUG] ERROR: No backend function available');
+      console.error('[v2.2-DEBUG] Available window functions:', Object.keys(window).filter(k => k.startsWith('__configGen')));
       showToast('Backend function not available', 'error');
       showPanel('manualPanel');
     }

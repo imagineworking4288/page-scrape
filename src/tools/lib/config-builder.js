@@ -722,6 +722,25 @@ class ConfigBuilder {
    * @returns {Object} - Configuration v2.2 object
    */
   buildConfigV22(capturedData, matchResult, metadata) {
+    this.logger.info('[v2.2-CONFIG] ========================================');
+    this.logger.info('[v2.2-CONFIG] BUILDING CONFIG V2.2');
+    this.logger.info('[v2.2-CONFIG] capturedData exists:', !!capturedData);
+    this.logger.info('[v2.2-CONFIG] capturedData.fields keys:', Object.keys(capturedData?.fields || {}));
+    this.logger.info('[v2.2-CONFIG] matchResult exists:', !!matchResult);
+    this.logger.info('[v2.2-CONFIG] metadata.url:', metadata?.url);
+
+    // Log each field's captured data
+    if (capturedData?.fields) {
+      Object.entries(capturedData.fields).forEach(([fieldName, fieldData]) => {
+        this.logger.info(`[v2.2-CONFIG] Field "${fieldName}":`, JSON.stringify({
+          value: fieldData?.value,
+          selector: fieldData?.selector,
+          hasCoordinates: !!fieldData?.coordinates,
+          source: fieldData?.source
+        }));
+      });
+    }
+
     const config = {
       // Metadata
       name: this.generateConfigName(metadata.url),
@@ -782,6 +801,12 @@ class ConfigBuilder {
       // Notes
       notes: this.generateNotesV22(capturedData, matchResult, metadata)
     };
+
+    this.logger.info('[v2.2-CONFIG] Config built successfully');
+    this.logger.info('[v2.2-CONFIG] Config name:', config.name);
+    this.logger.info('[v2.2-CONFIG] Config version:', config.version);
+    this.logger.info('[v2.2-CONFIG] Fields in fieldExtraction:', Object.keys(config.fieldExtraction?.fields || {}));
+    this.logger.info('[v2.2-CONFIG] ========================================');
 
     return config;
   }
@@ -1219,29 +1244,54 @@ class ConfigBuilder {
    * @returns {string} - Path to saved file
    */
   saveConfig(config, outputDir = null) {
+    this.logger.info('[v2.2-SAVE] ========================================');
+    this.logger.info('[v2.2-SAVE] SAVING CONFIG TO FILE');
+    this.logger.info('[v2.2-SAVE] Config name:', config?.name);
+    this.logger.info('[v2.2-SAVE] Config version:', config?.version);
+    this.logger.info('[v2.2-SAVE] Output dir param:', outputDir);
+    this.logger.info('[v2.2-SAVE] Default output dir:', this.outputDir);
+
     const dir = outputDir || this.outputDir;
+    this.logger.info('[v2.2-SAVE] Using directory:', dir);
 
     // Ensure directory exists
     const fullDir = path.resolve(dir);
+    this.logger.info('[v2.2-SAVE] Resolved full path:', fullDir);
+
     if (!fs.existsSync(fullDir)) {
+      this.logger.info('[v2.2-SAVE] Directory does not exist, creating...');
       fs.mkdirSync(fullDir, { recursive: true });
+      this.logger.info('[v2.2-SAVE] Directory created');
+    } else {
+      this.logger.info('[v2.2-SAVE] Directory already exists');
     }
 
     // Generate filename
     const filename = `${config.name}.json`;
     const filepath = path.join(fullDir, filename);
+    this.logger.info('[v2.2-SAVE] Full file path:', filepath);
 
     // Check for existing file
     if (fs.existsSync(filepath)) {
       // Create backup
       const backupPath = filepath.replace('.json', `.backup-${Date.now()}.json`);
       fs.copyFileSync(filepath, backupPath);
-      this.logger.info(`Existing config backed up to: ${backupPath}`);
+      this.logger.info(`[v2.2-SAVE] Existing config backed up to: ${backupPath}`);
     }
 
     // Write config
-    fs.writeFileSync(filepath, JSON.stringify(config, null, 2));
-    this.logger.info(`Config saved to: ${filepath}`);
+    const configJson = JSON.stringify(config, null, 2);
+    this.logger.info('[v2.2-SAVE] Config JSON length:', configJson.length, 'bytes');
+
+    try {
+      fs.writeFileSync(filepath, configJson);
+      this.logger.info(`[v2.2-SAVE] Config saved successfully to: ${filepath}`);
+      this.logger.info('[v2.2-SAVE] ========================================');
+    } catch (writeError) {
+      this.logger.error('[v2.2-SAVE] ERROR writing config file:', writeError.message);
+      this.logger.error('[v2.2-SAVE] Error stack:', writeError.stack);
+      throw writeError;
+    }
 
     return filepath;
   }
