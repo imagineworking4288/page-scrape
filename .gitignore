@@ -5,3 +5,12 @@ output
 .claude
 configs/sullcrom-lawyerlisting.backup-1764661986006.json
 configs/sullcrom-lawyerlisting.json
+
+# Temporary exploration reports (regenerated as needed)
+docs/reports/*.md
+temp/
+
+# Keep architecture and guides tracked
+!docs/architecture/
+!docs/guides/
+!docs/workflows/

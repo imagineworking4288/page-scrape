@@ -8,7 +8,11 @@
     "test": "node tests/scraper-test.js",
     "test:pdf": "node tests/pdf-scraper-test.js",
     "test:merger": "node tests/data-merger-test.js",
-    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js && node tests/data-merger-test.js"
+    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js && node tests/data-merger-test.js",
+    "report:subsystem": "node scripts/generate-report.js subsystem",
+    "report:file": "node scripts/generate-report.js file-analysis",
+    "report:pattern": "node scripts/generate-report.js pattern-search",
+    "report:deps": "node scripts/generate-report.js dependency-map"
   },
   "keywords": [
     "scraper",

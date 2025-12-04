@@ -2,6 +2,37 @@
 
 A powerful web scraping tool for extracting contact information from professional directories with high accuracy.
 
+## Documentation
+
+- **[Quick Start](docs/guides/QUICK_START.md)** - Get up and running quickly
+- **[Setup Guide](docs/guides/SETUP.md)** - Detailed installation instructions
+- **[Config Guides](docs/guides/)** - v2.1 and v2.2 config formats
+
+### Architecture & Development
+
+- **[Project Structure](docs/architecture/PROJECT_STRUCTURE.md)** - Directory layout and key files
+- **[System Architecture](docs/architecture/SYSTEM_ARCHITECTURE.md)** - Component design and data flow
+- **[Key Files Reference](docs/architecture/KEY_FILES.md)** - Important files and their purposes
+- **[Code Conventions](docs/architecture/CONVENTIONS.md)** - Coding patterns and standards
+
+### Development Workflow
+
+- **[Development Workflow](docs/workflows/DEVELOPMENT_WORKFLOW.md)** - Two-phase development process
+- **[Report Generation](docs/workflows/REPORT_USAGE_GUIDE.md)** - Exploration report tools
+- **[Claude Code Prompts](docs/workflows/CLAUDE_CODE_PROMPTS.md)** - Ready-to-use prompts
+
+### Report Generation
+
+Generate exploration reports for analysis:
+```bash
+npm run report:subsystem pagination   # Explore subsystem
+npm run report:file src/file.js       # Analyze file
+npm run report:pattern "pattern"      # Search pattern
+npm run report:deps src/dir/          # Map dependencies
+```
+
+---
+
 ## Features
 
 - **Dual Extraction Methods**: Choose between Node.js (fast) or Python (accurate)
