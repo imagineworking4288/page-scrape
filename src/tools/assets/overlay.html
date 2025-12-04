@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Visual Card Scraper - Config Generator v2.0</title>
+  <title>Visual Card Scraper - Config Generator v2.2</title>
   <style>
     * {
       box-sizing: border-box;
@@ -467,6 +467,406 @@
       font-size: 11px;
       white-space: nowrap;
     }
+
+    /* ===========================
+       v2.2 Manual Selection Styles
+       =========================== */
+
+    /* Preview Panel */
+    .preview-panel .detection-results {
+      margin-bottom: 16px;
+    }
+
+    .preview-panel .result-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .preview-panel .result-row .field-label {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .preview-panel .result-row .field-value {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview-panel .result-row .status-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .preview-panel .result-row .status-badge.found {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .preview-panel .result-row .status-badge.missing {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .preview-panel .btn-group-vertical {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Manual Selection Panel */
+    .manual-panel .progress-bar-container {
+      background: #e9ecef;
+      border-radius: 8px;
+      height: 8px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .manual-panel .progress-bar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+
+    .manual-panel .step-indicator {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .manual-panel .field-prompt {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .manual-panel .field-prompt h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .manual-panel .field-prompt p {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .manual-panel .field-hint {
+      background: #f0f4ff;
+      border-left: 4px solid #667eea;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #555;
+    }
+
+    .manual-panel .field-example {
+      background: #f8f9fa;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .manual-panel .feedback-section {
+      min-height: 80px;
+      padding: 16px;
+      border: 2px dashed #dee2e6;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+    .manual-panel .feedback-section.success {
+      border-color: #28a745;
+      background: #d4edda;
+    }
+
+    .manual-panel .feedback-section.error {
+      border-color: #dc3545;
+      background: #f8d7da;
+    }
+
+    .manual-panel .feedback-section .feedback-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .manual-panel .feedback-section .feedback-value {
+      font-family: monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: #155724;
+      word-break: break-all;
+    }
+
+    .manual-panel .feedback-section .feedback-error {
+      color: #721c24;
+      font-size: 13px;
+    }
+
+    .manual-panel .sample-values {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .manual-panel .sample-values strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #333;
+    }
+
+    .manual-panel .required-badge {
+      display: inline-block;
+      background: #dc3545;
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    .manual-panel .optional-badge {
+      display: inline-block;
+      background: #6c757d;
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    /* Click Mode Cursor */
+    body.click-mode {
+      cursor: crosshair !important;
+    }
+
+    body.click-mode * {
+      cursor: crosshair !important;
+    }
+
+    body.click-mode #controlPanel,
+    body.click-mode #controlPanel * {
+      cursor: default !important;
+    }
+
+    /* Element Hover Highlight */
+    .element-hover-highlight {
+      position: fixed;
+      border: 3px solid #667eea;
+      background: rgba(102, 126, 234, 0.15);
+      pointer-events: none;
+      z-index: 999995;
+      border-radius: 4px;
+      transition: all 0.1s ease;
+    }
+
+    /* Field Highlight on Cards */
+    .field-highlight {
+      position: absolute;
+      border: 2px solid #28a745;
+      background: rgba(40, 167, 69, 0.15);
+      border-radius: 3px;
+      pointer-events: none;
+      z-index: 999994;
+    }
+
+    /* Profile Link Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 1000001;
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-overlay.show {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      width: 450px;
+      max-width: 90vw;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .modal-header h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin: 0;
+    }
+
+    .modal-header p {
+      font-size: 13px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid #eee;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Link Option Cards */
+    .link-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .link-option {
+      display: flex;
+      align-items: flex-start;
+      padding: 12px;
+      border: 2px solid #dee2e6;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .link-option:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .link-option.selected {
+      border-color: #667eea;
+      background: #f0f4ff;
+    }
+
+    .link-option input[type="radio"] {
+      margin-right: 12px;
+      margin-top: 2px;
+    }
+
+    .link-option-content {
+      flex: 1;
+    }
+
+    .link-option-content .link-text {
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 4px;
+    }
+
+    .link-option-content .link-href {
+      font-family: monospace;
+      font-size: 11px;
+      color: #666;
+      word-break: break-all;
+    }
+
+    .link-option-badges {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .link-type-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .link-type-badge.profile {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .link-type-badge.social {
+      background: #cce5ff;
+      color: #004085;
+    }
+
+    .link-type-badge.action {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .link-type-badge.name-match {
+      background: #e2e3ff;
+      color: #383d6e;
+    }
+
+    .link-type-badge.name-match.strong {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    /* btn-warning */
+    .btn-warning {
+      background: #ffc107;
+      color: #333;
+    }
+
+    .btn-warning:hover {
+      background: #e0a800;
+    }
+
+    /* btn-sm */
+    .btn-sm {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+
+    /* Waiting indicator in feedback */
+    .waiting-indicator {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .waiting-indicator .pulse {
+      display: inline-block;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
   </style>
 </head>
 <body>
@@ -475,7 +875,7 @@
     <div class="panel-header">
       <button class="minimize-btn" onclick="toggleMinimize()">−</button>
       <h1>Visual Card Scraper</h1>
-      <div class="subtitle" id="panelSubtitle">Config Generator v2.0</div>
+      <div class="subtitle" id="panelSubtitle">Config Generator v2.2</div>
     </div>
 
     <div class="panel-body">
@@ -550,6 +950,136 @@
         <div class="config-path" id="completeConfigPath">configs/example.json</div>
         <button class="btn btn-primary btn-block" onclick="closePanel()">Close</button>
       </div>
+
+      <!-- ===========================
+           v2.2 Preview Panel (Auto-Detection Results)
+           =========================== -->
+      <div id="previewPanel" class="panel-content preview-panel">
+        <h3 style="margin-bottom: 16px; font-size: 16px; color: #333;">Auto-Detected Fields</h3>
+
+        <div class="detection-results" id="detectionResults">
+          <!-- Dynamically populated with detected fields -->
+        </div>
+
+        <div class="stats-row" style="margin: 16px 0;">
+          <div class="stat-box">
+            <div class="stat-value" id="previewCardCount">0</div>
+            <div class="stat-label">Cards Found</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="previewFieldCount">0/6</div>
+            <div class="stat-label">Fields Detected</div>
+          </div>
+        </div>
+
+        <div class="tip" style="margin-bottom: 16px;">
+          <span class="tip-icon">💡</span>
+          <span class="tip-text" id="previewTip">Review the detected fields. Accept if correct, or manually select missing fields.</span>
+        </div>
+
+        <div class="btn-group-vertical">
+          <button class="btn btn-success btn-block" id="acceptAutoDetectionBtn" onclick="acceptAutoDetection()">
+            Accept Auto-Detection
+          </button>
+          <button class="btn btn-warning btn-block" id="startManualSelectionBtn" onclick="startManualSelection()">
+            Manual Field Selection
+          </button>
+          <button class="btn btn-secondary btn-block" onclick="retrySelection()">
+            Select Different Card
+          </button>
+        </div>
+      </div>
+
+      <!-- ===========================
+           v2.2 Manual Selection Panel (Field-by-Field)
+           =========================== -->
+      <div id="manualPanel" class="panel-content manual-panel">
+        <div class="step-indicator">
+          <span id="currentStepLabel">Field 1 of 6</span>
+          <span id="fieldsCompleteLabel">0 captured</span>
+        </div>
+
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="manualProgressBar" style="width: 0%;"></div>
+        </div>
+
+        <div class="field-prompt" id="fieldPromptSection">
+          <h3 id="fieldPromptTitle">
+            Select NAME
+            <span class="required-badge" id="fieldRequiredBadge">Required</span>
+          </h3>
+          <p id="fieldPromptText">Click on a person's NAME in the card</p>
+        </div>
+
+        <div class="field-hint" id="fieldHintSection">
+          <strong>Hint:</strong> <span id="fieldHintText">Should contain 2-4 words, no email addresses or phone numbers</span>
+        </div>
+
+        <div class="field-example" id="fieldExampleSection">
+          <strong>Examples:</strong> <span id="fieldExampleText">John Smith, Jane Doe, Dr. Robert Johnson</span>
+        </div>
+
+        <div class="feedback-section" id="feedbackSection">
+          <div class="waiting-indicator">
+            <span class="pulse">●</span> Click on the <strong id="waitingFieldName">NAME</strong> element in the card
+          </div>
+        </div>
+
+        <div class="sample-values" id="sampleValuesSection" style="display: none;">
+          <strong>Sample values from other cards:</strong>
+          <div id="sampleValuesList"></div>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn btn-secondary btn-sm" id="skipFieldBtn" onclick="skipCurrentField()">
+            Skip (Optional)
+          </button>
+          <button class="btn btn-primary btn-sm" id="confirmFieldBtn" onclick="confirmCurrentField()" disabled>
+            Confirm & Next
+          </button>
+        </div>
+
+        <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+
+        <div class="btn-group">
+          <button class="btn btn-secondary btn-sm" id="backToPreviewBtn" onclick="backToPreview()">
+            Back to Preview
+          </button>
+          <button class="btn btn-success btn-sm" id="finishManualBtn" onclick="finishManualSelection()" disabled>
+            Finish Selection
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===========================
+       v2.2 Profile Link Disambiguation Modal
+       =========================== -->
+  <div id="profileLinkModal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Multiple Links Found</h3>
+        <p id="modalSubtitle">Select the link that points to this person's profile page</p>
+      </div>
+
+      <div class="modal-body">
+        <div class="link-options" id="linkOptionsContainer">
+          <!-- Dynamically populated with link options -->
+        </div>
+
+        <div class="tip" style="margin-top: 16px;">
+          <span class="tip-icon">💡</span>
+          <span class="tip-text">Look for links containing the person's name or professional profile URLs</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="cancelLinkSelection()">Cancel</button>
+        <button class="btn btn-primary" id="confirmLinkBtn" onclick="confirmLinkSelection()" disabled>
+          Use Selected Link
+        </button>
+      </div>
     </div>
   </div>
 
@@ -563,6 +1093,9 @@
 
   <!-- Card Highlights Container -->
   <div id="cardHighlights"></div>
+
+  <!-- Element Hover Highlight (for click mode) -->
+  <div id="elementHoverHighlight" class="element-hover-highlight" style="display: none;"></div>
 
   <!-- Toast Container -->
   <div id="toast" class="toast"></div>

@@ -775,26 +775,51 @@ class EnhancedCapture {
 
       /**
        * Detect dynamic loading behavior
+       * Fixed: Replaced jQuery :contains() with vanilla JS
        */
       function detectDynamicLoading() {
-        // Check for loading indicators
-        const hasLoader = !!document.querySelector(
-          '.loading, .loader, .spinner, [class*="loading"], [class*="skeleton"]'
-        );
+        try {
+          // Check for loading indicators
+          const hasLoader = !!document.querySelector(
+            '.loading, .loader, .spinner, [class*="loading"], [class*="skeleton"]'
+          );
 
-        // Check for lazy load attributes
-        const hasLazyLoad = document.querySelectorAll(
-          '[data-src], [data-lazy], [loading="lazy"]'
-        ).length > 0;
+          // Check for lazy load attributes
+          const hasLazyLoad = document.querySelectorAll(
+            '[data-src], [data-lazy], [loading="lazy"]'
+          ).length > 0;
 
-        // Check for pagination/load more
-        const hasLoadMore = !!document.querySelector(
-          '[class*="load-more"], [class*="show-more"], button:contains("Load")'
-        );
+          // Check for pagination/load more - Strategy 1: Class-based
+          let hasLoadMore = !!document.querySelector(
+            '[class*="load-more"], [class*="show-more"], [class*="loadmore"]'
+          );
 
-        if (hasLoader || hasLazyLoad) return 'lazy';
-        if (hasLoadMore) return 'paginated';
-        return 'eager';
+          // Strategy 2: Button text detection (vanilla JS replacement for :contains)
+          if (!hasLoadMore) {
+            const buttons = Array.from(document.querySelectorAll('button, a.btn, [role="button"]'));
+            hasLoadMore = buttons.some(btn => {
+              const text = (btn.textContent || '').toLowerCase();
+              return text.includes('load more') ||
+                     text.includes('show more') ||
+                     text.includes('see more') ||
+                     text.includes('view more');
+            });
+          }
+
+          // Strategy 3: ARIA label detection
+          if (!hasLoadMore) {
+            hasLoadMore = !!document.querySelector(
+              '[aria-label*="load"], [aria-label*="more"], [data-action*="load"]'
+            );
+          }
+
+          if (hasLoader || hasLazyLoad) return 'lazy';
+          if (hasLoadMore) return 'paginated';
+          return 'eager';
+        } catch (e) {
+          // Safe fallback - don't crash on detection errors
+          return 'eager';
+        }
       }
 
       // ===========================

@@ -1,7 +1,7 @@
 /**
- * Multi-Method Extractor v2.1
+ * Multi-Method Extractor v2.2
  *
- * Runtime extraction engine for v2.1 configs.
+ * Runtime extraction engine for v2.1 and v2.2 configs.
  * Executes extraction methods in priority order with automatic fallbacks.
  *
  * Features:
@@ -9,6 +9,8 @@
  * - Automatic fallback on failure
  * - Field validation
  * - Extraction statistics tracking
+ * - v2.2: User-selected method support (highest priority)
+ * - v2.2: Coordinate-based fallback extraction
  */
 
 class MultiMethodExtractor {
@@ -361,6 +363,144 @@ class MultiMethodExtractor {
       }
 
       // ===========================
+      // v2.2 EXTRACTION METHODS
+      // ===========================
+
+      /**
+       * Extract using user-selected selector (v2.2)
+       * Highest priority method from manual selection
+       */
+      function extractUserSelected(element, method) {
+        const selector = method.selector;
+        if (!selector) return null;
+
+        try {
+          const target = element.querySelector(selector);
+          if (!target) return null;
+
+          const attribute = method.attribute || 'textContent';
+
+          if (attribute === 'textContent') {
+            return target.textContent.trim();
+          } else if (attribute === 'href') {
+            const href = target.getAttribute('href');
+            // Handle mailto: and tel: prefixes
+            if (href) {
+              if (href.startsWith('mailto:')) {
+                return href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+              }
+              if (href.startsWith('tel:')) {
+                return href.replace('tel:', '').trim();
+              }
+              // Resolve relative URLs
+              if (!href.startsWith('http') && !href.startsWith('javascript:')) {
+                try {
+                  return new URL(href, window.location.href).href;
+                } catch (e) {
+                  return href;
+                }
+              }
+              return href;
+            }
+            return null;
+          } else {
+            return target.getAttribute(attribute);
+          }
+        } catch (e) {
+          console.warn('[UserSelected] Selector error:', e.message);
+          return null;
+        }
+      }
+
+      /**
+       * Extract using coordinates (v2.2)
+       * Fallback when selector fails - uses element at specific position
+       */
+      function extractCoordinates(element, method) {
+        const coords = method.coordinates;
+        if (!coords) return null;
+
+        // Get card bounding rect
+        const cardRect = element.getBoundingClientRect();
+
+        // Calculate absolute position from relative coordinates
+        let targetX, targetY;
+
+        if (coords.relativeX !== undefined && coords.relativeY !== undefined) {
+          // Use relative coordinates (relative to card)
+          targetX = cardRect.left + coords.relativeX;
+          targetY = cardRect.top + coords.relativeY;
+        } else if (coords.absoluteX !== undefined && coords.absoluteY !== undefined) {
+          // Use absolute coordinates
+          targetX = coords.absoluteX;
+          targetY = coords.absoluteY;
+        } else if (coords.centerX !== undefined && coords.centerY !== undefined) {
+          // Use center coordinates (legacy format)
+          targetX = coords.centerX;
+          targetY = coords.centerY;
+        } else {
+          return null;
+        }
+
+        // Find element at position
+        const targetElement = document.elementFromPoint(targetX, targetY);
+        if (!targetElement) return null;
+
+        // Check if target is within our card element
+        if (!element.contains(targetElement)) {
+          // Try nearby positions
+          const offsets = [[0, 0], [-5, 0], [5, 0], [0, -5], [0, 5]];
+          for (const [dx, dy] of offsets) {
+            const el = document.elementFromPoint(targetX + dx, targetY + dy);
+            if (el && element.contains(el)) {
+              return extractValueFromElement(el, method);
+            }
+          }
+          return null;
+        }
+
+        return extractValueFromElement(targetElement, method);
+      }
+
+      /**
+       * Helper: Extract value from element based on attribute
+       */
+      function extractValueFromElement(el, method) {
+        const attribute = method.attribute || 'textContent';
+
+        if (attribute === 'textContent') {
+          return el.textContent.trim();
+        } else if (attribute === 'href') {
+          // Check for links
+          if (el.tagName === 'A' && el.href) {
+            const href = el.getAttribute('href');
+            if (href.startsWith('mailto:')) {
+              return href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+            }
+            if (href.startsWith('tel:')) {
+              return href.replace('tel:', '').trim();
+            }
+            return el.href;
+          }
+          // Check parent for link
+          const parentLink = el.closest('a');
+          if (parentLink) {
+            const href = parentLink.getAttribute('href');
+            if (href.startsWith('mailto:')) {
+              return href.replace('mailto:', '').split('?')[0].toLowerCase().trim();
+            }
+            if (href.startsWith('tel:')) {
+              return href.replace('tel:', '').trim();
+            }
+            return parentLink.href;
+          }
+          return null;
+        } else {
+          return el.getAttribute(attribute);
+        }
+      }
+
+      // ===========================
       // MAIN EXTRACTION ENGINE
       // ===========================
 
@@ -381,6 +521,15 @@ class MultiMethodExtractor {
 
           try {
             switch (method.type) {
+              // v2.2: User-selected methods (highest priority)
+              case 'userSelected':
+                value = extractUserSelected(element, method);
+                break;
+              case 'coordinates':
+                value = extractCoordinates(element, method);
+                break;
+
+              // Standard extraction methods
               case 'mailto':
                 value = extractMailto(element, method);
                 break;
@@ -443,7 +592,7 @@ class MultiMethodExtractor {
         const results = {};
 
         // Define extraction order (email first for proximity-based name)
-        const order = ['email', 'phone', 'name', 'title', 'profileUrl'];
+        const order = ['email', 'phone', 'name', 'title', 'profileUrl', 'location'];
 
         for (const fieldName of order) {
           const config = fieldConfigs[fieldName];

@@ -1,5 +1,5 @@
 /**
- * Interactive Session v2.1
+ * Interactive Session v2.2
  *
  * Core workflow orchestrator for the config generator.
  * Manages browser page lifecycle, injects overlay UI, and coordinates
@@ -11,6 +11,12 @@
  * - Enhanced capture with multi-method extraction strategies
  * - Card highlighting with confidence scores
  * - v2.1 config generation with fallbacks
+ *
+ * v2.2 Features:
+ * - Manual field selection with click mode
+ * - Profile link disambiguation
+ * - User-selected extraction methods with coordinate fallbacks
+ * - Field requirements constants
  */
 
 const fs = require('fs');
@@ -24,6 +30,7 @@ const ConfigValidator = require('./config-validator');
 const CardMatcher = require('./card-matcher');
 const SmartFieldExtractor = require('./smart-field-extractor');
 const EnhancedCapture = require('./enhanced-capture');
+const ElementCapture = require('./element-capture');
 
 class InteractiveSession {
   constructor(browserManager, rateLimiter, logger, configLoader, options = {}) {
@@ -50,7 +57,10 @@ class InteractiveSession {
 
     // v2.1 state
     this.captureData = null;
-    this.configVersion = options.configVersion || '2.1';
+    this.configVersion = options.configVersion || '2.2';
+
+    // v2.2 state
+    this.manualSelections = null;
 
     // Helper modules
     this.selectorGenerator = new SelectorGenerator(logger);
@@ -64,6 +74,9 @@ class InteractiveSession {
 
     // v2.1 modules
     this.enhancedCapture = new EnhancedCapture(logger);
+
+    // v2.2 modules
+    this.elementCapture = new ElementCapture(logger);
 
     // Session state
     this.page = null;
@@ -309,6 +322,16 @@ class InteractiveSession {
       this.logger.info('Confirm and generate requested');
       return await this.handleConfirmAndGenerate();
     });
+
+    // ===========================
+    // v2.2 Functions - Manual Selection
+    // ===========================
+
+    // Confirm with manual selections
+    await this.page.exposeFunction('__configGen_confirmWithSelections', async (selections) => {
+      this.logger.info('[v2.2] Confirm with manual selections requested');
+      return await this.handleConfirmWithSelections(selections);
+    });
   }
 
   // ===========================
@@ -514,6 +537,151 @@ class InteractiveSession {
 
     } catch (error) {
       this.logger.error(`[v${this.configVersion}] Generate config error: ${error.message}`);
+
+      await this.page.evaluate((err) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete({ success: false, error: err });
+        }
+      }, error.message);
+
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle confirm with manual selections (v2.2)
+   * @param {Object} selections - Manual selections from overlay { fieldName: { selector, value, coordinates, element } }
+   * @returns {Promise<Object>} - Result with config path
+   */
+  async handleConfirmWithSelections(selections) {
+    this.logger.info('[v2.2] Processing manual selections...');
+
+    try {
+      if (!this.matchResult) {
+        throw new Error('No card selection to confirm');
+      }
+
+      // Store manual selections
+      this.manualSelections = selections;
+
+      // Process selections with ElementCapture
+      const capturedData = await this.elementCapture.processManualSelections(
+        this.page,
+        selections,
+        this.matchResult.referenceBox
+      );
+
+      // Log capture results
+      this.logger.info(`[v2.2] Captured fields: ${Object.keys(capturedData.fields).join(', ')}`);
+
+      if (!capturedData.validation.valid) {
+        this.logger.warn(`[v2.2] Missing required fields: ${capturedData.validation.missingRequired.join(', ')}`);
+      }
+
+      // Prepare metadata
+      const metadata = {
+        url: this.testUrl,
+        domain: this.domain,
+        pagination: this.selections.paginationPattern || { type: 'none' }
+      };
+
+      // Build v2.2 config with manual selections
+      let config, validation;
+
+      // Check if configBuilder has v2.2 method, else use v2.1
+      if (typeof this.configBuilder.buildConfigV22 === 'function') {
+        this.logger.info('[v2.2] Building config with manual selections...');
+        config = this.configBuilder.buildConfigV22(
+          capturedData,
+          this.matchResult,
+          metadata
+        );
+        validation = this.configBuilder.validateConfigV21(config);
+      } else {
+        // Fallback: Use v2.1 builder with captured data merged
+        this.logger.info('[v2.2] Using v2.1 builder with manual selections...');
+
+        // Merge manual capture into captureData format
+        const mergedCaptureData = {
+          success: true,
+          fields: capturedData.fields,
+          preview: Object.fromEntries(
+            Object.entries(capturedData.fields).map(([k, v]) => [k, v.value])
+          ),
+          relationships: capturedData.relationships,
+          siteCharacteristics: this.captureData?.siteCharacteristics || {}
+        };
+
+        config = this.configBuilder.buildConfigV21(
+          mergedCaptureData,
+          this.matchResult,
+          metadata
+        );
+
+        // Mark as v2.2 with manual selections
+        config.version = '2.2';
+        config.selectionMethod = 'manual';
+
+        validation = this.configBuilder.validateConfigV21(config);
+      }
+
+      // Add extraction rules from manual selections
+      const extractionRules = this.elementCapture.buildExtractionRules(capturedData);
+      config.fieldExtraction = extractionRules;
+
+      // Log method counts
+      const fields = config.fieldExtraction?.fields || {};
+      const totalMethods = Object.values(fields).reduce((sum, f) => sum + (f?.methods?.length || 0), 0);
+      this.logger.info(`[v2.2] Config generated with ${totalMethods} extraction methods`);
+
+      if (!validation.valid) {
+        this.logger.warn(`[v2.2] Config validation errors: ${validation.errors.join(', ')}`);
+      }
+
+      if (validation.warnings.length > 0) {
+        this.logger.warn(`[v2.2] Config validation warnings: ${validation.warnings.join(', ')}`);
+      }
+
+      // Save config
+      const configPath = this.configBuilder.saveConfig(config, this.options.outputDir);
+
+      this.logger.info(`[v2.2] Config saved to: ${configPath}`);
+      this.logger.info(`[v2.2] Config score: ${validation.score}/100`);
+
+      // Send result to overlay
+      const result = {
+        success: true,
+        configPath: configPath,
+        configName: config.name,
+        configVersion: config.version,
+        validation: validation,
+        selectionMethod: 'manual'
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete(res);
+        }
+      }, result);
+
+      // Mark session complete
+      this.sessionComplete = true;
+      this.sessionResult = {
+        success: true,
+        configPath: configPath,
+        config: config,
+        validation: validation,
+        selectionMethod: 'manual'
+      };
+
+      if (this.resolveSession) {
+        this.resolveSession(this.sessionResult);
+      }
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[v2.2] Generate config with selections error: ${error.message}`);
 
       await this.page.evaluate((err) => {
         if (window.handleConfigComplete) {

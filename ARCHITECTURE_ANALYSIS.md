@@ -1,27 +1,39 @@
-# Architecture Analysis - Config Generator v2.1
+# Architecture Analysis - Config Generator v2.2
 
 ## Executive Summary
 
-This document describes the v2.1 Config Generator architecture - an "intelligent, self-teaching" configuration system with multi-method extraction strategies and automatic fallbacks.
+This document describes the v2.2 Config Generator architecture - an "intelligent, self-teaching" configuration system with **manual field selection**, multi-method extraction strategies, and automatic fallbacks.
 
-**Status: IMPLEMENTED**
+**Status: IMPLEMENTED (v2.2)**
 
-## Implementation Summary
+## v2.2 Implementation Summary
 
-### New Files Created
+### New Files Created (v2.2)
+| File | Purpose |
+|------|---------|
+| `src/tools/lib/constants/field-requirements.js` | Centralized field definitions, validation rules, confidence scores |
+| `src/tools/lib/element-capture.js` | Backend element capture from manual selections |
+| `src/tools/lib/profile-enrichment.js` | Enhanced profile visiting with name matching |
+| `docs/CONFIG_V22_GUIDE.md` | User documentation for v2.2 manual selection |
+| `tests/v22-integration.test.js` | Comprehensive test suite (26 tests) |
+
+### Modified Files (v2.2)
+| File | Changes |
+|------|---------|
+| `src/tools/assets/overlay.html` | Added Preview Panel, Manual Panel, Link Modal, click mode styles |
+| `src/tools/assets/overlay-client.js` | State machine, click mode handlers, profile disambiguation |
+| `src/tools/lib/config-builder.js` | Added `buildConfigV22()`, `buildFieldMethodsV22()`, `isV22Config()` |
+| `src/tools/lib/multi-method-extractor.js` | Added `userSelected` and `coordinates` extraction methods |
+| `src/tools/lib/interactive-session.js` | Added `handleConfirmWithSelections()`, ElementCapture integration |
+| `src/scrapers/config-scraper.js` | Added `extractWithV22Config()`, v2.2 detection |
+| `src/tools/lib/enhanced-capture.js` | Fixed `:contains()` crash in detectDynamicLoading() |
+
+### v2.1 Files (Previous Implementation)
 | File | Purpose |
 |------|---------|
 | `src/tools/lib/enhanced-capture.js` | Comprehensive browser-side DOM capture with method tracking |
 | `src/tools/lib/multi-method-extractor.js` | Runtime multi-method extraction engine |
 | `docs/CONFIG_V21_GUIDE.md` | User documentation for v2.1 configs |
-
-### Modified Files
-| File | Changes |
-|------|---------|
-| `src/tools/lib/config-builder.js` | Added `buildConfigV21()`, `validateConfigV21()`, `migrateToV21()` |
-| `src/tools/lib/interactive-session.js` | Integrated EnhancedCapture, v2.1 config generation |
-| `src/scrapers/config-scraper.js` | Added v2.1 extraction with fallback selectors |
-| `src/utils/profile-visitor.js` | Updated documentation |
 
 ---
 

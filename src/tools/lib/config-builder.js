@@ -1,17 +1,24 @@
 /**
- * Config Builder v2.1
+ * Config Builder v2.2
  *
  * Builds site-specific configuration files from visual card selection.
- * Supports legacy v1.0, v2.0, and new v2.1 formats:
+ * Supports legacy v1.0, v2.0, v2.1, and new v2.2 formats:
  * - v1.0: Basic selectors
  * - v2.0: Card pattern matching (structural + visual signatures)
  * - v2.1: Multi-method extraction strategies with priorities and fallbacks
+ * - v2.2: Manual field selection with user-selected methods and coordinate fallbacks
  *
  * v2.1 Features:
  * - Site-specific extraction methods stored per field
  * - Priority-ordered fallback strategies
  * - Captured element snapshots for runtime matching
  * - Site characteristics for adaptive behavior
+ *
+ * v2.2 Features:
+ * - Manual field selection support
+ * - User-selected selectors with highest priority
+ * - Coordinate-based fallback extraction
+ * - Profile link classification
  */
 
 const fs = require('fs');
@@ -701,6 +708,313 @@ class ConfigBuilder {
         ...(v2Config.notes || [])
       ]
     };
+  }
+
+  // ===========================
+  // V2.2 CONFIG BUILDER (Manual Selection)
+  // ===========================
+
+  /**
+   * Build v2.2 configuration from manual field selections
+   * @param {Object} capturedData - Result from ElementCapture.processManualSelections()
+   * @param {Object} matchResult - Result from CardMatcher.findSimilarCards()
+   * @param {Object} metadata - Site metadata (url, domain, pagination)
+   * @returns {Object} - Configuration v2.2 object
+   */
+  buildConfigV22(capturedData, matchResult, metadata) {
+    const config = {
+      // Metadata
+      name: this.generateConfigName(metadata.url),
+      version: '2.2',
+      createdAt: new Date().toISOString(),
+      sourceUrl: metadata.url,
+      domain: metadata.domain,
+      selectionMethod: 'manual',
+
+      // Card pattern with fallback selectors (same as v2.1)
+      cardPattern: this.buildCardPatternV21(
+        { card: capturedData.capturedElements?.card || {} },
+        matchResult
+      ),
+
+      // Multi-method field extraction with manual selections
+      fieldExtraction: this.buildFieldExtractionV22(capturedData),
+
+      // Site characteristics (from enhanced capture if available)
+      siteCharacteristics: capturedData.siteCharacteristics || {},
+
+      // Spatial relationships from captured fields
+      relationships: capturedData.relationships || {},
+
+      // Captured element snapshots (for debugging and refinement)
+      capturedElements: capturedData.capturedElements || {},
+
+      // Pagination configuration
+      pagination: this.buildPaginationConfig(metadata.pagination || {}, metadata),
+
+      // Extraction settings
+      extraction: {
+        waitFor: matchResult?.selector,
+        waitTimeout: 15000,
+        scrollToLoad: true,
+        stripHtml: true,
+        trimWhitespace: true,
+        deduplicateBy: 'email'
+      },
+
+      // Site-specific options
+      options: {
+        minDelay: 2000,
+        maxDelay: 5000,
+        userAgent: null,
+        viewport: { width: 1920, height: 1080 }
+      },
+
+      // Detection statistics
+      detectionStats: {
+        totalCardsFound: matchResult?.totalFound || 0,
+        avgConfidence: this.calculateAverageConfidence(matchResult?.matches || []),
+        fieldsDetected: this.countDetectedFieldsV22(capturedData),
+        selectionMethod: 'manual',
+        timestamp: new Date().toISOString()
+      },
+
+      // Notes
+      notes: this.generateNotesV22(capturedData, matchResult, metadata)
+    };
+
+    return config;
+  }
+
+  /**
+   * Build multi-method field extraction rules for v2.2 with manual selections
+   * @param {Object} capturedData - Captured data with manual selections
+   * @returns {Object} - Field extraction configuration
+   */
+  buildFieldExtractionV22(capturedData) {
+    const fields = capturedData.fields || {};
+
+    return {
+      version: '2.2',
+      strategy: 'multi-method',
+      selectionMethod: 'manual',
+
+      fields: {
+        name: this.buildFieldMethodsV22(fields.name, 'name'),
+        email: this.buildFieldMethodsV22(fields.email, 'email'),
+        phone: this.buildFieldMethodsV22(fields.phone, 'phone'),
+        title: this.buildFieldMethodsV22(fields.title, 'title'),
+        profileUrl: this.buildFieldMethodsV22(fields.profileUrl, 'profileUrl'),
+        location: this.buildFieldMethodsV22(fields.location, 'location')
+      },
+
+      // Social links configuration
+      socialLinks: {
+        enabled: true,
+        platforms: ['linkedin', 'twitter', 'facebook', 'github']
+      }
+    };
+  }
+
+  /**
+   * Build extraction methods for a single field with v2.2 manual selection support
+   * @param {Object} fieldData - Field data with methods array
+   * @param {string} fieldName - Name of the field
+   * @returns {Object} - Field extraction methods
+   */
+  buildFieldMethodsV22(fieldData, fieldName) {
+    // If no field data, return defaults
+    if (!fieldData) {
+      return this.getDefaultFieldMethods(fieldName);
+    }
+
+    const methods = [];
+
+    // Priority 1: User-selected method (if from manual selection)
+    if (fieldData.source === 'manual' && fieldData.selector) {
+      methods.push({
+        priority: 1,
+        type: 'userSelected',
+        selector: fieldData.selector,
+        attribute: this.getAttributeForField(fieldName),
+        confidence: 1.0,
+        source: 'manual'
+      });
+    }
+
+    // Priority 2: Coordinate fallback (if coordinates captured)
+    if (fieldData.coordinates) {
+      methods.push({
+        priority: 2,
+        type: 'coordinates',
+        coordinates: fieldData.coordinates,
+        confidence: 0.85,
+        source: 'manual'
+      });
+    }
+
+    // Add remaining methods from fieldData.methods if present
+    if (fieldData.methods && fieldData.methods.length > 0) {
+      fieldData.methods.forEach((method, index) => {
+        // Skip if already added userSelected or coordinates
+        if (method.type === 'userSelected' || method.type === 'coordinates') return;
+
+        methods.push({
+          priority: methods.length + 1,
+          type: method.type,
+          selector: method.selector || null,
+          attribute: method.attribute || 'textContent',
+          confidence: method.confidence || 0.5,
+          ...(method.pattern && { pattern: method.pattern }),
+          ...(method.anchorField && { anchorField: method.anchorField }),
+          ...(method.direction && { direction: method.direction }),
+          ...(method.maxDistance && { maxDistance: method.maxDistance })
+        });
+      });
+    }
+
+    // Add default fallback methods if not enough methods
+    if (methods.length < 2) {
+      const defaults = this.getDefaultFieldMethods(fieldName);
+      if (defaults.methods) {
+        defaults.methods.forEach(m => {
+          // Only add if method type not already present
+          if (!methods.some(existing => existing.type === m.type)) {
+            methods.push({
+              ...m,
+              priority: methods.length + 1
+            });
+          }
+        });
+      }
+    }
+
+    return {
+      required: fieldName === 'email' || fieldName === 'name' || fieldName === 'profileUrl',
+      capturedValue: fieldData.value,
+      methods: methods,
+      validation: this.getFieldValidation(fieldName),
+      source: fieldData.source || 'manual'
+    };
+  }
+
+  /**
+   * Get the default attribute to extract for a field type
+   * @param {string} fieldName - Field name
+   * @returns {string} - Attribute name
+   */
+  getAttributeForField(fieldName) {
+    const attributes = {
+      email: 'href', // for mailto: links
+      phone: 'href', // for tel: links
+      profileUrl: 'href',
+      name: 'textContent',
+      title: 'textContent',
+      location: 'textContent'
+    };
+    return attributes[fieldName] || 'textContent';
+  }
+
+  /**
+   * Count detected fields for v2.2
+   * @param {Object} capturedData - Captured data
+   * @returns {Object} - Field detection counts
+   */
+  countDetectedFieldsV22(capturedData) {
+    const fields = capturedData.fields || {};
+    const counts = {
+      name: !!fields.name?.value,
+      email: !!fields.email?.value,
+      phone: !!fields.phone?.value,
+      title: !!fields.title?.value,
+      profileUrl: !!fields.profileUrl?.value,
+      location: !!fields.location?.value,
+      total: 0,
+      required: 0,
+      optional: 0,
+      methodsRecorded: 0
+    };
+
+    // Count totals
+    const fieldNames = ['name', 'email', 'phone', 'title', 'profileUrl', 'location'];
+    const requiredFields = ['name', 'email', 'profileUrl'];
+
+    fieldNames.forEach(fn => {
+      if (counts[fn]) {
+        counts.total++;
+        if (requiredFields.includes(fn)) {
+          counts.required++;
+        } else {
+          counts.optional++;
+        }
+      }
+      counts.methodsRecorded += fields[fn]?.methods?.length || 0;
+    });
+
+    return counts;
+  }
+
+  /**
+   * Generate notes for v2.2 config
+   * @param {Object} capturedData - Captured data
+   * @param {Object} matchResult - Match result
+   * @param {Object} metadata - Metadata
+   * @returns {Array} - Notes array
+   */
+  generateNotesV22(capturedData, matchResult, metadata) {
+    const notes = [];
+    const fields = capturedData.fields || {};
+
+    notes.push(`Config v2.2 generated on ${new Date().toLocaleString()}`);
+    notes.push(`Selection method: Manual field selection`);
+    notes.push(`Source: ${metadata.url}`);
+    notes.push(`Cards detected: ${matchResult?.totalFound || 0}`);
+
+    if (matchResult?.matches && matchResult.matches.length > 0) {
+      const avgConf = this.calculateAverageConfidence(matchResult.matches);
+      notes.push(`Average card confidence: ${avgConf}%`);
+    }
+
+    // Field detection summary
+    const detectedFields = [];
+    const manualFields = [];
+    Object.entries(fields).forEach(([fieldName, fieldData]) => {
+      if (fieldData?.value) {
+        detectedFields.push(fieldName);
+        if (fieldData.source === 'manual') {
+          manualFields.push(fieldName);
+        }
+      }
+    });
+    notes.push(`Fields captured: ${detectedFields.join(', ') || 'none'}`);
+    notes.push(`Manually selected: ${manualFields.join(', ') || 'none'}`);
+
+    // Methods summary
+    const totalMethods = Object.values(fields)
+      .reduce((sum, f) => sum + (f?.methods?.length || 0), 0);
+    notes.push(`Extraction methods configured: ${totalMethods}`);
+
+    // Validation status
+    if (capturedData.validation) {
+      if (capturedData.validation.valid) {
+        notes.push('All required fields captured');
+      } else {
+        notes.push(`WARNING: Missing required fields: ${capturedData.validation.missingRequired.join(', ')}`);
+      }
+    }
+
+    return notes;
+  }
+
+  /**
+   * Check if config is v2.2 format
+   * @param {Object} config - Configuration to check
+   * @returns {boolean} - True if v2.2
+   */
+  isV22Config(config) {
+    return config.version === '2.2' ||
+           config.selectionMethod === 'manual' ||
+           (config.fieldExtraction?.version === '2.2');
   }
 
   /**
