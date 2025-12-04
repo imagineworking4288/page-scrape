@@ -23,8 +23,6 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 
-const SelectorGenerator = require('./selector-generator');
-const ElementAnalyzer = require('./element-analyzer');
 const ConfigBuilder = require('./config-builder');
 const ConfigValidator = require('./config-validator');
 const CardMatcher = require('./card-matcher');
@@ -63,8 +61,6 @@ class InteractiveSession {
     this.manualSelections = null;
 
     // Helper modules
-    this.selectorGenerator = new SelectorGenerator(logger);
-    this.elementAnalyzer = new ElementAnalyzer(logger);
     this.configBuilder = new ConfigBuilder(logger, { outputDir: options.outputDir || 'configs' });
     this.configValidator = new ConfigValidator(logger);
 
@@ -246,17 +242,6 @@ class InteractiveSession {
       this.currentStep = mode;
       this.logger.info(`Selection mode set to: ${mode}`);
       return { success: true };
-    });
-
-    // Handle click report from overlay
-    await this.page.exposeFunction('__configGen_reportClick', async (clickData) => {
-      this.logger.info(`Click reported: type=${clickData.type}, pos=(${clickData.x}, ${clickData.y})`);
-      // Analyze element at click position
-      const elementInfo = await this.elementAnalyzer.analyzeElement(this.page, clickData);
-      if (elementInfo) {
-        return await this.handleElementSelected(elementInfo);
-      }
-      return { success: false, error: 'No element found at click position' };
     });
 
     // Auto-detect cards
@@ -866,241 +851,6 @@ class InteractiveSession {
       selector: bestSelector,
       cardCount: bestCount,
       message: `Auto-detected ${bestCount} cards. Proceed to field selection.`
-    };
-  }
-
-  /**
-   * Handle element selection from overlay
-   * @param {Object} elementData - Data about selected element
-   */
-  async handleElementSelected(elementData) {
-    this.logger.info(`Element selected in step: ${this.currentStep}`);
-
-    try {
-      switch (this.currentStep) {
-        case 'card':
-          return await this.processCardSelection(elementData);
-
-        case 'name':
-          return await this.processFieldSelection('name', elementData);
-
-        case 'email':
-          return await this.processFieldSelection('email', elementData);
-
-        case 'phone':
-          return await this.processFieldSelection('phone', elementData);
-
-        default:
-          return { success: false, error: 'Invalid step' };
-      }
-    } catch (error) {
-      this.logger.error(`Error processing selection: ${error.message}`);
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Process card container selection
-   * @param {Object} elementData - Element data from browser
-   */
-  async processCardSelection(elementData) {
-    this.logger.info('Processing card selection...');
-
-    // Generate selector candidates
-    const selectorResult = await this.selectorGenerator.generateSelectors(this.page, elementData);
-
-    // Handle both object format {best, alternatives, all} and array format
-    const candidates = selectorResult?.all || selectorResult || [];
-
-    if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
-      return {
-        success: false,
-        error: 'Could not generate selectors for this element. Try a different element.'
-      };
-    }
-
-    // Test each candidate to find best match
-    let bestSelector = null;
-    let bestCount = 0;
-
-    for (const candidate of candidates) {
-      if (!candidate || !candidate.selector) continue;
-
-      const count = await this.page.evaluate((sel) => {
-        try {
-          return document.querySelectorAll(sel).length;
-        } catch (e) {
-          return 0;
-        }
-      }, candidate.selector);
-
-      this.logger.debug(`Selector "${candidate.selector}" matches ${count} elements`);
-
-      // Prefer selectors that match 10-100 elements
-      if (count >= 10 && count <= 100) {
-        bestSelector = candidate.selector;
-        bestCount = count;
-        break;
-      }
-
-      // Fallback: take highest count in reasonable range
-      if (count > bestCount && count >= 5 && count <= 200) {
-        bestSelector = candidate.selector;
-        bestCount = count;
-      }
-    }
-
-    if (!bestSelector && candidates.length > 0 && candidates[0]?.selector) {
-      // Try first candidate anyway
-      bestSelector = candidates[0].selector;
-      bestCount = await this.page.evaluate((sel) => {
-        try {
-          return document.querySelectorAll(sel).length;
-        } catch (e) {
-          return 0;
-        }
-      }, bestSelector);
-    }
-
-    if (bestCount < 2) {
-      return {
-        success: false,
-        error: `Only ${bestCount} card(s) found. Please click on a repeating card element.`
-      };
-    }
-
-    // Get all cards and check structural similarity
-    const cards = await this.page.evaluate((selector) => {
-      return Array.from(document.querySelectorAll(selector)).map(el => ({
-        tagName: el.tagName,
-        childCount: el.children.length,
-        hasLinks: el.querySelectorAll('a').length > 0,
-        textLength: el.textContent.length
-      }));
-    }, bestSelector);
-
-    const similarity = this.elementAnalyzer.calculateSimilarity(cards);
-
-    if (similarity < 0.7) {
-      this.logger.warn(`Low structural similarity: ${(similarity * 100).toFixed(1)}%`);
-    }
-
-    // Store selection
-    this.selections.cardSelector = bestSelector;
-
-    // Highlight all matching cards
-    await this.page.evaluate((sel) => {
-      if (window.OverlayController) {
-        window.OverlayController.highlightElements(sel, 'card');
-      }
-    }, bestSelector);
-
-    this.logger.info(`Card selector: "${bestSelector}" (${bestCount} cards, ${(similarity * 100).toFixed(1)}% similar)`);
-
-    return {
-      success: true,
-      selector: bestSelector,
-      cardCount: bestCount,
-      similarity: similarity,
-      nextStep: 'name',
-      message: `Found ${bestCount} cards. Now click on a NAME field within any card.`
-    };
-  }
-
-  /**
-   * Process field selection (name, email, phone)
-   * @param {string} fieldType - Type of field
-   * @param {Object} elementData - Element data from browser
-   */
-  async processFieldSelection(fieldType, elementData) {
-    this.logger.info(`Processing ${fieldType} field selection...`);
-
-    if (!this.selections.cardSelector) {
-      return { success: false, error: 'Card selector not set. Please select a card first.' };
-    }
-
-    // Generate scoped selector (relative to card)
-    const scopedSelector = await this.selectorGenerator.generateScopedSelector(
-      this.page,
-      elementData,
-      this.selections.cardSelector
-    );
-
-    if (!scopedSelector) {
-      return {
-        success: false,
-        error: `Could not generate selector for ${fieldType}. Try a different element.`
-      };
-    }
-
-    // Detect which attribute contains the data
-    const attribute = this.elementAnalyzer.detectAttribute(elementData, fieldType);
-
-    // Extract from all cards
-    const extractedValues = await this.page.evaluate((cardSel, fieldSel, attr) => {
-      const cards = Array.from(document.querySelectorAll(cardSel));
-      return cards.map(card => {
-        const field = card.querySelector(fieldSel);
-        if (!field) return null;
-
-        if (attr === 'textContent') return field.textContent.trim();
-        if (attr === 'href') return field.getAttribute('href');
-        return field.getAttribute(attr) || field.textContent.trim();
-      });
-    }, this.selections.cardSelector, scopedSelector, attribute);
-
-    // Validate using existing contact-extractor
-    const validation = this.validateField(fieldType, extractedValues);
-
-    if (validation.coverage < 0.5 && fieldType !== 'phone') {
-      this.logger.warn(`Low ${fieldType} coverage: ${(validation.coverage * 100).toFixed(1)}%`);
-    }
-
-    // Store selection
-    this.selections[`${fieldType}Marker`] = {
-      selector: scopedSelector,
-      attribute: attribute,
-      coverage: validation.coverage,
-      validCount: validation.validCount,
-      totalCount: validation.totalCount,
-      samples: validation.samples
-    };
-
-    // Highlight fields
-    await this.page.evaluate((cardSel, fieldSel) => {
-      if (window.OverlayController) {
-        window.OverlayController.highlightFieldsInCards(cardSel, fieldSel, 'field');
-      }
-    }, this.selections.cardSelector, scopedSelector);
-
-    // Determine next step
-    let nextStep = null;
-    let message = '';
-
-    if (fieldType === 'name') {
-      nextStep = 'email';
-      message = `Found ${validation.validCount} names. Now click on an EMAIL field.`;
-    } else if (fieldType === 'email') {
-      nextStep = 'phone';
-      message = `Found ${validation.validCount} emails. Now click on a PHONE field (or skip).`;
-    } else if (fieldType === 'phone') {
-      nextStep = 'pagination';
-      message = `Found ${validation.validCount} phones. Detecting pagination...`;
-    }
-
-    this.logger.info(`${fieldType} selector: "${scopedSelector}" (${validation.validCount}/${validation.totalCount} valid)`);
-
-    return {
-      success: true,
-      fieldType: fieldType,
-      selector: scopedSelector,
-      attribute: attribute,
-      coverage: validation.coverage,
-      validCount: validation.validCount,
-      totalCount: validation.totalCount,
-      samples: validation.samples,
-      nextStep: nextStep,
-      message: message
     };
   }
 
