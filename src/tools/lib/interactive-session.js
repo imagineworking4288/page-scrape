@@ -332,6 +332,12 @@ class InteractiveSession {
       this.logger.info('[v2.2] Confirm with manual selections requested');
       return await this.handleConfirmWithSelections(selections);
     });
+
+    // Handle field rectangle selection (v2.2)
+    await this.page.exposeFunction('__configGen_handleFieldRectangle', async (data) => {
+      this.logger.info(`[v2.2] Field rectangle selection: ${data.fieldName}`);
+      return await this.handleFieldRectangleSelection(data);
+    });
   }
 
   // ===========================
@@ -690,6 +696,53 @@ class InteractiveSession {
       }, error.message);
 
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle field rectangle selection (v2.2)
+   * Extracts field value from elements within the drawn rectangle
+   * @param {Object} data - { fieldName, box: { x, y, width, height } }
+   * @returns {Promise<Object>} - Result with extracted value
+   */
+  async handleFieldRectangleSelection(data) {
+    const { fieldName, box } = data;
+    this.logger.info(`[v2.2] Processing field rectangle for ${fieldName}: ${JSON.stringify(box)}`);
+
+    try {
+      // Use ElementCapture to extract field from rectangle
+      const result = await this.elementCapture.extractFieldFromRectangle(
+        this.page,
+        fieldName,
+        box,
+        this.matchResult?.referenceBox
+      );
+
+      // Send result back to overlay
+      await this.page.evaluate((res) => {
+        if (window.handleFieldRectangleResult) {
+          window.handleFieldRectangleResult(res);
+        }
+      }, result);
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[v2.2] Field rectangle extraction error: ${error.message}`);
+
+      const errorResult = {
+        success: false,
+        fieldName: fieldName,
+        error: error.message
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleFieldRectangleResult) {
+          window.handleFieldRectangleResult(res);
+        }
+      }, errorResult);
+
+      return errorResult;
     }
   }
 

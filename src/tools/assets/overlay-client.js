@@ -79,7 +79,7 @@
     PROCESSING: 'PROCESSING',
     PREVIEW: 'PREVIEW',
     MANUAL_SELECTION: 'MANUAL_SELECTION',
-    CLICK_MODE: 'CLICK_MODE',
+    FIELD_RECTANGLE_SELECTION: 'FIELD_RECTANGLE_SELECTION',  // v2.2: Rectangle selection for fields
     LINK_DISAMBIGUATION: 'LINK_DISAMBIGUATION',
     GENERATING: 'GENERATING',
     COMPLETE: 'COMPLETE'
@@ -106,9 +106,16 @@
     manualSelections: {},          // { fieldName: { selector, value, element, coordinates } }
     currentFieldIndex: 0,          // Index in FIELD_ORDER
     currentField: null,            // Current field being captured
-    hoveredElement: null,          // Currently hovered element
-    pendingClickCapture: null,     // Data from clicked element waiting for confirmation
+    pendingFieldCapture: null,     // Data from field rectangle selection
     autoDetectedFields: {},        // Fields auto-detected by v2.1
+
+    // v2.2: Field rectangle selection state
+    isDrawingField: false,         // Currently drawing field rectangle
+    fieldStartX: 0,                // Field rectangle start X
+    fieldStartY: 0,                // Field rectangle start Y
+    fieldCurrentX: 0,              // Field rectangle current X
+    fieldCurrentY: 0,              // Field rectangle current Y
+    selectorEnabled: false,        // v2.2: Toggle for enabling/disabling drawing mode
 
     // v2.2: Link disambiguation state
     pendingLinks: [],              // Links found when clicking for profileUrl
@@ -558,8 +565,8 @@
     state.currentField = null;
     state.autoDetectedFields = {};
 
-    // Exit click mode if active
-    exitClickMode();
+    // Exit field rectangle selection if active
+    exitFieldRectangleSelection();
 
     // Clear highlights
     clearHighlights();
@@ -856,6 +863,7 @@
   function showFieldPrompt(index) {
     if (index >= FIELD_ORDER.length) {
       // All fields processed
+      exitFieldRectangleSelection();
       updateFinishButton();
       return;
     }
@@ -873,7 +881,7 @@
     const progress = (index / FIELD_ORDER.length) * 100;
     document.getElementById('manualProgressBar').style.width = `${progress}%`;
 
-    // Update prompt
+    // Update prompt - changed to rectangle-based instructions
     document.getElementById('fieldPromptTitle').innerHTML = `Select ${meta.label.toUpperCase()}`;
     const badge = document.getElementById('fieldRequiredBadge');
     if (meta.required) {
@@ -885,7 +893,8 @@
       badge.textContent = 'Optional';
       badge.style.display = 'inline-block';
     }
-    document.getElementById('fieldPromptText').textContent = meta.prompt;
+    // Update prompt to rectangle-based with toggle hint
+    document.getElementById('fieldPromptText').textContent = `Enable selector, then draw a rectangle around the ${meta.label.toUpperCase()}`;
 
     // Update hint and example
     document.getElementById('fieldHintText').textContent = meta.validationHint;
@@ -905,8 +914,8 @@
       showCapturedFeedback(state.manualSelections[state.currentField].value);
     }
 
-    // Enter click mode
-    enterClickMode();
+    // Enter field rectangle selection mode
+    enterFieldRectangleSelection();
     updateFinishButton();
   }
 
@@ -918,7 +927,7 @@
     section.className = 'feedback-section';
     section.innerHTML = `
       <div class="waiting-indicator">
-        <span class="pulse">●</span> Click on the <strong id="waitingFieldName">FIELD</strong> element in the card
+        <span class="pulse">●</span> Click <strong>Selector ON</strong> above, then draw around the <strong id="waitingFieldName">FIELD</strong>
       </div>
     `;
     document.getElementById('confirmFieldBtn').disabled = true;
@@ -971,10 +980,10 @@
     const fieldName = state.currentField;
     console.log(`[ConfigGen v2.2] Confirmed field: ${fieldName}`);
 
-    // Field should already be in manualSelections from click capture
-    if (state.pendingClickCapture) {
-      state.manualSelections[fieldName] = state.pendingClickCapture;
-      state.pendingClickCapture = null;
+    // Field should already be in manualSelections from rectangle capture
+    if (state.pendingFieldCapture) {
+      state.manualSelections[fieldName] = state.pendingFieldCapture;
+      state.pendingFieldCapture = null;
     }
 
     // Move to next field
@@ -986,7 +995,7 @@
    */
   window.backToPreview = function() {
     console.log('[ConfigGen v2.2] Back to preview');
-    exitClickMode();
+    exitFieldRectangleSelection();
     state.currentState = STATES.PREVIEW;
     showPanel('previewPanel');
     document.getElementById('panelSubtitle').textContent = `${state.detectedCards.length} cards detected`;
@@ -997,7 +1006,7 @@
    */
   window.finishManualSelection = function() {
     console.log('[ConfigGen v2.2] Finishing manual selection');
-    exitClickMode();
+    exitFieldRectangleSelection();
     state.currentState = STATES.GENERATING;
     confirmAndGenerateWithSelections();
   };
@@ -1019,71 +1028,137 @@
   }
 
   // ===========================
-  // v2.2: CLICK MODE FUNCTIONS
+  // v2.2: FIELD RECTANGLE SELECTION FUNCTIONS
   // ===========================
 
   /**
-   * Enter click mode for element selection
+   * Enter field rectangle selection mode
    */
-  function enterClickMode() {
-    console.log('[ConfigGen v2.2] Entering click mode');
-    state.currentState = STATES.CLICK_MODE;
-    document.body.classList.add('click-mode');
+  function enterFieldRectangleSelection() {
+    console.log('[ConfigGen v2.2] Entering field rectangle selection mode');
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
 
-    // Add event listeners
-    document.addEventListener('mousemove', handleClickModeMouseMove, true);
-    document.addEventListener('click', handleClickModeClick, true);
-    document.addEventListener('keydown', handleClickModeKeyDown, true);
+    // Initialize toggle button (starts with selector disabled)
+    // User must click toggle button to enable drawing
+    initializeSelectorToggle();
   }
 
   /**
-   * Exit click mode
+   * Exit field rectangle selection mode
    */
-  function exitClickMode() {
-    console.log('[ConfigGen v2.2] Exiting click mode');
-    document.body.classList.remove('click-mode');
+  function exitFieldRectangleSelection() {
+    console.log('[ConfigGen v2.2] Exiting field rectangle selection mode');
+    document.body.classList.remove('field-selection-mode');
+
+    // Disable selector (removes event listeners and hides canvas)
+    disableSelector();
+
+    // Hide field selection preview
+    hideFieldSelectionPreview();
+
+    // Reset field drawing state
+    state.isDrawingField = false;
+  }
+
+  // ===========================
+  // v2.2: SELECTOR TOGGLE FUNCTIONS
+  // ===========================
+
+  /**
+   * Initialize the selector toggle button
+   * Call this after manualPanel is shown
+   */
+  function initializeSelectorToggle() {
+    const toggleBtn = document.getElementById('selectorToggleBtn');
+    if (toggleBtn) {
+      toggleBtn.onclick = function() {
+        if (state.selectorEnabled) {
+          disableSelector();
+        } else {
+          enableSelector();
+        }
+      };
+    }
+    // Start with selector disabled
+    disableSelector();
+  }
+
+  /**
+   * Enable the selector - allow drawing rectangles
+   */
+  function enableSelector() {
+    console.log('[ConfigGen v2.2] Enabling selector');
+    state.selectorEnabled = true;
+
+    // Show canvas for field selection
+    canvas.classList.remove('hidden');
+    document.body.classList.add('field-selection-mode');
+
+    // Add field rectangle event listeners
+    canvas.addEventListener('mousedown', handleFieldMouseDown);
+    canvas.addEventListener('mousemove', handleFieldMouseMove);
+    canvas.addEventListener('mouseup', handleFieldMouseUp);
+    document.addEventListener('keydown', handleFieldKeyDown, true);
+
+    // Update button visual
+    updateSelectorToggleButton();
+  }
+
+  /**
+   * Disable the selector - prevent drawing, allow scrolling
+   */
+  function disableSelector() {
+    console.log('[ConfigGen v2.2] Disabling selector');
+    state.selectorEnabled = false;
+
+    // Hide canvas
+    canvas.classList.add('hidden');
+    document.body.classList.remove('field-selection-mode');
 
     // Remove event listeners
-    document.removeEventListener('mousemove', handleClickModeMouseMove, true);
-    document.removeEventListener('click', handleClickModeClick, true);
-    document.removeEventListener('keydown', handleClickModeKeyDown, true);
+    canvas.removeEventListener('mousedown', handleFieldMouseDown);
+    canvas.removeEventListener('mousemove', handleFieldMouseMove);
+    canvas.removeEventListener('mouseup', handleFieldMouseUp);
+    document.removeEventListener('keydown', handleFieldKeyDown, true);
 
-    // Hide hover highlight
-    hideHoverHighlight();
-    state.hoveredElement = null;
+    // Update button visual
+    updateSelectorToggleButton();
   }
 
   /**
-   * Handle mouse move in click mode
+   * Update the selector toggle button appearance
    */
-  function handleClickModeMouseMove(e) {
-    // Ignore if over control panel
-    const panel = document.getElementById('controlPanel');
-    if (panel && panel.contains(e.target)) {
-      hideHoverHighlight();
-      return;
+  function updateSelectorToggleButton() {
+    const toggleBtn = document.getElementById('selectorToggleBtn');
+    if (!toggleBtn) return;
+
+    if (state.selectorEnabled) {
+      toggleBtn.classList.add('active');
+      toggleBtn.innerHTML = '<span class="toggle-icon">✓</span> Selector ON';
+      toggleBtn.title = 'Click to disable drawing mode (allows scrolling)';
+    } else {
+      toggleBtn.classList.remove('active');
+      toggleBtn.innerHTML = '<span class="toggle-icon">○</span> Selector OFF';
+      toggleBtn.title = 'Click to enable drawing mode';
     }
-
-    // Ignore our overlay elements
-    if (e.target.closest('#cardHighlights') ||
-        e.target.closest('#elementHoverHighlight') ||
-        e.target.closest('#profileLinkModal')) {
-      return;
-    }
-
-    // Get element at point
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el || el === state.hoveredElement) return;
-
-    state.hoveredElement = el;
-    showHoverHighlight(el);
   }
 
   /**
-   * Handle click in click mode
+   * Expose toggleSelector for onclick handlers
    */
-  function handleClickModeClick(e) {
-    // Ignore if over control panel or modal
+  window.toggleSelector = function() {
+    if (state.selectorEnabled) {
+      disableSelector();
+    } else {
+      enableSelector();
+    }
+  };
+
+  /**
+   * Handle mouse down for field rectangle
+   */
+  function handleFieldMouseDown(e) {
+    // Ignore if clicking on panel or modal
     const panel = document.getElementById('controlPanel');
     const modal = document.getElementById('profileLinkModal');
     if ((panel && panel.contains(e.target)) ||
@@ -1091,206 +1166,200 @@
       return;
     }
 
-    e.preventDefault();
-    e.stopPropagation();
+    state.isDrawingField = true;
+    state.fieldStartX = e.clientX;
+    state.fieldStartY = e.clientY;
+    state.fieldCurrentX = e.clientX;
+    state.fieldCurrentY = e.clientY;
 
-    const el = state.hoveredElement;
-    if (!el) return;
-
-    console.log('[ConfigGen v2.2] Element clicked:', el.tagName, el.textContent?.substring(0, 50));
-
-    // Capture element data
-    captureClickedElement(el);
+    // Show field selection preview
+    showFieldSelectionPreview();
+    updateFieldSelectionPreview();
   }
 
   /**
-   * Handle keydown in click mode (Escape to cancel)
+   * Handle mouse move for field rectangle
    */
-  function handleClickModeKeyDown(e) {
+  function handleFieldMouseMove(e) {
+    if (!state.isDrawingField) return;
+
+    state.fieldCurrentX = e.clientX;
+    state.fieldCurrentY = e.clientY;
+    updateFieldSelectionPreview();
+  }
+
+  /**
+   * Handle mouse up for field rectangle - finalize selection
+   */
+  function handleFieldMouseUp(e) {
+    if (!state.isDrawingField) return;
+
+    state.isDrawingField = false;
+    state.fieldCurrentX = e.clientX;
+    state.fieldCurrentY = e.clientY;
+
+    // Calculate field box
+    const box = getFieldSelectionBox();
+
+    // Validate minimum size
+    if (box.width < 10 || box.height < 10) {
+      showErrorFeedback('Selection too small. Please draw a larger rectangle.');
+      hideFieldSelectionPreview();
+      return;
+    }
+
+    // Hide preview but keep canvas active for re-selection
+    hideFieldSelectionPreview();
+
+    // Process field rectangle - send to backend
+    processFieldRectangle(box);
+  }
+
+  /**
+   * Handle keydown in field selection mode (Escape to cancel)
+   */
+  function handleFieldKeyDown(e) {
     if (e.key === 'Escape') {
-      console.log('[ConfigGen v2.2] Escape pressed, canceling click mode');
+      console.log('[ConfigGen v2.2] Escape pressed, canceling field selection');
+      state.isDrawingField = false;
+      hideFieldSelectionPreview();
       resetFeedbackSection();
     }
   }
 
   /**
-   * Show hover highlight around element
+   * Get normalized field selection box
    */
-  function showHoverHighlight(el) {
-    const highlight = document.getElementById('elementHoverHighlight');
-    if (!highlight) return;
+  function getFieldSelectionBox() {
+    const x = Math.min(state.fieldStartX, state.fieldCurrentX);
+    const y = Math.min(state.fieldStartY, state.fieldCurrentY);
+    const width = Math.abs(state.fieldCurrentX - state.fieldStartX);
+    const height = Math.abs(state.fieldCurrentY - state.fieldStartY);
 
-    const rect = el.getBoundingClientRect();
-    highlight.style.display = 'block';
-    highlight.style.left = rect.left + 'px';
-    highlight.style.top = rect.top + 'px';
-    highlight.style.width = rect.width + 'px';
-    highlight.style.height = rect.height + 'px';
+    return { x, y, width, height };
   }
 
   /**
-   * Hide hover highlight
+   * Show field selection preview rectangle
    */
-  function hideHoverHighlight() {
-    const highlight = document.getElementById('elementHoverHighlight');
-    if (highlight) {
-      highlight.style.display = 'none';
+  function showFieldSelectionPreview() {
+    let preview = document.getElementById('fieldSelectionPreview');
+    if (!preview) {
+      preview = document.createElement('div');
+      preview.id = 'fieldSelectionPreview';
+      preview.className = 'field-selection-preview';
+      document.body.appendChild(preview);
+    }
+    preview.style.display = 'block';
+  }
+
+  /**
+   * Update field selection preview rectangle
+   */
+  function updateFieldSelectionPreview() {
+    const preview = document.getElementById('fieldSelectionPreview');
+    if (!preview) return;
+
+    const box = getFieldSelectionBox();
+
+    preview.style.left = box.x + 'px';
+    preview.style.top = box.y + 'px';
+    preview.style.width = box.width + 'px';
+    preview.style.height = box.height + 'px';
+  }
+
+  /**
+   * Hide field selection preview
+   */
+  function hideFieldSelectionPreview() {
+    const preview = document.getElementById('fieldSelectionPreview');
+    if (preview) {
+      preview.style.display = 'none';
     }
   }
 
   /**
-   * Capture data from clicked element
+   * Process field rectangle - send to backend for extraction
    */
-  function captureClickedElement(el) {
+  async function processFieldRectangle(box) {
     const fieldName = state.currentField;
-    const meta = FIELD_METADATA[fieldName];
+    console.log(`[ConfigGen v2.2] Processing field rectangle for ${fieldName}:`, box);
 
-    // Special handling for profileUrl - check for links
-    if (fieldName === 'profileUrl') {
-      handleProfileUrlCapture(el);
+    try {
+      // Send to backend for extraction
+      if (typeof __configGen_handleFieldRectangle === 'function') {
+        await __configGen_handleFieldRectangle({
+          fieldName: fieldName,
+          box: box
+        });
+      } else {
+        throw new Error('Backend function not available');
+      }
+    } catch (error) {
+      console.error('[ConfigGen v2.2] Field rectangle processing error:', error);
+      showErrorFeedback('Failed to process selection: ' + error.message);
+    }
+  }
+
+  /**
+   * Handle field rectangle result from backend
+   * Called by backend via page.evaluate
+   */
+  window.handleFieldRectangleResult = function(result) {
+    console.log('[ConfigGen v2.2] Field rectangle result:', result);
+
+    if (!result.success) {
+      showErrorFeedback(result.error || 'Could not extract field value');
       return;
     }
 
-    // Extract value based on field type
-    let value = extractElementValue(el, fieldName);
+    const fieldName = result.fieldName;
 
-    // Validate
-    const validation = validateFieldValue(fieldName, value);
-    if (!validation.valid) {
-      showErrorFeedback(validation.message);
+    // Special handling for profileUrl - may need disambiguation
+    if (fieldName === 'profileUrl' && result.links && result.links.length > 1) {
+      // Multiple links found - show disambiguation
+      handleProfileUrlDisambiguation(result.links);
       return;
     }
 
-    // Store capture
-    state.pendingClickCapture = {
-      value: value,
-      selector: generateSelector(el),
-      coordinates: getElementCoordinates(el),
-      element: {
-        tagName: el.tagName.toLowerCase(),
-        className: el.className,
-        textContent: el.textContent?.substring(0, 200)
-      },
+    // Store the capture
+    state.pendingFieldCapture = {
+      value: result.value,
+      selector: result.selector,
+      coordinates: result.coordinates,
+      element: result.element,
       source: 'manual',
       confidence: 1.0
     };
 
-    showCapturedFeedback(value);
-  }
+    // Show success feedback
+    showCapturedFeedback(result.value);
+  };
 
   /**
-   * Extract value from element based on field type
+   * Handle profile URL disambiguation when multiple links found
    */
-  function extractElementValue(el, fieldName) {
-    switch (fieldName) {
-      case 'email':
-        // Check for mailto: link
-        if (el.tagName === 'A' && el.href?.startsWith('mailto:')) {
-          return el.href.replace('mailto:', '').split('?')[0];
-        }
-        // Check text content for email pattern
-        const emailMatch = el.textContent?.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
-        return emailMatch ? emailMatch[0] : el.textContent?.trim();
-
-      case 'phone':
-        // Check for tel: link
-        if (el.tagName === 'A' && el.href?.startsWith('tel:')) {
-          return el.href.replace('tel:', '');
-        }
-        return el.textContent?.trim();
-
-      case 'profileUrl':
-        // Handle separately
-        return el.href || el.getAttribute('href');
-
-      default:
-        return el.textContent?.trim();
-    }
-  }
-
-  /**
-   * Handle profile URL capture (may need disambiguation)
-   */
-  function handleProfileUrlCapture(el) {
-    // Find all links in or around the clicked element
-    let links = [];
-
-    // If clicked element is a link
-    if (el.tagName === 'A' && el.href) {
-      links.push({
-        element: el,
-        href: el.href,
-        text: el.textContent?.trim(),
-        isClicked: true
-      });
-    }
-
-    // Find links in parent card area
-    const card = findParentCard(el);
-    if (card) {
-      const cardLinks = card.querySelectorAll('a[href]');
-      cardLinks.forEach(link => {
-        if (link !== el && !isUtilityLink(link)) {
-          links.push({
-            element: link,
-            href: link.href,
-            text: link.textContent?.trim(),
-            isClicked: false
-          });
-        }
-      });
-    }
-
-    // Analyze and classify links
-    links = links.map(link => ({
+  function handleProfileUrlDisambiguation(links) {
+    // Classify links for display
+    const classifiedLinks = links.map(link => ({
       ...link,
       classification: classifyLink(link.href, link.text, state.personName)
     }));
 
-    // Filter to profile-like links
-    const profileLinks = links.filter(l =>
-      l.classification.type === 'profile' ||
-      l.classification.nameMatch !== 'none'
-    );
-
-    // If only one profile link, use it directly
-    if (profileLinks.length === 1) {
-      selectProfileLink(profileLinks[0]);
-      return;
-    }
-
-    // If clicked element is a valid profile link, use it
-    const clickedLink = links.find(l => l.isClicked);
-    if (clickedLink && clickedLink.classification.type === 'profile') {
-      selectProfileLink(clickedLink);
-      return;
-    }
-
-    // Multiple options - show disambiguation modal
-    if (profileLinks.length > 1) {
-      showLinkDisambiguationModal(profileLinks);
-      return;
-    }
-
-    // No good profile links found
-    if (clickedLink && clickedLink.href) {
-      // Use clicked link anyway with warning
-      selectProfileLink(clickedLink);
-    } else {
-      showErrorFeedback('No valid profile link found. Click on a link element.');
-    }
+    // Show disambiguation modal
+    showLinkDisambiguationModal(classifiedLinks);
   }
 
   /**
-   * Select profile link and store capture
+   * Select profile link and store capture (from disambiguation)
    */
   function selectProfileLink(link) {
     const value = link.href;
 
-    state.pendingClickCapture = {
+    state.pendingFieldCapture = {
       value: value,
-      selector: generateSelector(link.element),
-      coordinates: getElementCoordinates(link.element),
+      selector: link.selector || generateSelector(link.element),
+      coordinates: link.coordinates || getElementCoordinates(link.element),
       element: {
         tagName: 'a',
         className: link.element?.className || '',
@@ -1306,58 +1375,6 @@
     hideModal();
 
     showCapturedFeedback(truncate(value, 50));
-  }
-
-  /**
-   * Find parent card element
-   */
-  function findParentCard(el) {
-    // Try to find a containing card element
-    let current = el;
-    let depth = 0;
-    const maxDepth = 10;
-
-    while (current && depth < maxDepth) {
-      // Check if this looks like a card container
-      if (current.classList) {
-        const classes = Array.from(current.classList).join(' ').toLowerCase();
-        if (classes.includes('card') ||
-            classes.includes('item') ||
-            classes.includes('person') ||
-            classes.includes('member') ||
-            classes.includes('listing') ||
-            classes.includes('bio')) {
-          return current;
-        }
-      }
-
-      // Check tag and role
-      if (current.tagName === 'ARTICLE' ||
-          current.tagName === 'LI' ||
-          current.getAttribute('role') === 'listitem') {
-        return current;
-      }
-
-      current = current.parentElement;
-      depth++;
-    }
-
-    // Fallback: return element with largest area within first 5 parents
-    return el.closest('article, li, [class*="card"], [class*="item"]') || el.parentElement;
-  }
-
-  /**
-   * Check if link is a utility link (email, phone, social, etc.)
-   */
-  function isUtilityLink(link) {
-    const href = link.href || '';
-    return href.startsWith('mailto:') ||
-           href.startsWith('tel:') ||
-           href.startsWith('javascript:') ||
-           href.includes('linkedin.com') ||
-           href.includes('twitter.com') ||
-           href.includes('facebook.com') ||
-           href === '#';
   }
 
   /**
@@ -1517,8 +1534,8 @@
     const link = state.pendingLinks[state.selectedLinkIndex];
     selectProfileLink(link);
 
-    // Return to click mode
-    state.currentState = STATES.CLICK_MODE;
+    // Return to field rectangle selection mode
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
   };
 
   /**
@@ -1526,7 +1543,7 @@
    */
   window.cancelLinkSelection = function() {
     hideModal();
-    state.currentState = STATES.CLICK_MODE;
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
     resetFeedbackSection();
   };
 

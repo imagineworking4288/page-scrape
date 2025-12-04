@@ -656,21 +656,46 @@
       font-weight: 600;
     }
 
-    /* Click Mode Cursor */
-    body.click-mode {
+    /* Field Selection Mode Cursor (v2.2 rectangle-based) */
+    body.field-selection-mode {
       cursor: crosshair !important;
     }
 
-    body.click-mode * {
+    body.field-selection-mode * {
       cursor: crosshair !important;
     }
 
-    body.click-mode #controlPanel,
-    body.click-mode #controlPanel * {
+    body.field-selection-mode #controlPanel,
+    body.field-selection-mode #controlPanel * {
       cursor: default !important;
     }
 
-    /* Element Hover Highlight */
+    body.field-selection-mode #profileLinkModal,
+    body.field-selection-mode #profileLinkModal * {
+      cursor: default !important;
+    }
+
+    /* Field Selection Preview Rectangle (v2.2) */
+    .field-selection-preview {
+      position: fixed;
+      border: 3px dashed #28a745;
+      background: rgba(40, 167, 69, 0.15);
+      pointer-events: none;
+      z-index: 999998;
+      border-radius: 4px;
+    }
+
+    /* Field Rectangle Highlight (after capture) */
+    .field-rectangle-highlight {
+      position: fixed;
+      border: 3px solid #28a745;
+      background: rgba(40, 167, 69, 0.2);
+      pointer-events: none;
+      z-index: 999995;
+      border-radius: 4px;
+    }
+
+    /* Legacy Element Hover Highlight (kept for compatibility) */
     .element-hover-highlight {
       position: fixed;
       border: 3px solid #667eea;
@@ -867,6 +892,60 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
+
+    /* ===========================
+       v2.2 Selector Toggle Button
+       =========================== */
+
+    .selector-toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .selector-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border: 2px solid #dee2e6;
+      border-radius: 8px;
+      background: white;
+      color: #666;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      min-width: 140px;
+      justify-content: center;
+    }
+
+    .selector-toggle-btn:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .selector-toggle-btn.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-color: transparent;
+      color: white;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .selector-toggle-btn .toggle-icon {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .selector-hint {
+      font-size: 12px;
+      color: #888;
+      flex: 1;
+    }
   </style>
 </head>
 <body>
@@ -999,6 +1078,14 @@
           <span id="fieldsCompleteLabel">0 captured</span>
         </div>
 
+        <!-- Selector Toggle Button -->
+        <div class="selector-toggle-container">
+          <button type="button" id="selectorToggleBtn" class="selector-toggle-btn" onclick="toggleSelector()">
+            <span class="toggle-icon">○</span> Selector OFF
+          </button>
+          <span class="selector-hint">Enable to draw selection rectangles</span>
+        </div>
+
         <div class="progress-bar-container">
           <div class="progress-bar" id="manualProgressBar" style="width: 0%;"></div>
         </div>
@@ -1008,7 +1095,7 @@
             Select NAME
             <span class="required-badge" id="fieldRequiredBadge">Required</span>
           </h3>
-          <p id="fieldPromptText">Click on a person's NAME in the card</p>
+          <p id="fieldPromptText">Draw a rectangle around the NAME in the card</p>
         </div>
 
         <div class="field-hint" id="fieldHintSection">
@@ -1021,7 +1108,7 @@
 
         <div class="feedback-section" id="feedbackSection">
           <div class="waiting-indicator">
-            <span class="pulse">●</span> Click on the <strong id="waitingFieldName">NAME</strong> element in the card
+            <span class="pulse">●</span> Draw a rectangle around the <strong id="waitingFieldName">NAME</strong> in the card
           </div>
         </div>
 
