@@ -1,12 +1,13 @@
 /**
- * Config Builder v2.2
+ * Config Builder v2.3
  *
  * Builds site-specific configuration files from visual card selection.
- * Supports legacy v1.0, v2.0, v2.1, and new v2.2 formats:
+ * Supports legacy v1.0, v2.0, v2.1, v2.2, and new v2.3 formats:
  * - v1.0: Basic selectors
  * - v2.0: Card pattern matching (structural + visual signatures)
  * - v2.1: Multi-method extraction strategies with priorities and fallbacks
  * - v2.2: Manual field selection with user-selected methods and coordinate fallbacks
+ * - v2.3: User-validated extraction methods with multi-method testing
  *
  * v2.1 Features:
  * - Site-specific extraction methods stored per field
@@ -19,6 +20,12 @@
  * - User-selected selectors with highest priority
  * - Coordinate-based fallback extraction
  * - Profile link classification
+ *
+ * v2.3 Features:
+ * - Multi-method extraction testing (OCR, coordinate-text, selector, etc.)
+ * - User validation of best extraction method
+ * - Foolproof universal scraper approach
+ * - Coordinate-based extraction with method fallbacks
  */
 
 const fs = require('fs');
@@ -1671,6 +1678,243 @@ module.exports = ${JSON.stringify(config, null, 2)};
         ...(v1Config.notes || [])
       ]
     };
+  }
+
+  // ===========================
+  // v2.3 Config Building Methods
+  // ===========================
+
+  /**
+   * Build v2.3 configuration with user-validated extraction methods
+   * @param {Object} selections - User-validated field selections
+   * @param {Object} matchResult - Result from CardMatcher.findSimilarCards()
+   * @param {Object} metadata - Site metadata (url, domain, pagination)
+   * @returns {Object} - Configuration v2.3 object
+   */
+  buildConfigV23(selections, matchResult, metadata) {
+    this.logger.info('[v2.3-CONFIG] Building config with validated extraction methods');
+
+    const config = {
+      // Metadata
+      name: this.generateConfigName(metadata.url),
+      version: '2.3',
+      selectionMethod: 'manual-validated',
+      createdAt: new Date().toISOString(),
+      sourceUrl: metadata.url,
+      domain: metadata.domain,
+
+      // Card pattern
+      cardPattern: {
+        primarySelector: matchResult?.selector || null,
+        sampleDimensions: {
+          width: matchResult?.referenceBox?.width || 0,
+          height: matchResult?.referenceBox?.height || 0
+        },
+        sampleCoordinates: {
+          x: matchResult?.referenceBox?.x || 0,
+          y: matchResult?.referenceBox?.y || 0
+        }
+      },
+
+      // Fields with user-validated extraction methods
+      fields: this.buildFieldsV23(selections),
+
+      // Pagination configuration
+      pagination: this.buildPaginationConfig(metadata.pagination || {}, metadata),
+
+      // Extraction settings
+      extraction: {
+        waitFor: matchResult?.selector,
+        waitTimeout: 15000,
+        scrollToLoad: true,
+        stripHtml: true,
+        trimWhitespace: true,
+        deduplicateBy: 'email'
+      },
+
+      // Site-specific options
+      options: {
+        minDelay: 2000,
+        maxDelay: 5000,
+        userAgent: null,
+        viewport: { width: 1920, height: 1080 }
+      },
+
+      // Detection statistics
+      detectionStats: {
+        totalCardsFound: matchResult?.totalFound || 0,
+        avgConfidence: this.calculateAverageConfidence(matchResult?.matches || []),
+        fieldsValidated: Object.keys(selections || {}).filter(k => selections[k]?.value).length,
+        timestamp: new Date().toISOString()
+      },
+
+      // Notes
+      notes: this.generateNotesV23(selections, matchResult, metadata)
+    };
+
+    this.logger.info(`[v2.3-CONFIG] Config built with ${Object.keys(config.fields).length} fields`);
+    return config;
+  }
+
+  /**
+   * Build fields configuration for v2.3
+   * @param {Object} selections - User-validated field selections
+   * @returns {Object} - Fields configuration
+   */
+  buildFieldsV23(selections) {
+    const fields = {
+      name: this.buildFieldV23(selections?.name, 'name', true),
+      email: this.buildFieldV23(selections?.email, 'email', true),
+      phone: this.buildFieldV23(selections?.phone, 'phone', false),
+      title: this.buildFieldV23(selections?.title, 'title', false),
+      location: this.buildFieldV23(selections?.location, 'location', false),
+      profileUrl: this.buildFieldV23(selections?.profileUrl, 'profileUrl', true)
+    };
+
+    return fields;
+  }
+
+  /**
+   * Build single field configuration for v2.3
+   * @param {Object} fieldData - Field data with validated method
+   * @param {string} fieldName - Field name
+   * @param {boolean} required - Is field required
+   * @returns {Object} - Field configuration
+   */
+  buildFieldV23(fieldData, fieldName, required) {
+    if (!fieldData || !fieldData.value) {
+      return {
+        required: required,
+        skipped: true,
+        userValidatedMethod: null,
+        coordinates: { x: 0, y: 0, width: 0, height: 0 },
+        selector: null,
+        sampleValue: null,
+        confidence: 0,
+        extractionOptions: [],
+        failedMethods: []
+      };
+    }
+
+    return {
+      required: required,
+      skipped: false,
+      userValidatedMethod: fieldData.userValidatedMethod || fieldData.method || 'coordinate-text',
+      coordinates: fieldData.coordinates || { x: 0, y: 0, width: 0, height: 0 },
+      selector: fieldData.selector || null,
+      sampleValue: fieldData.value,
+      confidence: fieldData.confidence || 0,
+      extractionOptions: fieldData.extractionOptions || [],
+      failedMethods: fieldData.failedMethods || []
+    };
+  }
+
+  /**
+   * Generate notes for v2.3 config
+   * @param {Object} selections - User selections
+   * @param {Object} matchResult - Match result
+   * @param {Object} metadata - Metadata
+   * @returns {Array} - Notes array
+   */
+  generateNotesV23(selections, matchResult, metadata) {
+    const notes = [];
+
+    notes.push(`Config v2.3 generated on ${new Date().toLocaleString()}`);
+    notes.push(`Selection method: Manual field selection with user validation`);
+    notes.push(`Source: ${metadata.url}`);
+    notes.push(`Cards detected: ${matchResult?.totalFound || 0}`);
+
+    // Field summary
+    const validatedFields = [];
+    const skippedFields = [];
+
+    Object.entries(selections || {}).forEach(([fieldName, fieldData]) => {
+      if (fieldData?.value) {
+        validatedFields.push(`${fieldName} (${fieldData.userValidatedMethod || 'unknown'})`);
+      } else {
+        skippedFields.push(fieldName);
+      }
+    });
+
+    if (validatedFields.length > 0) {
+      notes.push(`Validated fields: ${validatedFields.join(', ')}`);
+    }
+    if (skippedFields.length > 0) {
+      notes.push(`Skipped fields: ${skippedFields.join(', ')}`);
+    }
+
+    return notes;
+  }
+
+  /**
+   * Validate v2.3 configuration
+   * @param {Object} config - Configuration v2.3 to validate
+   * @returns {Object} - Validation result
+   */
+  validateConfigV23(config) {
+    const errors = [];
+    const warnings = [];
+
+    // Check version
+    if (config.version !== '2.3') {
+      warnings.push(`Config version is ${config.version}, expected 2.3`);
+    }
+
+    // Check card pattern
+    if (!config.cardPattern?.primarySelector) {
+      errors.push('Missing card selector');
+    }
+
+    // Check required fields
+    const requiredFields = ['name', 'email', 'profileUrl'];
+    for (const fieldName of requiredFields) {
+      const field = config.fields?.[fieldName];
+      if (!field) {
+        errors.push(`Missing required field: ${fieldName}`);
+      } else if (!field.skipped && !field.userValidatedMethod) {
+        warnings.push(`Required field '${fieldName}' has no validated method`);
+      }
+    }
+
+    // Check field coordinates validity
+    const allFields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+    for (const fieldName of allFields) {
+      const field = config.fields?.[fieldName];
+      if (field && !field.skipped && field.userValidatedMethod) {
+        const coords = field.coordinates;
+        if (!coords || (coords.width === 0 && coords.height === 0)) {
+          warnings.push(`Field '${fieldName}' has invalid coordinates`);
+        }
+      }
+    }
+
+    // Calculate score
+    let score = 100;
+    score -= errors.length * 20;
+    score -= warnings.length * 5;
+
+    // Bonus for validated fields
+    const validatedCount = allFields.filter(f =>
+      config.fields?.[f]?.userValidatedMethod && !config.fields?.[f]?.skipped
+    ).length;
+    score += validatedCount * 3;
+
+    return {
+      valid: errors.length === 0,
+      errors: errors,
+      warnings: warnings,
+      score: Math.max(0, Math.min(100, score))
+    };
+  }
+
+  /**
+   * Check if config is v2.3 format
+   * @param {Object} config - Configuration to check
+   * @returns {boolean} - True if v2.3
+   */
+  isV23Config(config) {
+    return config.version === '2.3' ||
+           config.selectionMethod === 'manual-validated';
   }
 }
 

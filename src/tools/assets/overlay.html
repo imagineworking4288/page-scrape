@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Visual Card Scraper - Config Generator v2.2</title>
+  <title>Visual Card Scraper - Config Generator v2.3</title>
   <style>
     * {
       box-sizing: border-box;
@@ -1001,6 +1001,162 @@
     .field-status-item.captured.current {
       box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.3);
     }
+
+    /* ===========================
+       v2.3 Extraction Results Panel Styles
+       =========================== */
+
+    .extraction-results-panel h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .extraction-results-panel .extraction-hint {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 16px;
+    }
+
+    .extraction-results-list {
+      margin-bottom: 16px;
+    }
+
+    .extraction-result-item {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border: 2px solid #dee2e6;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .extraction-result-item:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .extraction-result-item.selected {
+      border-color: #28a745;
+      background: #d4edda;
+    }
+
+    .extraction-result-item .result-radio {
+      margin-right: 12px;
+    }
+
+    .extraction-result-item .result-radio input {
+      width: 18px;
+      height: 18px;
+    }
+
+    .extraction-result-item .result-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .extraction-result-item .result-value {
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+
+    .extraction-result-item .result-method {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .extraction-result-item .result-confidence {
+      text-align: right;
+      margin-left: 12px;
+    }
+
+    .extraction-result-item .result-confidence .confidence-value {
+      display: block;
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .extraction-result-item .result-confidence.high .confidence-value {
+      color: #28a745;
+    }
+
+    .extraction-result-item .result-confidence.medium .confidence-value {
+      color: #ffc107;
+    }
+
+    .extraction-result-item .result-confidence.low .confidence-value {
+      color: #dc3545;
+    }
+
+    .extraction-result-item .recommended-badge {
+      display: inline-block;
+      font-size: 9px;
+      background: #28a745;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+
+    .no-results-message {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+
+    .no-results-message p {
+      margin-bottom: 8px;
+    }
+
+    /* Failed methods section */
+    .failed-methods-details {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 16px;
+    }
+
+    .failed-methods-details summary {
+      cursor: pointer;
+      color: #999;
+      font-weight: 500;
+      padding: 8px 0;
+    }
+
+    .failed-methods-details summary:hover {
+      color: #666;
+    }
+
+    .failed-methods-list {
+      margin: 8px 0 0 16px;
+      padding: 0;
+    }
+
+    .failed-methods-list li {
+      margin-bottom: 4px;
+    }
+
+    .failed-methods-list .failed-method-name {
+      font-weight: 500;
+      color: #888;
+    }
+
+    /* Extraction results buttons */
+    .extraction-results-panel .btn-group-3 {
+      display: flex;
+      gap: 8px;
+    }
+
+    .extraction-results-panel .btn-group-3 .btn {
+      flex: 1;
+      padding: 10px 8px;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -1009,7 +1165,7 @@
     <div class="panel-header">
       <button class="minimize-btn" onclick="toggleMinimize()">−</button>
       <h1>Visual Card Scraper</h1>
-      <div class="subtitle" id="panelSubtitle">Config Generator v2.2</div>
+      <div class="subtitle" id="panelSubtitle">Config Generator v2.3</div>
     </div>
 
     <div class="panel-body">
@@ -1189,6 +1345,36 @@
           </button>
           <button class="btn btn-success btn-sm" id="finishManualBtn" onclick="finishManualSelection()" disabled>
             Finish Selection
+          </button>
+        </div>
+      </div>
+
+      <!-- ===========================
+           v2.3 Extraction Results Panel
+           =========================== -->
+      <div id="extractionResultsPanel" class="panel-content extraction-results-panel">
+        <div id="extractionResultsHeader">
+          <h3>Select Best Result for NAME</h3>
+          <p class="extraction-hint">5 methods tested, 3 returned values</p>
+        </div>
+
+        <div class="extraction-results-list" id="extractionResultsList">
+          <!-- Dynamically populated with extraction results -->
+        </div>
+
+        <div id="failedMethodsSection" style="display: none;">
+          <!-- Dynamically populated with failed methods -->
+        </div>
+
+        <div class="btn-group-3">
+          <button class="btn btn-secondary" onclick="retryFieldExtraction()">
+            Reselect
+          </button>
+          <button class="btn btn-warning" id="skipFromResultsBtn" onclick="skipFieldFromResults()">
+            Skip
+          </button>
+          <button class="btn btn-success" id="confirmExtractionBtn" onclick="confirmExtractionResult()" disabled>
+            Confirm
           </button>
         </div>
       </div>

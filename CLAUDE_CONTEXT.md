@@ -13,8 +13,9 @@ This document provides comprehensive context for Claude when editing this projec
 - **Automatic pagination**: Detects and handles URL-based and offset-based pagination
 - **Anti-detection**: Stealth browser configuration with random user agents
 - **Domain classification**: Identifies business vs personal email domains
-- **Config generation**: Visual tool for creating site-specific configs
+- **Config generation v2.3**: Visual tool with multi-method extraction testing and user validation
 - **Multiple output formats**: JSON, CSV, Google Sheets export
+- **OCR extraction**: Tesseract.js-based screenshot text extraction
 
 ---
 
@@ -36,7 +37,8 @@ page-scrape/
 │   │   ├── simple-scraper.js   # HTML DOM-based scraper
 │   │   ├── select-scraper.js   # Text selection scraper
 │   │   ├── pdf-scraper.js      # PDF rendering scraper
-│   │   └── config-scraper.js   # Config-driven scraper (main)
+│   │   ├── config-scraper.js   # Config-driven scraper (main)
+│   │   └── visual-scraper.js   # v2.3 visual scraper (coordinate-based)
 │   ├── utils/                  # Utility modules
 │   │   ├── browser-manager.js  # Puppeteer browser handling
 │   │   ├── config-loader.js    # Config file loading/validation
@@ -62,11 +64,18 @@ page-scrape/
 │   └── tools/                  # Development/utility tools
 │       ├── config-generator.js # Interactive config creator
 │       ├── site-tester.js      # Site testing utility
+│       ├── assets/             # UI assets for config generator
+│       │   ├── overlay.html    # v2.3 overlay UI HTML/CSS
+│       │   └── overlay-client.js # v2.3 browser-side UI code
 │       └── lib/                # Tool-specific modules
-│           ├── interactive-session.js # Browser UI session
+│           ├── interactive-session.js # v2.3 Browser UI session
 │           ├── element-capture.js     # Element selection
 │           ├── multi-method-extractor.js # Field extraction
-│           ├── config-builder.js      # Config assembly
+│           ├── config-builder.js      # v2.3 Config assembly
+│           ├── config-schemas.js      # v2.3 Schema definitions
+│           ├── extraction-tester.js   # v2.3 Multi-method testing
+│           ├── screenshot-extractor.js # v2.3 OCR extraction
+│           ├── coordinate-extractor.js # v2.3 Coordinate-based extraction
 │           └── ...                    # Other helpers
 ├── tests/                      # Test files
 │   ├── scraper-test.js         # SimpleScraper tests
@@ -475,22 +484,277 @@ node src/tools/config-generator.js --url "https://example.com/directory"
 
 **Process**:
 1. Opens browser in visible mode
-2. User clicks on contact cards and fields
-3. Detects selectors and patterns
-4. Generates and saves config file
+2. User draws rectangle around a contact card
+3. System finds similar cards on the page
+4. User selects each field (name, email, phone, profileUrl, etc.)
+5. v2.3: System tests multiple extraction methods per field
+6. v2.3: User validates best extraction method
+7. Generates and saves config file
 
 ---
 
-### src/tools/lib/interactive-session.js
+## Visual Config Generator v2.3
+
+The v2.3 config generator implements a "foolproof universal scraper" approach with user-validated extraction methods.
+
+### Core Concept
+
+Instead of relying on auto-detection, v2.3:
+1. Tests 5+ extraction methods per field
+2. Shows user top 5 results ranked by confidence
+3. User validates which method works best
+4. Config stores user-validated method with coordinates
+5. Runtime scraper uses validated method
+
+### Extraction Methods (Priority Order)
+
+| Method | ID | Description | Best For |
+|--------|-----|-------------|----------|
+| Screenshot OCR | `screenshot-ocr` | Tesseract.js OCR on region screenshot | Complex layouts, images |
+| Coordinate Text | `coordinate-text` | TreeWalker DOM lookup at coordinates | Standard text fields |
+| CSS Selector | `selector` | Element at center point | Structured HTML |
+| Data Attribute | `data-attribute` | data-* attributes | React/Vue apps |
+| Text Regex | `text-regex` | Pattern matching on text | Emails, phones |
+| Mailto Link | `mailto-link` | Extract from mailto: href | Email fields |
+| Tel Link | `tel-link` | Extract from tel: href | Phone fields |
+| Href Link | `href-link` | Extract link URL | Profile URLs |
+
+### Key Files
+
+#### src/tools/lib/config-schemas.js
+
+**Purpose**: v2.3 schema definitions and validation.
+
+**Exports**:
+- `FIELD_ORDER` - Field processing order: ['name', 'email', 'phone', 'profileUrl', 'title', 'location']
+- `REQUIRED_FIELDS` - ['name', 'email', 'profileUrl']
+- `FIELD_METADATA` - Labels, prompts, validation hints per field
+- `EXTRACTION_METHODS` - Method definitions with priorities
+- `createFieldSchema()` - Create empty field schema
+- `createConfigV23(options)` - Create new v2.3 config
+- `validateConfigV23(config)` - Validate and score config
+
+**v2.3 Field Schema**:
+```javascript
+{
+  required: Boolean,
+  skipped: Boolean,
+  userValidatedMethod: String,  // e.g., 'coordinate-text', 'screenshot-ocr'
+  coordinates: { x, y, width, height },  // Relative to card
+  selector: String | null,
+  sampleValue: String,
+  confidence: Number,  // 0-100
+  extractionOptions: Array,  // All tested options
+  failedMethods: Array
+}
+```
+
+---
+
+#### src/tools/lib/screenshot-extractor.js
+
+**Purpose**: OCR-based text extraction using Tesseract.js.
+
+**Dependencies**: `tesseract.js`
+
+**Key Methods**:
+- `initialize()` - Create Tesseract worker
+- `terminate()` - Cleanup worker
+- `extractFromRegion(cardElement, fieldCoords)` - Extract text from region
+- `captureRegionScreenshot(coords)` - Screenshot specific area
+- `runOCR(imageBuffer)` - Run Tesseract on image
+- `cleanText(text)` - Remove OCR artifacts
+- `calculateConfidence(ocrResult, cleanedText)` - Score result
+
+**Returns**:
+```javascript
+{
+  value: String,
+  confidence: Number,
+  metadata: { method: 'screenshot-ocr', ocrConfidence, rawText, ... }
+}
+```
+
+---
+
+#### src/tools/lib/coordinate-extractor.js
+
+**Purpose**: DOM-based text extraction at specific coordinates.
+
+**Key Methods**:
+- `extractFromRegion(cardElement, fieldCoords)` - Find text at coordinates
+- `extractLinkFromRegion(cardElement, fieldCoords)` - Extract href
+- `extractMailtoFromRegion(cardElement, fieldCoords)` - Extract email from mailto:
+- `extractTelFromRegion(cardElement, fieldCoords)` - Extract phone from tel:
+
+**Algorithm**:
+1. Calculate absolute coordinates from card + field offset
+2. Use TreeWalker to find text nodes in region
+3. Check rect overlap with target region
+4. Combine overlapping texts
+5. Calculate confidence based on overlap quality
+
+---
+
+#### src/tools/lib/extraction-tester.js
+
+**Purpose**: Orchestrates multiple extraction methods and returns ranked results.
+
+**Key Methods**:
+- `initialize()` - Setup extractors
+- `terminate()` - Cleanup
+- `testField(fieldName, cardElement, fieldCoords)` - Test all methods
+- `getMethodsForField(fieldName)` - Get applicable methods
+- `runMethod(methodId, cardElement, fieldCoords, fieldName)` - Run single method
+- `applyFieldValidation(fieldName, results)` - Field-specific validation
+- `formatForUI(testResults, fieldName)` - Format for overlay display
+
+**Returns**:
+```javascript
+{
+  results: [
+    { method, methodLabel, value, confidence, metadata }
+  ],  // Top 5 sorted by confidence
+  failedMethods: [{ method, reason }],
+  totalMethodsTested: Number
+}
+```
+
+---
+
+#### src/tools/lib/interactive-session.js (v2.3)
 
 **Purpose**: Manages the interactive config generation session.
 
+**v2.3 State**:
+```javascript
+this.extractionTester = null;
+this.v23Selections = {};  // User-validated extraction methods
+```
+
+**v2.3 Exposed Functions**:
+- `__configGen_testFieldExtraction(data)` - Test extraction methods
+- `__configGen_confirmFieldExtraction(data)` - User confirms selection
+- `__configGen_generateV23Config(selections)` - Generate final config
+
+**v2.3 Handler Methods**:
+- `getExtractionTester()` - Lazy-load ExtractionTester
+- `handleTestFieldExtraction(data)` - Run all methods, send results to UI
+- `handleConfirmFieldExtraction(data)` - Store user's validated choice
+- `handleGenerateV23Config(selections)` - Build and save v2.3 config
+
+---
+
+#### src/tools/lib/config-builder.js (v2.3)
+
+**Purpose**: Builds site-specific configuration files.
+
+**v2.3 Methods**:
+- `buildConfigV23(selections, matchResult, metadata)` - Build v2.3 config
+- `buildFieldsV23(selections)` - Build all field configs
+- `buildFieldV23(fieldData, fieldName, required)` - Build single field
+- `validateConfigV23(config)` - Validate with scoring
+- `isV23Config(config)` - Check if config is v2.3 format
+
+---
+
+#### src/tools/assets/overlay-client.js (v2.3)
+
+**Purpose**: Browser-side UI for the config generator overlay.
+
+**v2.3 State**:
+```javascript
+state.extractionResults = [];    // Results from backend
+state.failedMethods = [];        // Failed extraction methods
+state.selectedResultIndex = -1;  // User's selection
+state.currentFieldCoords = null; // Current field coordinates
+```
+
+**v2.3 States**:
+- `EXTRACTION_RESULTS` - Showing extraction method results for user validation
+
+**v2.3 Functions**:
+- `window.handleExtractionResults(result)` - Receive results from backend
+- `buildExtractionResultsPanel(fieldName, result)` - Build UI
+- `selectExtractionResult(index)` - User selects a result
+- `window.confirmExtractionResult()` - Confirm selection
+- `window.retryFieldExtraction()` - Reselect area
+- `window.skipFieldFromResults()` - Skip optional field
+
+---
+
+#### src/scrapers/visual-scraper.js
+
+**Purpose**: Runtime scraper that uses v2.3 configs with user-validated methods.
+
 **Key Methods**:
-- `start(url)` - Begin session
-- `injectOverlay(page)` - Add UI controls to page
-- `handleCardSelection(data)` - Process card click
-- `handleFieldSelection(data)` - Process field click
-- `saveConfig(config)` - Write config file
+- `initialize(config)` - Setup with v2.3 config
+- `scrape(url, options)` - Extract contacts from URL
+- `extractContactFromCard(cardElement, index)` - Single card extraction
+- `extractField(cardElement, fieldName, fieldConfig)` - Field extraction
+- `extractWithOCR(cardElement, coords)` - OCR extraction
+- `extractWithCoordinates(cardElement, coords)` - Coordinate extraction
+- `cleanup()` - Release resources
+
+**Extraction Flow**:
+1. Navigate to URL
+2. Find cards using `config.cardPattern.primarySelector`
+3. For each card, extract fields using `config.fields[name].userValidatedMethod`
+4. Apply method-specific extraction (OCR, coordinates, selector, etc.)
+5. Return validated contacts
+
+---
+
+### v2.3 Config Structure
+
+```json
+{
+  "version": "2.3",
+  "selectionMethod": "manual-validated",
+  "name": "example-com",
+  "domain": "example.com",
+  "sourceUrl": "https://example.com/people",
+  "createdAt": "2025-01-01T00:00:00.000Z",
+
+  "cardPattern": {
+    "primarySelector": ".person-card",
+    "sampleDimensions": { "width": 300, "height": 200 },
+    "sampleCoordinates": { "x": 100, "y": 150 }
+  },
+
+  "fields": {
+    "name": {
+      "required": true,
+      "skipped": false,
+      "userValidatedMethod": "coordinate-text",
+      "coordinates": { "x": 10, "y": 20, "width": 150, "height": 30 },
+      "selector": null,
+      "sampleValue": "John Smith",
+      "confidence": 92,
+      "extractionOptions": [],
+      "failedMethods": []
+    },
+    "email": {
+      "required": true,
+      "skipped": false,
+      "userValidatedMethod": "mailto-link",
+      "coordinates": { "x": 10, "y": 60, "width": 200, "height": 25 },
+      "selector": null,
+      "sampleValue": "john@example.com",
+      "confidence": 95,
+      "extractionOptions": [],
+      "failedMethods": []
+    }
+    // ... other fields
+  },
+
+  "pagination": { ... },
+  "extraction": { ... },
+  "options": { ... },
+  "detectionStats": { ... },
+  "notes": [ ... ]
+}
+```
 
 ---
 
@@ -621,6 +885,7 @@ Tests for pagination system including:
 - `puppeteer-extra` - Plugin system
 - `puppeteer-extra-plugin-stealth` - Anti-detection
 - `pdf-parse` - PDF text extraction
+- `tesseract.js` - OCR text extraction (v2.3)
 - `winston` - Logging
 - `commander` - CLI argument parsing
 - `dotenv` - Environment variables
@@ -671,10 +936,13 @@ Always try methods in order of reliability:
 
 ## Common Tasks
 
-### Adding a New Site Config
+### Adding a New Site Config (v2.3)
 1. Run `node src/tools/config-generator.js --url "URL"`
-2. Follow visual prompts
-3. Config saved to `configs/{domain}.json`
+2. Draw rectangle around a contact card
+3. For each field, draw rectangle around the field content
+4. Select the best extraction method from the results
+5. Repeat for all fields (name, email, phone, profileUrl, title, location)
+6. Config saved to `configs/{domain}.json` with v2.3 format
 
 ### Testing a URL
 ```bash
@@ -684,6 +952,17 @@ node tests/scraper-test.js --url "https://example.com/agents"
 ### Scraping with Pagination
 ```bash
 node orchestrator.js --url "URL" --max-pages 50 --format both
+```
+
+### Using v2.3 Visual Scraper
+```javascript
+const VisualScraper = require('./src/scrapers/visual-scraper');
+const config = require('./configs/example-com.json');
+
+const scraper = new VisualScraper(browserManager, logger);
+await scraper.initialize(config);
+const result = await scraper.scrape('https://example.com/people', { limit: 50 });
+await scraper.cleanup();
 ```
 
 ### Debugging

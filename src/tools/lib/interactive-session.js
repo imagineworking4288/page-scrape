@@ -1,5 +1,5 @@
 /**
- * Interactive Session v2.2
+ * Interactive Session v2.3
  *
  * Core workflow orchestrator for the config generator.
  * Manages browser page lifecycle, injects overlay UI, and coordinates
@@ -17,6 +17,12 @@
  * - Profile link disambiguation
  * - User-selected extraction methods with coordinate fallbacks
  * - Field requirements constants
+ *
+ * v2.3 Features:
+ * - Multi-method extraction testing (OCR, coordinate-text, selector, etc.)
+ * - Top 5 results display for user validation
+ * - User-validated extraction methods stored in config
+ * - Foolproof universal scraper approach
  */
 
 const fs = require('fs');
@@ -29,6 +35,9 @@ const CardMatcher = require('./card-matcher');
 const SmartFieldExtractor = require('./smart-field-extractor');
 const EnhancedCapture = require('./enhanced-capture');
 const ElementCapture = require('./element-capture');
+
+// v2.3 modules
+const ExtractionTester = require('./extraction-tester');
 
 class InteractiveSession {
   constructor(browserManager, rateLimiter, logger, configLoader, options = {}) {
@@ -55,10 +64,14 @@ class InteractiveSession {
 
     // v2.1 state
     this.captureData = null;
-    this.configVersion = options.configVersion || '2.2';
+    this.configVersion = options.configVersion || '2.3';
 
     // v2.2 state
     this.manualSelections = null;
+
+    // v2.3 state
+    this.extractionTester = null;
+    this.v23Selections = {};  // Stores user-validated extraction methods
 
     // Helper modules
     this.configBuilder = new ConfigBuilder(logger, { outputDir: options.outputDir || 'configs' });
@@ -322,6 +335,28 @@ class InteractiveSession {
     await this.page.exposeFunction('__configGen_handleFieldRectangle', async (data) => {
       this.logger.info(`[v2.2] Field rectangle selection: ${data.fieldName}`);
       return await this.handleFieldRectangleSelection(data);
+    });
+
+    // ===========================
+    // v2.3 Functions - Multi-Method Extraction Testing
+    // ===========================
+
+    // Test extraction methods for a field rectangle (v2.3)
+    await this.page.exposeFunction('__configGen_testFieldExtraction', async (data) => {
+      this.logger.info(`[v2.3] Testing extraction methods for field: ${data.fieldName}`);
+      return await this.handleTestFieldExtraction(data);
+    });
+
+    // Confirm user-validated extraction result (v2.3)
+    await this.page.exposeFunction('__configGen_confirmFieldExtraction', async (data) => {
+      this.logger.info(`[v2.3] User confirmed extraction for: ${data.fieldName}`);
+      return await this.handleConfirmFieldExtraction(data);
+    });
+
+    // Generate v2.3 config with validated methods
+    await this.page.exposeFunction('__configGen_generateV23Config', async (selections) => {
+      this.logger.info('[v2.3] Generating config with validated extraction methods');
+      return await this.handleGenerateV23Config(selections);
     });
   }
 
@@ -1261,6 +1296,249 @@ class InteractiveSession {
         window.OverlayController.handleBackendMessage(cmd, d);
       }
     }, command, data);
+  }
+
+  // ===========================
+  // v2.3 Extraction Testing Handlers
+  // ===========================
+
+  /**
+   * Initialize the extraction tester (lazy loading)
+   * @returns {ExtractionTester}
+   */
+  async getExtractionTester() {
+    if (!this.extractionTester) {
+      this.extractionTester = new ExtractionTester(this.page);
+      await this.extractionTester.initialize();
+      this.logger.info('[v2.3] Extraction tester initialized');
+    }
+    return this.extractionTester;
+  }
+
+  /**
+   * Test multiple extraction methods for a field
+   * @param {Object} data - { fieldName, box: { x, y, width, height } }
+   * @returns {Promise<Object>} - Results with top 5 methods
+   */
+  async handleTestFieldExtraction(data) {
+    const { fieldName, box } = data;
+    this.logger.info(`[v2.3] Testing extraction methods for ${fieldName}...`);
+
+    try {
+      // Get card element from the reference box
+      if (!this.matchResult || !this.matchResult.selector) {
+        throw new Error('No card selector available');
+      }
+
+      // Get the first card element
+      const cardElement = await this.page.$(this.matchResult.selector);
+      if (!cardElement) {
+        throw new Error('Card element not found');
+      }
+
+      // Get card bounding box to calculate relative coordinates
+      const cardBox = await cardElement.boundingBox();
+      if (!cardBox) {
+        throw new Error('Card has no bounding box');
+      }
+
+      // Calculate relative coordinates (field position relative to card)
+      const relativeCoords = {
+        x: box.x - cardBox.x,
+        y: box.y - cardBox.y,
+        width: box.width,
+        height: box.height
+      };
+
+      this.logger.info(`[v2.3] Card at (${cardBox.x}, ${cardBox.y}), field relative coords: ${JSON.stringify(relativeCoords)}`);
+
+      // Get extraction tester and run tests
+      const tester = await this.getExtractionTester();
+      const testResult = await tester.testField(fieldName, cardElement, relativeCoords);
+
+      // Format results for UI
+      const formattedResults = tester.formatForUI(testResult, fieldName);
+
+      // Prepare response for overlay
+      const response = {
+        success: true,
+        fieldName: fieldName,
+        coordinates: relativeCoords,
+        results: formattedResults.results,
+        failedMethods: formattedResults.failedMethods,
+        totalMethodsTested: formattedResults.totalMethodsTested,
+        hasGoodResult: formattedResults.hasGoodResult
+      };
+
+      this.logger.info(`[v2.3] Extraction test complete: ${testResult.results.length} results, ${testResult.failedMethods.length} failed`);
+
+      // Send results to overlay
+      await this.page.evaluate((res) => {
+        if (window.handleExtractionResults) {
+          window.handleExtractionResults(res);
+        }
+      }, response);
+
+      return response;
+
+    } catch (error) {
+      this.logger.error(`[v2.3] Extraction test failed: ${error.message}`);
+
+      const errorResponse = {
+        success: false,
+        fieldName: fieldName,
+        error: error.message
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleExtractionResults) {
+          window.handleExtractionResults(res);
+        }
+      }, errorResponse);
+
+      return errorResponse;
+    }
+  }
+
+  /**
+   * Handle user confirmation of an extraction result
+   * @param {Object} data - { fieldName, selectedResult, coordinates }
+   * @returns {Promise<Object>}
+   */
+  async handleConfirmFieldExtraction(data) {
+    const { fieldName, selectedResult, coordinates } = data;
+
+    this.logger.info(`[v2.3] User confirmed ${fieldName}: method=${selectedResult.method}, value="${selectedResult.value}"`);
+
+    // Store the validated selection
+    this.v23Selections[fieldName] = {
+      userValidatedMethod: selectedResult.method,
+      value: selectedResult.value,
+      confidence: selectedResult.confidence,
+      coordinates: coordinates,
+      metadata: selectedResult.metadata
+    };
+
+    return {
+      success: true,
+      fieldName: fieldName,
+      stored: true
+    };
+  }
+
+  /**
+   * Generate v2.3 config with user-validated extraction methods
+   * @param {Object} selections - Field selections with validated methods
+   * @returns {Promise<Object>}
+   */
+  async handleGenerateV23Config(selections) {
+    this.logger.info('[v2.3] Generating config with validated extraction methods...');
+
+    try {
+      if (!this.matchResult) {
+        throw new Error('No card selection available');
+      }
+
+      // Import config schema functions
+      const { createConfigV23, validateConfigV23 } = require('./config-schemas');
+
+      // Create base config
+      const config = createConfigV23({
+        testSite: this.testUrl,
+        domain: this.domain,
+        name: this.domain.replace(/\./g, '-'),
+        cardSelector: this.matchResult.selector,
+        sampleDimensions: {
+          width: this.matchResult.referenceBox?.width || 0,
+          height: this.matchResult.referenceBox?.height || 0
+        },
+        sampleCoordinates: {
+          x: this.matchResult.referenceBox?.x || 0,
+          y: this.matchResult.referenceBox?.y || 0
+        }
+      });
+
+      // Populate field data from validated selections
+      for (const [fieldName, fieldData] of Object.entries(selections)) {
+        if (config.fields[fieldName]) {
+          config.fields[fieldName] = {
+            required: config.fields[fieldName].required,
+            skipped: !fieldData.value,
+            userValidatedMethod: fieldData.userValidatedMethod || fieldData.method,
+            coordinates: fieldData.coordinates || { x: 0, y: 0, width: 0, height: 0 },
+            selector: fieldData.selector || null,
+            sampleValue: fieldData.value,
+            confidence: fieldData.confidence || 0,
+            extractionOptions: [],  // Could store all tested options here
+            failedMethods: []
+          };
+        }
+      }
+
+      // Validate config
+      const validation = validateConfigV23(config);
+
+      if (!validation.valid) {
+        this.logger.warn(`[v2.3] Config validation errors: ${validation.errors.join(', ')}`);
+      }
+
+      if (validation.warnings.length > 0) {
+        this.logger.warn(`[v2.3] Config validation warnings: ${validation.warnings.join(', ')}`);
+      }
+
+      // Save config
+      const configPath = this.configBuilder.saveConfig(config, this.options.outputDir);
+
+      this.logger.info(`[v2.3] Config saved to: ${configPath}`);
+      this.logger.info(`[v2.3] Config score: ${validation.score}/100`);
+
+      // Send result to overlay
+      const result = {
+        success: true,
+        configPath: configPath,
+        configName: config.name,
+        configVersion: config.version,
+        validation: validation
+      };
+
+      await this.page.evaluate((res) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete(res);
+        }
+      }, result);
+
+      // Mark session complete
+      this.sessionComplete = true;
+      this.sessionResult = {
+        success: true,
+        configPath: configPath,
+        config: config,
+        validation: validation
+      };
+
+      if (this.resolveSession) {
+        this.resolveSession(this.sessionResult);
+      }
+
+      // Cleanup extraction tester
+      if (this.extractionTester) {
+        await this.extractionTester.terminate();
+        this.extractionTester = null;
+      }
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[v2.3] Config generation failed: ${error.message}`);
+
+      await this.page.evaluate((err) => {
+        if (window.handleConfigComplete) {
+          window.handleConfigComplete({ success: false, error: err });
+        }
+      }, error.message);
+
+      return { success: false, error: error.message };
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * Visual Card Scraper - Overlay Client Script v2.2
+ * Visual Card Scraper - Overlay Client Script v2.3
  *
  * This script runs in the browser context and handles:
  * - Rectangle selection for card detection
@@ -8,13 +8,14 @@
  * - Communication with Node.js backend
  * - v2.2: Manual field selection with click mode
  * - v2.2: Profile link disambiguation modal
+ * - v2.3: Multi-method extraction testing with user validation
  */
 
 (function() {
   'use strict';
 
   // ===========================
-  // CONSTANTS (v2.2)
+  // CONSTANTS (v2.3)
   // ===========================
 
   const FIELD_ORDER = ['name', 'email', 'phone', 'profileUrl', 'title', 'location'];
@@ -80,6 +81,7 @@
     PREVIEW: 'PREVIEW',
     MANUAL_SELECTION: 'MANUAL_SELECTION',
     FIELD_RECTANGLE_SELECTION: 'FIELD_RECTANGLE_SELECTION',  // v2.2: Rectangle selection for fields
+    EXTRACTION_RESULTS: 'EXTRACTION_RESULTS',  // v2.3: Showing extraction method results
     LINK_DISAMBIGUATION: 'LINK_DISAMBIGUATION',
     GENERATING: 'GENERATING',
     COMPLETE: 'COMPLETE'
@@ -120,7 +122,13 @@
     // v2.2: Link disambiguation state
     pendingLinks: [],              // Links found when clicking for profileUrl
     selectedLinkIndex: -1,         // Index of selected link in modal
-    personName: null               // Name for matching profile links
+    personName: null,              // Name for matching profile links
+
+    // v2.3: Extraction results state
+    extractionResults: [],         // Array of extraction method results
+    failedMethods: [],             // Methods that failed
+    selectedResultIndex: -1,       // User's selected extraction result
+    currentFieldCoords: null       // Current field coordinates being tested
   };
 
   // DOM Elements
@@ -212,7 +220,8 @@
       'progressPanel',
       'completePanel',
       'previewPanel',    // v2.2
-      'manualPanel'      // v2.2
+      'manualPanel',     // v2.2
+      'extractionResultsPanel'  // v2.3
     ];
     panels.forEach(id => {
       const panel = document.getElementById(id);
@@ -1746,6 +1755,238 @@
     state.pendingLinks = [];
     state.selectedLinkIndex = -1;
   }
+
+  // ===========================
+  // v2.3: EXTRACTION RESULTS FUNCTIONS
+  // ===========================
+
+  /**
+   * Handle extraction results from backend
+   * Called by backend via page.evaluate after testing all extraction methods
+   */
+  window.handleExtractionResults = function(result) {
+    console.log('[ConfigGen v2.3] Extraction results:', result);
+
+    if (!result.success) {
+      showErrorFeedback(result.error || 'Extraction testing failed');
+      return;
+    }
+
+    const fieldName = result.fieldName;
+    state.extractionResults = result.results || [];
+    state.failedMethods = result.failedMethods || [];
+    state.selectedResultIndex = -1;
+    state.currentFieldCoords = result.coordinates;
+
+    // Show extraction results panel
+    buildExtractionResultsPanel(fieldName, result);
+    state.currentState = STATES.EXTRACTION_RESULTS;
+    showPanel('extractionResultsPanel');
+  };
+
+  /**
+   * Build the extraction results panel showing top 5 methods
+   */
+  function buildExtractionResultsPanel(fieldName, result) {
+    const meta = FIELD_METADATA[fieldName];
+
+    // Update header
+    const headerEl = document.getElementById('extractionResultsHeader');
+    if (headerEl) {
+      headerEl.innerHTML = `
+        <h3>Select Best Result for ${meta.label.toUpperCase()}</h3>
+        <p class="extraction-hint">${result.totalMethodsTested} methods tested, ${state.extractionResults.length} returned values</p>
+      `;
+    }
+
+    // Build results list
+    const container = document.getElementById('extractionResultsList');
+    if (!container) {
+      console.error('[v2.3] extractionResultsList container not found');
+      return;
+    }
+    container.innerHTML = '';
+
+    if (state.extractionResults.length === 0) {
+      container.innerHTML = `
+        <div class="no-results-message">
+          <p>No extraction methods found valid data for this field.</p>
+          <p>Try selecting a different area or skip this field.</p>
+        </div>
+      `;
+      return;
+    }
+
+    state.extractionResults.forEach((r, index) => {
+      const resultItem = document.createElement('div');
+      resultItem.className = 'extraction-result-item';
+      resultItem.dataset.index = index;
+      resultItem.onclick = () => selectExtractionResult(index);
+
+      // Confidence indicator
+      const confidenceClass = r.confidence >= 90 ? 'high' :
+                              r.confidence >= 70 ? 'medium' : 'low';
+
+      resultItem.innerHTML = `
+        <div class="result-radio">
+          <input type="radio" name="extractionResult" id="result${index}" ${index === 0 && r.confidence >= 70 ? 'checked' : ''}>
+        </div>
+        <div class="result-content">
+          <div class="result-value">${escapeHtml(truncate(r.value, 60))}</div>
+          <div class="result-method">${escapeHtml(r.methodLabel || r.method)}</div>
+        </div>
+        <div class="result-confidence ${confidenceClass}">
+          <span class="confidence-value">${r.confidence}%</span>
+          ${index === 0 && r.confidence >= 70 ? '<span class="recommended-badge">Recommended</span>' : ''}
+        </div>
+      `;
+
+      container.appendChild(resultItem);
+
+      // Auto-select first high-confidence result
+      if (index === 0 && r.confidence >= 70) {
+        state.selectedResultIndex = 0;
+        resultItem.classList.add('selected');
+      }
+    });
+
+    // Show failed methods section if any
+    buildFailedMethodsSection();
+
+    // Update confirm button state
+    updateExtractionConfirmButton();
+  }
+
+  /**
+   * Build the failed methods collapsible section
+   */
+  function buildFailedMethodsSection() {
+    const container = document.getElementById('failedMethodsSection');
+    if (!container) return;
+
+    if (state.failedMethods.length === 0) {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'block';
+    container.innerHTML = `
+      <details class="failed-methods-details">
+        <summary>Failed Methods (${state.failedMethods.length})</summary>
+        <ul class="failed-methods-list">
+          ${state.failedMethods.map(f => `
+            <li><span class="failed-method-name">${escapeHtml(f.method)}</span>: ${escapeHtml(f.reason)}</li>
+          `).join('')}
+        </ul>
+      </details>
+    `;
+  }
+
+  /**
+   * Select an extraction result
+   */
+  function selectExtractionResult(index) {
+    state.selectedResultIndex = index;
+
+    // Update visual selection
+    const items = document.querySelectorAll('.extraction-result-item');
+    items.forEach((item, i) => {
+      item.classList.toggle('selected', i === index);
+      const radio = item.querySelector('input[type="radio"]');
+      if (radio) radio.checked = (i === index);
+    });
+
+    updateExtractionConfirmButton();
+  }
+
+  /**
+   * Update confirm button state
+   */
+  function updateExtractionConfirmButton() {
+    const btn = document.getElementById('confirmExtractionBtn');
+    if (btn) {
+      btn.disabled = state.selectedResultIndex < 0;
+    }
+  }
+
+  /**
+   * Confirm selected extraction result
+   */
+  window.confirmExtractionResult = function() {
+    if (state.selectedResultIndex < 0) {
+      showToast('Please select an extraction method', 'warning');
+      return;
+    }
+
+    const selectedResult = state.extractionResults[state.selectedResultIndex];
+    const fieldName = state.currentField;
+
+    console.log(`[ConfigGen v2.3] Confirmed extraction for ${fieldName}:`, selectedResult);
+
+    // Store the validated selection
+    const captureData = {
+      value: selectedResult.value,
+      userValidatedMethod: selectedResult.method,
+      coordinates: state.currentFieldCoords,
+      confidence: selectedResult.confidence,
+      metadata: selectedResult.metadata,
+      source: 'v2.3-validated'
+    };
+
+    state.pendingFieldCapture = captureData;
+    state.manualSelections[fieldName] = captureData;
+
+    console.log('[v2.3] Stored validated field:', fieldName, captureData.value);
+
+    // Show success feedback
+    showCapturedFeedback(selectedResult.value);
+
+    // Update field completion UI
+    updateFieldCompletionUI();
+
+    // Return to field selection state
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
+    showPanel('manualPanel');
+
+    // Disable selector after successful capture
+    disableSelector();
+  };
+
+  /**
+   * Retry field selection (reselect area)
+   */
+  window.retryFieldExtraction = function() {
+    console.log('[ConfigGen v2.3] Retrying field extraction');
+    state.extractionResults = [];
+    state.failedMethods = [];
+    state.selectedResultIndex = -1;
+
+    // Return to field selection
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
+    showPanel('manualPanel');
+    resetFeedbackSection();
+  };
+
+  /**
+   * Skip current field from extraction results view
+   */
+  window.skipFieldFromResults = function() {
+    const fieldName = state.currentField;
+    const meta = FIELD_METADATA[fieldName];
+
+    if (meta.required) {
+      showToast(`${meta.label} is required and cannot be skipped`, 'warning');
+      return;
+    }
+
+    console.log(`[ConfigGen v2.3] Skipping field from results: ${fieldName}`);
+    delete state.manualSelections[fieldName];
+
+    // Move to next field
+    state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
+    showPanel('manualPanel');
+    showFieldPrompt(state.currentFieldIndex + 1);
+  };
 
   // ===========================
   // v2.2: VALIDATION FUNCTIONS
