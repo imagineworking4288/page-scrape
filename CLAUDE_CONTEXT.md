@@ -595,26 +595,33 @@ v2.3 supports 15 extraction methods organized by field applicability:
 
 **Purpose**: OCR-based text extraction using Tesseract.js.
 
-**Dependencies**: `tesseract.js`, `fs`
+**Dependencies**: `tesseract.js`
 
-**Cache Configuration**: Uses `.cache/tesseract/` directory for Tesseract language data to avoid polluting project root.
+**Cache Configuration**: Uses Tesseract.js default cache location (`node_modules/.cache/`) for better Windows compatibility.
 
 **Key Methods**:
-- `initialize()` - Create Tesseract worker with cache directory
-- `terminate()` - Cleanup worker
-- `ensureCacheDir()` - Create cache directory if needed
+- `initialize()` - Create Tesseract worker with default cache and error handling
+- `terminate()` - Cleanup worker gracefully
 - `extractFromRegion(cardElement, fieldCoords)` - Extract text from region
 - `captureRegionScreenshot(coords)` - Screenshot specific area
 - `runOCR(imageBuffer)` - Run Tesseract on image
-- `cleanText(text)` - Remove OCR artifacts
+- `cleanText(text)` - Remove OCR artifacts and non-printable characters
 - `calculateConfidence(ocrResult, cleanedText)` - Score result
 
 **Tesseract Worker Config**:
 ```javascript
+// Uses Tesseract.js default cache for cross-platform reliability
 this.worker = await Tesseract.createWorker('eng', 1, {
-  cachePath: this.cacheDir,      // .cache/tesseract/
-  langPath: this.cacheDir,       // .cache/tesseract/
-  logger: m => { /* progress */ }
+  errorHandler: (err) => {
+    console.error('[ScreenshotExtractor] Worker error:', err);
+  },
+  logger: (m) => {
+    // Log important milestones only
+    if (m.status === 'loading language traineddata' ||
+        m.status === 'initialized api') {
+      console.log(`[ScreenshotExtractor] ${m.status}`);
+    }
+  }
 });
 ```
 

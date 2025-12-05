@@ -6,6 +6,11 @@ output
 configs/sullcrom-lawyerlisting.backup-1764661986006.json
 configs/sullcrom-lawyerlisting.json
 
-# Tesseract OCR cache
-.cache/
+# Tesseract OCR cache (default location in node_modules)
+node_modules/.cache/
+
+# Alternative: ignore all .traineddata files anywhere
 *.traineddata
+
+# Custom cache directory (if used)
+.cache/

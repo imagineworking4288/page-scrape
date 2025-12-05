@@ -1543,3 +1543,52 @@ class InteractiveSession {
 }
 
 module.exports = InteractiveSession;
+
+// Graceful shutdown handlers for cleanup
+let activeSession = null;
+
+// Track active session for cleanup
+InteractiveSession.setActiveSession = function(session) {
+  activeSession = session;
+};
+
+InteractiveSession.clearActiveSession = function() {
+  activeSession = null;
+};
+
+// Cleanup function
+async function cleanupResources() {
+  if (activeSession && activeSession.extractionTester) {
+    try {
+      console.log('[InteractiveSession] Cleaning up extraction tester...');
+      await activeSession.extractionTester.terminate();
+    } catch (error) {
+      console.error('[InteractiveSession] Error during cleanup:', error.message);
+    }
+  }
+}
+
+// Handle process signals for graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n[InteractiveSession] Received SIGINT, cleaning up...');
+  await cleanupResources();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('[InteractiveSession] Received SIGTERM, cleaning up...');
+  await cleanupResources();
+  process.exit(0);
+});
+
+process.on('uncaughtException', async (error) => {
+  console.error('[InteractiveSession] Uncaught exception:', error.message);
+  await cleanupResources();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.error('[InteractiveSession] Unhandled rejection:', reason);
+  await cleanupResources();
+  process.exit(1);
+});

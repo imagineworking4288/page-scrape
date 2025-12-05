@@ -2,61 +2,59 @@
  * Screenshot Extractor v2.3
  *
  * Uses Tesseract.js for OCR-based text extraction from page regions.
- * Takes screenshots of specific coordinates and extracts text using OCR.
+ * Simplified initialization without custom cache paths to avoid Windows issues.
  */
 
 const Tesseract = require('tesseract.js');
-const path = require('path');
-const fs = require('fs');
 
 class ScreenshotExtractor {
   constructor(page) {
     this.page = page;
     this.worker = null;
     this.initialized = false;
-
-    // Configure cache directory for Tesseract language data
-    this.cacheDir = path.join(process.cwd(), '.cache', 'tesseract');
   }
 
   /**
-   * Ensure cache directory exists
-   */
-  ensureCacheDir() {
-    if (!fs.existsSync(this.cacheDir)) {
-      fs.mkdirSync(this.cacheDir, { recursive: true });
-      console.log('[ScreenshotExtractor] Created cache directory:', this.cacheDir);
-    }
-  }
-
-  /**
-   * Initialize Tesseract worker
+   * Initialize Tesseract worker with proper error handling
+   * Uses default cache location to avoid path issues
    */
   async initialize() {
-    if (this.initialized) return;
+    if (this.initialized && this.worker) {
+      console.log('[ScreenshotExtractor] Worker already initialized');
+      return;
+    }
 
     try {
-      // Ensure cache directory exists before initializing
-      this.ensureCacheDir();
+      console.log('[ScreenshotExtractor] Initializing Tesseract worker...');
 
-      // Create worker with cache path configuration
+      // Use default Tesseract.js cache location (node_modules/.cache)
+      // This is more reliable across platforms than custom paths
       this.worker = await Tesseract.createWorker('eng', 1, {
-        cachePath: this.cacheDir,
-        langPath: this.cacheDir,
-        logger: m => {
-          // Only log important messages
+        errorHandler: (err) => {
+          console.error('[ScreenshotExtractor] Worker error:', err);
+        },
+        logger: (m) => {
+          // Only log important milestones
           if (m.status === 'loading language traineddata' ||
               m.status === 'initialized api') {
             console.log(`[ScreenshotExtractor] ${m.status}`);
+          } else if (m.status === 'recognizing text' && m.progress > 0) {
+            const pct = Math.round(m.progress * 100);
+            if (pct % 25 === 0) {
+              console.log(`[ScreenshotExtractor] OCR progress: ${pct}%`);
+            }
           }
         }
       });
 
       this.initialized = true;
-      console.log('[ScreenshotExtractor] Tesseract worker initialized with cache:', this.cacheDir);
+      console.log('[ScreenshotExtractor] Tesseract worker initialized successfully');
+
     } catch (error) {
       console.error('[ScreenshotExtractor] Failed to initialize Tesseract:', error.message);
-      throw error;
+      console.error('[ScreenshotExtractor] Error stack:', error.stack);
+      this.initialized = false;
+      throw new Error(`Tesseract initialization failed: ${error.message}`);
     }
   }
 
@@ -65,10 +63,15 @@ class ScreenshotExtractor {
    */
   async terminate() {
     if (this.worker) {
-      await this.worker.terminate();
-      this.worker = null;
-      this.initialized = false;
-      console.log('[ScreenshotExtractor] Tesseract worker terminated');
+      try {
+        console.log('[ScreenshotExtractor] Terminating Tesseract worker...');
+        await this.worker.terminate();
+        this.worker = null;
+        this.initialized = false;
+        console.log('[ScreenshotExtractor] Tesseract worker terminated successfully');
+      } catch (error) {
+        console.error('[ScreenshotExtractor] Error terminating worker:', error.message);
+      }
     }
   }
 
@@ -81,6 +84,17 @@ class ScreenshotExtractor {
   async extractFromRegion(cardElement, fieldCoords) {
     if (!this.initialized) {
       await this.initialize();
+    }
+
+    if (!this.worker) {
+      return {
+        value: null,
+        confidence: 0,
+        metadata: {
+          method: 'screenshot-ocr',
+          error: 'Tesseract worker not available'
+        }
+      };
     }
 
     try {
@@ -107,6 +121,8 @@ class ScreenshotExtractor {
         height: absoluteCoords.height + (padding * 2)
       };
 
+      console.log(`[ScreenshotExtractor] Capturing region: x=${Math.round(captureCoords.x)}, y=${Math.round(captureCoords.y)}, w=${Math.round(captureCoords.width)}, h=${Math.round(captureCoords.height)}`);
+
       // Capture screenshot of the region
       const screenshot = await this.captureRegionScreenshot(captureCoords);
 
@@ -116,6 +132,8 @@ class ScreenshotExtractor {
       // Clean and process the text
       const cleanedText = this.cleanText(ocrResult.text);
       const confidence = this.calculateConfidence(ocrResult, cleanedText);
+
+      console.log(`[ScreenshotExtractor] OCR extracted: "${cleanedText}" (confidence: ${confidence}%)`);
 
       return {
         value: cleanedText,
@@ -201,6 +219,8 @@ class ScreenshotExtractor {
       .replace(/\s+/g, ' ')
       // Remove common OCR artifacts
       .replace(/[|]/g, '')
+      // Remove non-printable characters
+      .replace(/[^\x20-\x7E]/g, '')
       // Trim
       .trim();
   }

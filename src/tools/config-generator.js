@@ -111,6 +111,9 @@ async function main() {
       verbose: options.verbose
     });
 
+    // Register session for cleanup on shutdown
+    InteractiveSession.setActiveSession(session);
+
     // Run interactive session
     logger.info('Starting interactive session...');
     logger.info('Follow the on-screen instructions in the browser window.');
@@ -126,6 +129,9 @@ async function main() {
     console.log('');
 
     const result = await session.start(options.url);
+
+    // Clear active session reference
+    InteractiveSession.clearActiveSession();
 
     // Close browser
     await browserManager.close();
