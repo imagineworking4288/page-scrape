@@ -128,7 +128,20 @@
     extractionResults: [],         // Array of extraction method results
     failedMethods: [],             // Methods that failed
     selectedResultIndex: -1,       // User's selected extraction result
-    currentFieldCoords: null       // Current field coordinates being tested
+    currentFieldCoords: null,      // Current field coordinates being tested
+    lastFieldAbsoluteBox: null,    // Last field's absolute viewport coordinates (for v2.3 extraction testing)
+
+    // v2.3: Field validation progress tracking
+    fieldProgress: {               // Track which fields have been validated
+      name: false,
+      email: false,
+      phone: false,
+      title: false,
+      location: false,
+      profileUrl: false
+    },
+    v23RequiredFields: ['name', 'email', 'profileUrl'],  // Required for config generation
+    v23OptionalFields: ['phone', 'title', 'location']    // Optional fields
   };
 
   // DOM Elements
@@ -1462,6 +1475,9 @@
     const fieldName = state.currentField;
     console.log(`[ConfigGen v2.2] Processing field rectangle for ${fieldName}:`, box);
 
+    // Store the absolute box for v2.3 extraction testing
+    state.lastFieldAbsoluteBox = box;
+
     try {
       // Send to backend for extraction
       if (typeof __configGen_handleFieldRectangle === 'function') {
@@ -1483,7 +1499,7 @@
    * Called by backend via page.evaluate
    */
   window.handleFieldRectangleResult = function(result) {
-    console.log('[ConfigGen v2.2] Field rectangle result:', result);
+    console.log('[ConfigGen v2.3] Field rectangle result:', result);
 
     if (!result.success) {
       showErrorFeedback(result.error || 'Could not extract field value');
@@ -1492,37 +1508,101 @@
 
     const fieldName = result.fieldName;
 
-    // Special handling for profileUrl - may need disambiguation
-    if (fieldName === 'profileUrl' && result.links && result.links.length > 1) {
-      // Multiple links found - show disambiguation
-      handleProfileUrlDisambiguation(result.links);
+    // ===========================
+    // v2.3: ALL FIELDS - MULTI-METHOD EXTRACTION
+    // ===========================
+    // Trigger v2.3 multi-method extraction testing for ALL fields
+    // This tests multiple extraction methods and lets user validate the best one
+    console.log(`[ConfigGen v2.3] ${fieldName.toUpperCase()} field detected - triggering multi-method extraction`);
+    triggerV23Extraction(fieldName, result);
+  };
+
+  /**
+   * v2.3: Trigger multi-method extraction testing for a field
+   * This calls the backend to test all applicable extraction methods
+   * @param {string} fieldName - Field to test (e.g., 'name')
+   * @param {Object} rectangleResult - Result from handleFieldRectangle with coordinates
+   */
+  async function triggerV23Extraction(fieldName, rectangleResult) {
+    console.log(`[ConfigGen v2.3] Triggering extraction for ${fieldName}`);
+    console.log('[ConfigGen v2.3] Rectangle result:', rectangleResult);
+
+    // Show progress feedback while testing
+    const section = document.getElementById('feedbackSection');
+    if (section) {
+      section.className = 'feedback-section';
+      section.innerHTML = `
+        <div class="waiting-indicator">
+          <span class="pulse">●</span> Testing extraction methods...
+        </div>
+      `;
+    }
+
+    // Store relative coordinates for later use (these will be stored in config)
+    state.currentFieldCoords = rectangleResult.coordinates;
+
+    // Use the stored absolute box for backend testing (backend calculates relative internally)
+    const absoluteBox = state.lastFieldAbsoluteBox;
+    if (!absoluteBox) {
+      console.error('[ConfigGen v2.3] No absolute box stored, falling back to v2.2');
+      fallbackToV22(fieldName, rectangleResult);
       return;
     }
 
-    // Create capture data object
+    // Prepare test data for backend - send ABSOLUTE box coordinates
+    // The backend handleTestFieldExtraction expects absolute viewport coordinates
+    // and will calculate relative coordinates using the card's bounding box
+    const testData = {
+      fieldName: fieldName,
+      box: absoluteBox,  // Absolute viewport coordinates
+      cardSelector: rectangleResult.cardSelector || state.previewData?.cardSelector,
+      // Include the initial extraction for reference
+      initialValue: rectangleResult.value,
+      initialMethod: 'coordinate-text'
+    };
+
+    console.log('[ConfigGen v2.3] Test data with absolute box:', testData);
+
+    try {
+      // Call backend to test all extraction methods
+      if (typeof __configGen_testFieldExtraction === 'function') {
+        console.log('[ConfigGen v2.3] Calling __configGen_testFieldExtraction...');
+        await __configGen_testFieldExtraction(testData);
+        // Backend will call window.handleExtractionResults when done
+      } else {
+        console.warn('[ConfigGen v2.3] __configGen_testFieldExtraction not available, falling back to v2.2');
+        // Fallback: use the v2.2 workflow
+        fallbackToV22(fieldName, rectangleResult);
+      }
+    } catch (error) {
+      console.error('[ConfigGen v2.3] Extraction test failed:', error);
+      showErrorFeedback('Extraction testing failed: ' + error.message);
+      // Fallback to v2.2 workflow on error
+      fallbackToV22(fieldName, rectangleResult);
+    }
+  }
+
+  /**
+   * v2.3: Fallback to v2.2 workflow when v2.3 backend is not available
+   */
+  function fallbackToV22(fieldName, rectangleResult) {
+    console.log(`[ConfigGen v2.3] Falling back to v2.2 workflow for ${fieldName}`);
+
     const captureData = {
-      value: result.value,
-      selector: result.selector,
-      coordinates: result.coordinates,
-      element: result.element,
+      value: rectangleResult.value,
+      selector: rectangleResult.selector,
+      coordinates: rectangleResult.coordinates,
+      element: rectangleResult.element,
       source: 'manual',
       confidence: 1.0
     };
 
-    // Store the capture in both places for reliable access
     state.pendingFieldCapture = captureData;
-
-    // CRITICAL: Store directly in manualSelections for persistence
     state.manualSelections[fieldName] = captureData;
-    console.log('[v2.2] Stored field in manualSelections:', fieldName, state.manualSelections[fieldName]);
-    console.log('[v2.2] Current manualSelections:', Object.keys(state.manualSelections));
 
-    // Show success feedback
-    showCapturedFeedback(result.value);
-
-    // Update field completion UI
+    showCapturedFeedback(rectangleResult.value);
     updateFieldCompletionUI();
-  };
+  }
 
   /**
    * Handle profile URL disambiguation when multiple links found
@@ -1927,6 +2007,7 @@
     const captureData = {
       value: selectedResult.value,
       userValidatedMethod: selectedResult.method,
+      methodLabel: selectedResult.methodLabel,
       coordinates: state.currentFieldCoords,
       confidence: selectedResult.confidence,
       metadata: selectedResult.metadata,
@@ -1936,13 +2017,18 @@
     state.pendingFieldCapture = captureData;
     state.manualSelections[fieldName] = captureData;
 
+    // Mark field as validated in progress tracker
+    state.fieldProgress[fieldName] = true;
+
     console.log('[v2.3] Stored validated field:', fieldName, captureData.value);
+    console.log('[v2.3] Field progress:', state.fieldProgress);
 
     // Show success feedback
     showCapturedFeedback(selectedResult.value);
 
-    // Update field completion UI
+    // Update field completion UI and finish button state
     updateFieldCompletionUI();
+    updateFinishButtonStateV23();
 
     // Return to field selection state
     state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
@@ -1951,6 +2037,39 @@
     // Disable selector after successful capture
     disableSelector();
   };
+
+  /**
+   * Update finish button state based on v2.3 field validation progress
+   */
+  function updateFinishButtonStateV23() {
+    const finishBtn = document.getElementById('finishManualBtn');
+    if (!finishBtn) return;
+
+    // Check if all required fields are validated
+    const requiredComplete = state.v23RequiredFields.every(field =>
+      state.fieldProgress[field] === true
+    );
+
+    // Count completed fields
+    const completedCount = Object.values(state.fieldProgress).filter(Boolean).length;
+    const totalFields = Object.keys(state.fieldProgress).length;
+
+    if (requiredComplete) {
+      finishBtn.disabled = false;
+      finishBtn.classList.add('ready');
+      finishBtn.title = `Generate config (${completedCount}/${totalFields} fields validated)`;
+    } else {
+      finishBtn.disabled = true;
+      finishBtn.classList.remove('ready');
+
+      const missing = state.v23RequiredFields.filter(f => !state.fieldProgress[f]);
+      const missingLabels = missing.map(f => FIELD_METADATA[f]?.label || f).join(', ');
+      finishBtn.title = `Complete required fields: ${missingLabels}`;
+    }
+
+    console.log('[v2.3] Finish button state - required complete:', requiredComplete,
+                'completed:', completedCount, '/', totalFields);
+  }
 
   /**
    * Retry field selection (reselect area)
@@ -2117,36 +2236,92 @@
   }
 
   // ===========================
-  // v2.2: CONFIG GENERATION WITH SELECTIONS
+  // v2.2/v2.3: CONFIG GENERATION WITH SELECTIONS
   // ===========================
 
   /**
+   * Check if any field has a v2.3 user-validated method
+   * @returns {boolean}
+   */
+  function hasV23ValidatedFields() {
+    if (!state.manualSelections) return false;
+    return Object.values(state.manualSelections).some(
+      field => field.userValidatedMethod || field.source === 'v2.3-validated'
+    );
+  }
+
+  /**
    * Generate config with manual selections
+   * Automatically detects v2.3 workflow and uses appropriate backend method
    */
   function confirmAndGenerateWithSelections() {
-    console.log('[v2.2-DEBUG] ========================================');
-    console.log('[v2.2-DEBUG] CONFIRM AND GENERATE WITH SELECTIONS');
-    console.log('[v2.2-DEBUG] ========================================');
-    console.log('[v2.2-DEBUG] Manual selections to send:', JSON.stringify(state.manualSelections, null, 2));
+    console.log('[v2.2/v2.3-DEBUG] ========================================');
+    console.log('[v2.2/v2.3-DEBUG] CONFIRM AND GENERATE WITH SELECTIONS');
+    console.log('[v2.2/v2.3-DEBUG] ========================================');
+    console.log('[v2.2/v2.3-DEBUG] Manual selections to send:', JSON.stringify(state.manualSelections, null, 2));
 
     // Verify we have selections
     const fieldCount = Object.keys(state.manualSelections).length;
-    console.log('[v2.2-DEBUG] Field count:', fieldCount);
+    console.log('[v2.2/v2.3-DEBUG] Field count:', fieldCount);
 
     if (fieldCount === 0) {
-      console.error('[v2.2-DEBUG] ERROR: No fields captured in manualSelections!');
+      console.error('[v2.2/v2.3-DEBUG] ERROR: No fields captured in manualSelections!');
       showToast('No fields captured. Please capture at least the required fields.', 'error');
       showPanel('manualPanel');
       return;
     }
 
-    console.log(`[v2.2-DEBUG] Sending ${fieldCount} fields to backend for config generation`);
+    // Check if any field was validated through v2.3 workflow
+    const useV23 = hasV23ValidatedFields();
+    console.log('[v2.2/v2.3-DEBUG] Has v2.3 validated fields:', useV23);
+
+    console.log(`[v2.2/v2.3-DEBUG] Sending ${fieldCount} fields to backend for config generation`);
 
     // Check backend function availability
-    console.log('[v2.2-DEBUG] __configGen_confirmWithSelections exists:', typeof __configGen_confirmWithSelections === 'function');
-    console.log('[v2.2-DEBUG] __configGen_confirmAndGenerate exists:', typeof __configGen_confirmAndGenerate === 'function');
+    console.log('[v2.2/v2.3-DEBUG] __configGen_generateV23Config exists:', typeof __configGen_generateV23Config === 'function');
+    console.log('[v2.2/v2.3-DEBUG] __configGen_confirmWithSelections exists:', typeof __configGen_confirmWithSelections === 'function');
+    console.log('[v2.2/v2.3-DEBUG] __configGen_confirmAndGenerate exists:', typeof __configGen_confirmAndGenerate === 'function');
 
-    // Call backend with selections
+    // Use v2.3 backend if any field was validated through v2.3 workflow
+    if (useV23 && typeof __configGen_generateV23Config === 'function') {
+      console.log('[v2.3-DEBUG] Using v2.3 config generation with validated methods...');
+      console.log('[v2.3-DEBUG] Selections being sent:', state.manualSelections);
+
+      try {
+        __configGen_generateV23Config(state.manualSelections)
+          .then(result => {
+            console.log('[v2.3-DEBUG] ========================================');
+            console.log('[v2.3-DEBUG] V2.3 BACKEND PROMISE RESOLVED');
+            console.log('[v2.3-DEBUG] ========================================');
+            console.log('[v2.3-DEBUG] Backend returned:', result);
+            console.log('[v2.3-DEBUG] Result success:', result?.success);
+            console.log('[v2.3-DEBUG] Config path:', result?.configPath);
+          })
+          .catch(err => {
+            console.error('[v2.3-DEBUG] ========================================');
+            console.error('[v2.3-DEBUG] V2.3 BACKEND PROMISE REJECTED');
+            console.error('[v2.3-DEBUG] ========================================');
+            console.error('[v2.3-DEBUG] Backend error:', err);
+            console.error('[v2.3-DEBUG] Error message:', err?.message);
+            showToast('Config generation failed: ' + err.message, 'error');
+            showPanel('manualPanel');
+          });
+        console.log('[v2.3-DEBUG] V2.3 backend function called, waiting for promise...');
+      } catch (syncError) {
+        console.error('[v2.3-DEBUG] Synchronous error calling v2.3 backend:', syncError);
+        // Fallback to v2.2
+        callV22Backend();
+      }
+    } else {
+      // Use v2.2 backend (no v2.3 validated fields or v2.3 backend not available)
+      callV22Backend();
+    }
+  }
+
+  /**
+   * Call v2.2 backend for config generation
+   */
+  function callV22Backend() {
     if (typeof __configGen_confirmWithSelections === 'function') {
       console.log('[v2.2-DEBUG] Calling __configGen_confirmWithSelections with selections...');
       console.log('[v2.2-DEBUG] Selections being sent:', state.manualSelections);

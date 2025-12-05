@@ -5,3 +5,7 @@ output
 .claude
 configs/sullcrom-lawyerlisting.backup-1764661986006.json
 configs/sullcrom-lawyerlisting.json
+
+# Tesseract OCR cache
+.cache/
+*.traineddata

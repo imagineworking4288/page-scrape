@@ -126,11 +126,12 @@ const FIELD_METADATA = {
 
 // Extraction method definitions
 const EXTRACTION_METHODS = {
+  // Universal methods (work for most fields)
   'screenshot-ocr': {
     id: 'screenshot-ocr',
     label: 'Screenshot OCR',
     description: 'Takes a screenshot of the region and uses OCR to extract text',
-    priority: 1,
+    priority: 3,
     fields: ['name', 'email', 'phone', 'title', 'location']
   },
   'coordinate-text': {
@@ -144,43 +145,102 @@ const EXTRACTION_METHODS = {
     id: 'selector',
     label: 'CSS Selector',
     description: 'Uses CSS selector to find and extract element content',
-    priority: 3,
+    priority: 4,
     fields: ['name', 'email', 'phone', 'title', 'location', 'profileUrl']
   },
   'data-attribute': {
     id: 'data-attribute',
     label: 'Data Attribute',
     description: 'Extracts value from data-* attributes',
-    priority: 4,
+    priority: 5,
     fields: ['name', 'email', 'phone', 'profileUrl']
   },
   'text-regex': {
     id: 'text-regex',
     label: 'Text Pattern Matching',
-    description: 'Uses regex patterns to extract structured data',
-    priority: 5,
+    description: 'Uses regex patterns to extract structured data from text',
+    priority: 3,
     fields: ['email', 'phone']
   },
+
+  // Email-specific methods
   'mailto-link': {
     id: 'mailto-link',
     label: 'Mailto Link',
-    description: 'Extracts email from mailto: href attribute',
+    description: 'Extracts email from mailto: href attribute (most reliable)',
     priority: 1,
     fields: ['email']
   },
+  'regex-email': {
+    id: 'regex-email',
+    label: 'Email RegEx Pattern',
+    description: 'Finds email patterns in surrounding text using regex',
+    priority: 2,
+    fields: ['email']
+  },
+  'label-email': {
+    id: 'label-email',
+    label: 'Email Label Detection',
+    description: 'Finds "Email:" label and extracts adjacent value',
+    priority: 4,
+    fields: ['email']
+  },
+
+  // Phone-specific methods
   'tel-link': {
     id: 'tel-link',
     label: 'Tel Link',
-    description: 'Extracts phone from tel: href attribute',
+    description: 'Extracts phone from tel: href attribute (most reliable)',
     priority: 1,
     fields: ['phone']
   },
+  'regex-phone': {
+    id: 'regex-phone',
+    label: 'Phone RegEx Pattern',
+    description: 'Finds phone patterns in surrounding text using regex',
+    priority: 2,
+    fields: ['phone']
+  },
+  'label-phone': {
+    id: 'label-phone',
+    label: 'Phone Label Detection',
+    description: 'Finds "Phone:" label and extracts adjacent value',
+    priority: 4,
+    fields: ['phone']
+  },
+
+  // Profile URL methods
   'href-link': {
     id: 'href-link',
-    label: 'Href Link',
-    description: 'Extracts URL from href attribute',
+    label: 'Href Link Extraction',
+    description: 'Extracts URL from href attribute of links in region',
     priority: 1,
     fields: ['profileUrl']
+  },
+  'data-url': {
+    id: 'data-url',
+    label: 'Data URL Attribute',
+    description: 'Extracts URL from data-url or similar attributes',
+    priority: 2,
+    fields: ['profileUrl']
+  },
+
+  // Title-specific methods
+  'label-title': {
+    id: 'label-title',
+    label: 'Title Label Detection',
+    description: 'Finds "Title:" or "Position:" label and extracts adjacent value',
+    priority: 3,
+    fields: ['title']
+  },
+
+  // Location-specific methods
+  'label-location': {
+    id: 'label-location',
+    label: 'Location Label Detection',
+    description: 'Finds "Location:" or "Office:" label and extracts adjacent value',
+    priority: 3,
+    fields: ['location']
   }
 };
 

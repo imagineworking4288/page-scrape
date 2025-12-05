@@ -7,12 +7,26 @@
 
 const Tesseract = require('tesseract.js');
 const path = require('path');
+const fs = require('fs');
 
 class ScreenshotExtractor {
   constructor(page) {
     this.page = page;
     this.worker = null;
     this.initialized = false;
+
+    // Configure cache directory for Tesseract language data
+    this.cacheDir = path.join(process.cwd(), '.cache', 'tesseract');
+  }
+
+  /**
+   * Ensure cache directory exists
+   */
+  ensureCacheDir() {
+    if (!fs.existsSync(this.cacheDir)) {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+      console.log('[ScreenshotExtractor] Created cache directory:', this.cacheDir);
+    }
   }
 
   /**
@@ -22,9 +36,24 @@ class ScreenshotExtractor {
     if (this.initialized) return;
 
     try {
-      this.worker = await Tesseract.createWorker('eng');
+      // Ensure cache directory exists before initializing
+      this.ensureCacheDir();
+
+      // Create worker with cache path configuration
+      this.worker = await Tesseract.createWorker('eng', 1, {
+        cachePath: this.cacheDir,
+        langPath: this.cacheDir,
+        logger: m => {
+          // Only log important messages
+          if (m.status === 'loading language traineddata' ||
+              m.status === 'initialized api') {
+            console.log(`[ScreenshotExtractor] ${m.status}`);
+          }
+        }
+      });
+
       this.initialized = true;
-      console.log('[ScreenshotExtractor] Tesseract worker initialized');
+      console.log('[ScreenshotExtractor] Tesseract worker initialized with cache:', this.cacheDir);
     } catch (error) {
       console.error('[ScreenshotExtractor] Failed to initialize Tesseract:', error.message);
       throw error;

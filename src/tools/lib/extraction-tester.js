@@ -7,6 +7,10 @@
 
 const ScreenshotExtractor = require('./screenshot-extractor');
 const CoordinateExtractor = require('./coordinate-extractor');
+const EmailExtractor = require('./email-extractor');
+const PhoneExtractor = require('./phone-extractor');
+const LinkExtractor = require('./link-extractor');
+const LabelExtractor = require('./label-extractor');
 const { EXTRACTION_METHODS, FIELD_METADATA } = require('./config-schemas');
 
 class ExtractionTester {
@@ -14,6 +18,10 @@ class ExtractionTester {
     this.page = page;
     this.screenshotExtractor = new ScreenshotExtractor(page);
     this.coordinateExtractor = new CoordinateExtractor(page);
+    this.emailExtractor = new EmailExtractor(page);
+    this.phoneExtractor = new PhoneExtractor(page);
+    this.linkExtractor = new LinkExtractor(page);
+    this.labelExtractor = new LabelExtractor(page);
     this.initialized = false;
   }
 
@@ -25,7 +33,7 @@ class ExtractionTester {
 
     await this.screenshotExtractor.initialize();
     this.initialized = true;
-    console.log('[ExtractionTester] Initialized');
+    console.log('[ExtractionTester] Initialized with specialized extractors');
   }
 
   /**
@@ -147,13 +155,38 @@ class ExtractionTester {
         return await this.extractWithRegex(cardElement, fieldCoords, fieldName);
 
       case 'mailto-link':
-        return await this.coordinateExtractor.extractMailtoFromRegion(cardElement, fieldCoords);
+        // Use specialized email extractor for mailto links
+        return await this.emailExtractor.extractFromMailtoLink(cardElement, fieldCoords);
 
       case 'tel-link':
-        return await this.coordinateExtractor.extractTelFromRegion(cardElement, fieldCoords);
+        // Use specialized phone extractor for tel links
+        return await this.phoneExtractor.extractFromTelLink(cardElement, fieldCoords);
 
       case 'href-link':
-        return await this.coordinateExtractor.extractLinkFromRegion(cardElement, fieldCoords);
+        // Use specialized link extractor for href links
+        return await this.linkExtractor.extractFromRegion(cardElement, fieldCoords);
+
+      // New specialized extractors
+      case 'regex-email':
+        return await this.emailExtractor.extractFromRegion(cardElement, fieldCoords);
+
+      case 'regex-phone':
+        return await this.phoneExtractor.extractFromRegion(cardElement, fieldCoords);
+
+      case 'label-email':
+        return await this.labelExtractor.extractFromRegion(cardElement, fieldCoords, 'email');
+
+      case 'label-phone':
+        return await this.labelExtractor.extractFromRegion(cardElement, fieldCoords, 'phone');
+
+      case 'label-title':
+        return await this.labelExtractor.extractFromRegion(cardElement, fieldCoords, 'title');
+
+      case 'label-location':
+        return await this.labelExtractor.extractFromRegion(cardElement, fieldCoords, 'location');
+
+      case 'data-url':
+        return await this.linkExtractor.extractDataAttribute(cardElement, fieldCoords);
 
       default:
         return {
