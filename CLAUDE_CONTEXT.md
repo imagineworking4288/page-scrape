@@ -1,8 +1,8 @@
 # Page Scrape - Claude Context Documentation
 
-This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
+This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns. 
 
-**Last Updated**: December 2024
+**Last Updated**: December 6, 15:25
 
 ---
 
@@ -28,11 +28,12 @@ page-scrape/
 ├── orchestrator.js              # Main entry point - CLI orchestration
 ├── package.json                 # Project dependencies and scripts
 ├── CLAUDE_CONTEXT.md            # This file - comprehensive project documentation
-├── configs/                     # Site-specific configuration files
-│   ├── _default.json           # Default fallback config
-│   ├── _template.json          # Template for new configs
-│   ├── _pagination_cache.json  # Cached pagination patterns
-│   └── *.json                  # Site-specific configs (domain-named)
+├── configs/                     # Configuration files root
+│   ├── _default.json           # System: Default fallback config
+│   ├── _template.json          # System: Template for new configs
+│   ├── _pagination_cache.json  # System: Cached pagination patterns
+│   └── website-configs/        # Website-specific configs (domain-named)
+│       └── {domain}.json       # e.g., sullcrom-com.json, example-com.json
 ├── src/
 │   ├── scrapers/               # Core scraping implementations
 │   │   ├── index.js            # Scraper exports
@@ -299,18 +300,27 @@ node orchestrator.js --url <url>           # Target URL (required)
 
 **Purpose**: Loads and validates site-specific configuration files.
 
+**Key Properties**:
+- `configDir` - Root configs directory (`configs/`)
+- `websiteConfigDir` - Website configs subdirectory (`configs/website-configs/`)
+- `defaultConfigPath` - Path to `_default.json`
+- `paginationCachePath` - Path to `_pagination_cache.json`
+
 **Key Methods**:
-- `loadConfig(url)` - Load config for URL's domain
+- `isSystemConfig(filename)` - Check if filename is system config (prefixed with `_`)
+- `loadConfig(url)` - Load config for URL's domain (checks website-configs/ first)
 - `extractDomain(url)` - Get domain from URL
 - `validateConfig(config, domain)` - Validate config structure
 - `getDefaultConfig(domain)` - Fallback config
+- `listConfigs()` - List all website configs (from both locations)
 - `getCachedPattern(domain)` - Get cached pagination pattern
 - `saveCachedPattern(domain, pattern)` - Cache pagination pattern
 
 **Config Loading Order**:
-1. Domain-specific (`configs/{domain}.json`)
-2. Default (`configs/_default.json`)
-3. Hardcoded fallback
+1. Primary: `configs/website-configs/{domain}.json`
+2. Legacy fallback: `configs/{domain}.json` (with warning)
+3. Default: `configs/_default.json`
+4. Hardcoded fallback
 
 ---
 
@@ -965,13 +975,28 @@ node src/tools/config-generator.js --url "https://example.com/directory"
 
 **Usage**:
 ```bash
-node src/tools/test-config.js <config-path> [--limit N] [--verbose] [--show]
+# By domain name (resolves to configs/website-configs/{domain}.json)
+node src/tools/test-config.js sullcrom-com [--limit N] [--verbose] [--show]
+
+# By full path
+node src/tools/test-config.js configs/website-configs/example-com.json [--limit N] [--verbose] [--show]
 ```
+
+**Arguments**:
+- `config-path` - Full path to config file
+- `domain-name` - Domain name to resolve (e.g., sullcrom-com)
 
 **Options**:
 - `--limit N` - Test only N cards (default: 5)
 - `--verbose` - Show detailed extraction results per card
 - `--show` - Show browser window (not headless)
+
+**Path Resolution** (`resolveConfigPath()`):
+1. If input exists as file, use it directly
+2. If input ends with `.json`, treat as path
+3. Otherwise, resolve as domain name:
+   - Primary: `configs/website-configs/{domain}.json`
+   - Legacy: `configs/{domain}.json` (with warning)
 
 **What It Tests**:
 1. Loads the v2.3 config
@@ -983,6 +1008,23 @@ node src/tools/test-config.js <config-path> [--limit N] [--verbose] [--show]
 ---
 
 ## Configuration System
+
+### Config Directory Structure
+
+```
+configs/
+├── _default.json           # System: Default fallback config
+├── _template.json          # System: Template for new configs
+├── _pagination_cache.json  # System: Cached pagination patterns
+└── website-configs/        # Website-specific configs
+    ├── sullcrom-com.json   # Example: Sullivan & Cromwell
+    ├── example-com.json    # Example: Example.com
+    └── {domain}.json       # Named by domain (dots → dashes)
+```
+
+**Naming Convention**:
+- System configs: Prefixed with `_` (stay in `configs/` root)
+- Website configs: Domain name with dots replaced by dashes (e.g., `sullcrom.com` → `sullcrom-com.json`)
 
 ### Config File Structure
 
@@ -1134,18 +1176,21 @@ Always try methods in order of reliability:
 5. Select the best extraction method from the results
 6. **Required fields**: name, email, profileUrl must be validated
 7. **Optional fields**: phone, title, location can be skipped
-8. Config saved to `configs/{domain}.json` with v2.3 format
+8. Config saved to `configs/website-configs/{domain}.json` with v2.3 format
 
 ### Testing a v2.3 Config
 ```bash
-# Test with 5 cards (default)
-node src/tools/test-config.js configs/example-com.json
+# Test by domain name (recommended)
+node src/tools/test-config.js sullcrom-com --limit 5
 
 # Test with more cards and verbose output
-node src/tools/test-config.js configs/example-com.json --limit 10 --verbose
+node src/tools/test-config.js example-com --limit 10 --verbose
 
 # Test with visible browser
-node src/tools/test-config.js configs/example-com.json --limit 3 --show
+node src/tools/test-config.js example-com --limit 3 --show
+
+# Test by full path (also works)
+node src/tools/test-config.js configs/website-configs/example-com.json
 ```
 
 ### Scraping with a v2.3 Config
@@ -1201,3 +1246,34 @@ Set `LOG_LEVEL=debug` in `.env` for verbose output.
 **Problem**: Tesseract worker was crashing silently on Windows due to cache path issues.
 
 **Solution**: Simplified to use Tesseract.js default cache location instead of custom `.cache/tesseract` path.
+
+### Website Configs Subfolder Reorganization (December 6)
+**Change**: Reorganized config file storage to separate system configs from website configs.
+
+**Structure**:
+```
+configs/
+├── _default.json           # System config (stays in root)
+├── _template.json          # System config (stays in root)
+├── _pagination_cache.json  # System config (stays in root)
+└── website-configs/        # NEW: Website configs go here
+    └── {domain}.json
+```
+
+**Files Updated**:
+- `src/utils/config-loader.js`:
+  - Added `websiteConfigDir` property
+  - Added `isSystemConfig()` helper method
+  - Updated `loadConfig()` to check `website-configs/` first, then legacy location with warning
+  - Updated `listConfigs()` to scan both locations
+
+- `src/tools/lib/config-builder.js`:
+  - Added `isSystemConfig()` helper method
+  - Updated `saveConfig()` to route website configs to `website-configs/` subdirectory
+
+- `src/tools/test-config.js`:
+  - Added `resolveConfigPath()` function for domain name resolution
+  - Updated CLI to accept domain names (e.g., `sullcrom-com`) in addition to full paths
+  - Maintains backward compatibility with legacy paths
+
+**Backward Compatibility**: Configs in the old location (`configs/{domain}.json`) will still be found and loaded with a warning suggesting migration to the new location.

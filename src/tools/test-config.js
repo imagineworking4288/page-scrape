@@ -380,20 +380,71 @@ function truncate(str, maxLength) {
   return str.substring(0, maxLength - 3) + '...';
 }
 
+/**
+ * Resolve config path from input (supports domain names and full paths)
+ * @param {string} input - Domain name or config path
+ * @returns {string} - Resolved config path
+ */
+function resolveConfigPath(input) {
+  const fsSync = require('fs');
+
+  // If input is already a path to an existing file, use it directly
+  if (fsSync.existsSync(input)) {
+    return input;
+  }
+
+  // If input ends with .json, treat as path even if file doesn't exist
+  if (input.endsWith('.json')) {
+    return input;
+  }
+
+  // Treat as domain name - resolve to config path
+  const configsDir = path.join(__dirname, '..', '..', 'configs');
+  const websiteConfigsDir = path.join(configsDir, 'website-configs');
+
+  // Primary: website-configs subdirectory
+  const primaryPath = path.join(websiteConfigsDir, `${input}.json`);
+  if (fsSync.existsSync(primaryPath)) {
+    return primaryPath;
+  }
+
+  // Fallback: legacy location (configs root)
+  const legacyPath = path.join(configsDir, `${input}.json`);
+  if (fsSync.existsSync(legacyPath)) {
+    console.warn(`${colors.yellow}Warning: Config found in legacy location: ${legacyPath}${colors.reset}`);
+    console.warn(`${colors.yellow}Consider moving to: ${primaryPath}${colors.reset}`);
+    return legacyPath;
+  }
+
+  // Return primary path (will fail with appropriate error message)
+  return primaryPath;
+}
+
 // CLI entry point
 if (require.main === module) {
   const args = process.argv.slice(2);
-  const configPath = args.find(a => !a.startsWith('--'));
+  const inputPath = args.find(a => !a.startsWith('--'));
 
-  if (!configPath) {
-    console.error('Usage: node test-config.js <config-path> [--limit N] [--verbose] [--show]');
+  if (!inputPath) {
+    console.error('Usage: node test-config.js <config-path|domain-name> [--limit N] [--verbose] [--show]');
+    console.error('');
+    console.error('Arguments:');
+    console.error('  config-path   Full path to config file (e.g., configs/website-configs/example-com.json)');
+    console.error('  domain-name   Domain name to resolve (e.g., example-com, sullcrom-com)');
     console.error('');
     console.error('Options:');
     console.error('  --limit N   Test only N cards (default: 5)');
     console.error('  --verbose   Show detailed extraction results');
     console.error('  --show      Show browser window (not headless)');
+    console.error('');
+    console.error('Examples:');
+    console.error('  node test-config.js sullcrom-com --limit 5');
+    console.error('  node test-config.js configs/website-configs/example-com.json --verbose');
     process.exit(1);
   }
+
+  // Resolve input to config path
+  const configPath = resolveConfigPath(inputPath);
 
   const options = {
     limit: parseInt(args.find(a => a.startsWith('--limit'))?.split('=')[1] ||

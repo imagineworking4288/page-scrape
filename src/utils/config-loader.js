@@ -12,9 +12,19 @@ class ConfigLoader {
     this.logger = logger;
     // Config directory is at project root: page-scrape/configs/
     this.configDir = path.join(__dirname, '..', '..', 'configs');
+    this.websiteConfigDir = path.join(this.configDir, 'website-configs');
     this.defaultConfigPath = path.join(this.configDir, '_default.json');
     this.paginationCachePath = path.join(this.configDir, '_pagination_cache.json');
     this.paginationCache = this.loadPaginationCache();
+  }
+
+  /**
+   * Check if a filename is a system config (prefixed with _)
+   * @param {string} filename - Config filename
+   * @returns {boolean} - True if system config
+   */
+  isSystemConfig(filename) {
+    return filename.startsWith('_');
   }
 
   /**
@@ -41,15 +51,33 @@ class ConfigLoader {
 
   /**
    * Load config file for given URL
+   * Checks website-configs/ first, then falls back to legacy location
    * @param {string} url - Target URL
    * @returns {object} - Config object merged with defaults
    */
   loadConfig(url) {
     const domain = this.extractDomain(url);
-    const configPath = path.join(this.configDir, `${domain}.json`);
+
+    // Primary path: website-configs subdirectory
+    const primaryPath = path.join(this.websiteConfigDir, `${domain}.json`);
+    // Legacy path: configs root (for backward compatibility)
+    const legacyPath = path.join(this.configDir, `${domain}.json`);
+
+    // Determine which path to use
+    let configPath = null;
+    let isLegacy = false;
+
+    if (fs.existsSync(primaryPath)) {
+      configPath = primaryPath;
+    } else if (fs.existsSync(legacyPath)) {
+      configPath = legacyPath;
+      isLegacy = true;
+      this.logger.warn(`Config found in legacy location: ${legacyPath}`);
+      this.logger.warn(`Consider moving to: ${primaryPath}`);
+    }
 
     // Check if domain-specific config exists
-    if (fs.existsSync(configPath)) {
+    if (configPath) {
       try {
         const configData = fs.readFileSync(configPath, 'utf8');
         const siteConfig = JSON.parse(configData);
@@ -60,7 +88,7 @@ class ConfigLoader {
         // Merge with defaults
         const mergedConfig = this.resolveWithDefaults(siteConfig);
 
-        this.logger.info(`Loaded config for domain: ${domain}`);
+        this.logger.info(`Loaded config for domain: ${domain}${isLegacy ? ' (legacy location)' : ''}`);
         return mergedConfig;
       } catch (error) {
         this.logger.error(`Failed to load config for ${domain}: ${error.message}`);
@@ -259,15 +287,29 @@ class ConfigLoader {
   }
 
   /**
-   * List all available config files
-   * @returns {array} - Array of config filenames
+   * List all available website config files
+   * Looks in website-configs/ directory, with fallback to legacy location
+   * @returns {array} - Array of config filenames (domains)
    */
   listConfigs() {
+    const configs = new Set();
+
     try {
-      const files = fs.readdirSync(this.configDir);
-      return files
-        .filter(file => file.endsWith('.json') && !file.startsWith('_'))
-        .map(file => file.replace('.json', ''));
+      // Primary: website-configs subdirectory
+      if (fs.existsSync(this.websiteConfigDir)) {
+        const websiteFiles = fs.readdirSync(this.websiteConfigDir);
+        websiteFiles
+          .filter(file => file.endsWith('.json') && !this.isSystemConfig(file))
+          .forEach(file => configs.add(file.replace('.json', '')));
+      }
+
+      // Fallback: legacy location (root configs/)
+      const rootFiles = fs.readdirSync(this.configDir);
+      rootFiles
+        .filter(file => file.endsWith('.json') && !this.isSystemConfig(file))
+        .forEach(file => configs.add(file.replace('.json', '')));
+
+      return Array.from(configs).sort();
     } catch (error) {
       this.logger.error(`Failed to list configs: ${error.message}`);
       return [];

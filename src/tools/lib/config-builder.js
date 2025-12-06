@@ -1245,7 +1245,18 @@ class ConfigBuilder {
   }
 
   /**
+   * Check if a config name represents a system config (prefixed with _)
+   * @param {string} name - Config name
+   * @returns {boolean} - True if system config
+   */
+  isSystemConfig(name) {
+    return name && name.startsWith('_');
+  }
+
+  /**
    * Save configuration to file
+   * Website configs are saved to configs/website-configs/ subdirectory
+   * System configs (prefixed with _) are saved to configs/ root
    * @param {Object} config - Configuration object
    * @param {string} outputDir - Output directory (optional override)
    * @returns {string} - Path to saved file
@@ -1258,7 +1269,18 @@ class ConfigBuilder {
     this.logger.info('[v2.2-SAVE] Output dir param:', outputDir);
     this.logger.info('[v2.2-SAVE] Default output dir:', this.outputDir);
 
-    const dir = outputDir || this.outputDir;
+    // Determine base directory
+    const baseDir = outputDir || this.outputDir;
+
+    // Website configs go to website-configs subdirectory, system configs stay in root
+    let dir;
+    if (this.isSystemConfig(config?.name)) {
+      dir = baseDir;
+      this.logger.info('[v2.2-SAVE] System config - saving to root configs/');
+    } else {
+      dir = path.join(baseDir, 'website-configs');
+      this.logger.info('[v2.2-SAVE] Website config - saving to website-configs/');
+    }
     this.logger.info('[v2.2-SAVE] Using directory:', dir);
 
     // Ensure directory exists

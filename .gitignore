@@ -3,8 +3,7 @@ node_modules
 logs
 output
 .claude
-configs/sullcrom-lawyerlisting.backup-1764661986006.json
-configs/sullcrom-lawyerlisting.json
+configs/website-configs/
 
 # Tesseract OCR cache (default location in node_modules)
 node_modules/.cache/
