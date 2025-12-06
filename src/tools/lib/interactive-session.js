@@ -1322,7 +1322,12 @@ class InteractiveSession {
    */
   async handleTestFieldExtraction(data) {
     const { fieldName, box } = data;
-    this.logger.info(`[v2.3] Testing extraction methods for ${fieldName}...`);
+    this.logger.info('');
+    this.logger.info('========================================');
+    this.logger.info(`[v2.3] TESTING EXTRACTION METHODS: ${fieldName.toUpperCase()}`);
+    this.logger.info('========================================');
+    this.logger.info(`[v2.3] Field: ${fieldName}`);
+    this.logger.info(`[v2.3] Box coordinates: ${JSON.stringify(box)}`);
 
     try {
       // Get card element from the reference box
@@ -1371,6 +1376,15 @@ class InteractiveSession {
       };
 
       this.logger.info(`[v2.3] Extraction test complete: ${testResult.results.length} results, ${testResult.failedMethods.length} failed`);
+
+      // Log top results
+      if (testResult.results.length > 0) {
+        this.logger.info('[v2.3] Top extraction results:');
+        testResult.results.slice(0, 3).forEach((r, i) => {
+          this.logger.info(`  ${i+1}. ${r.method}: "${r.value}" (${r.confidence}%)`);
+        });
+      }
+      this.logger.info('========================================');
 
       // Send results to overlay
       await this.page.evaluate((res) => {

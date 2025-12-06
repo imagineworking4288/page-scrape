@@ -1524,8 +1524,12 @@
    * @param {Object} rectangleResult - Result from handleFieldRectangle with coordinates
    */
   async function triggerV23Extraction(fieldName, rectangleResult) {
-    console.log(`[ConfigGen v2.3] Triggering extraction for ${fieldName}`);
-    console.log('[ConfigGen v2.3] Rectangle result:', rectangleResult);
+    console.log('');
+    console.log('========================================');
+    console.log(`[v2.3] TRIGGERING MULTI-METHOD EXTRACTION`);
+    console.log('========================================');
+    console.log(`[v2.3] Field: ${fieldName.toUpperCase()}`);
+    console.log('[v2.3] Rectangle result:', JSON.stringify(rectangleResult, null, 2));
 
     // Show progress feedback while testing
     const section = document.getElementById('feedbackSection');
@@ -1566,18 +1570,24 @@
     try {
       // Call backend to test all extraction methods
       if (typeof __configGen_testFieldExtraction === 'function') {
-        console.log('[ConfigGen v2.3] Calling __configGen_testFieldExtraction...');
+        console.log('[v2.3] Backend function available: __configGen_testFieldExtraction');
+        console.log('[v2.3] Calling backend with test data...');
         await __configGen_testFieldExtraction(testData);
+        console.log('[v2.3] Backend call completed, waiting for handleExtractionResults callback');
         // Backend will call window.handleExtractionResults when done
       } else {
-        console.warn('[ConfigGen v2.3] __configGen_testFieldExtraction not available, falling back to v2.2');
+        console.error('[v2.3] ERROR: __configGen_testFieldExtraction NOT AVAILABLE');
+        console.error('[v2.3] This should not happen - check backend function exposure');
+        console.warn('[v2.3] Falling back to v2.2 workflow for', fieldName);
         // Fallback: use the v2.2 workflow
         fallbackToV22(fieldName, rectangleResult);
       }
     } catch (error) {
-      console.error('[ConfigGen v2.3] Extraction test failed:', error);
+      console.error('[v2.3] ERROR: Extraction test failed:', error);
+      console.error('[v2.3] Error stack:', error.stack);
       showErrorFeedback('Extraction testing failed: ' + error.message);
       // Fallback to v2.2 workflow on error
+      console.warn('[v2.3] Falling back to v2.2 workflow for', fieldName);
       fallbackToV22(fieldName, rectangleResult);
     }
   }
@@ -1586,7 +1596,13 @@
    * v2.3: Fallback to v2.2 workflow when v2.3 backend is not available
    */
   function fallbackToV22(fieldName, rectangleResult) {
-    console.log(`[ConfigGen v2.3] Falling back to v2.2 workflow for ${fieldName}`);
+    console.log('');
+    console.log('========================================');
+    console.log(`[v2.2] FALLBACK - USING V2.2 WORKFLOW`);
+    console.log('========================================');
+    console.log(`[v2.2] Field: ${fieldName.toUpperCase()}`);
+    console.log('[v2.2] This means v2.3 multi-method testing was not available or failed');
+    console.log('[v2.2] The field will be saved without user-validated method selection');
 
     const captureData = {
       value: rectangleResult.value,
