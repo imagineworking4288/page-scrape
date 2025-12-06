@@ -151,12 +151,21 @@ class EmailExtractor {
   }
 
   /**
-   * Extract email from mailto: links in the region
+   * Extract email from mailto: links using 4-layer detection strategy
+   * Handles Sullivan & Cromwell pattern: <a href="mailto:email@domain.com">Email</a>
+   *
+   * Layer 1: Direct hit - click point is directly on mailto link
+   * Layer 2: Text-triggered - center text is "Email" keyword, find nearby mailto
+   * Layer 3: Expanded area scan - search broader region for mailto links
+   * Layer 4: Failure with diagnostic info
+   *
    * @param {Object} cardElement - Card element handle
    * @param {Object} fieldCoords - Relative coordinates within card
    * @returns {Object} {value, confidence, metadata}
    */
   async extractFromMailtoLink(cardElement, fieldCoords) {
+    console.log('[EmailExtractor] Starting 4-layer mailto-link extraction');
+
     try {
       const cardBox = await cardElement.boundingBox();
       if (!cardBox) {
@@ -170,64 +179,214 @@ class EmailExtractor {
         height: fieldCoords.height
       };
 
+      console.log('[EmailExtractor] Absolute coordinates:', absoluteCoords);
+
       const result = await this.page.evaluate((coords) => {
         const centerX = coords.x + coords.width / 2;
         const centerY = coords.y + coords.height / 2;
 
-        // Get elements at center point
-        const elements = document.elementsFromPoint(centerX, centerY);
+        // ===== HELPER FUNCTIONS =====
 
-        // Find mailto links
-        for (const el of elements) {
-          // Check if element is a mailto link
-          if (el.tagName === 'A' && el.href && el.href.startsWith('mailto:')) {
-            const email = el.href.replace('mailto:', '').split('?')[0];
-            return {
-              found: true,
-              email: email,
-              linkText: el.textContent.trim()
-            };
+        function extractEmailFromHref(href) {
+          if (!href || !href.startsWith('mailto:')) return null;
+          // Extract: mailto:email@domain.com?subject=... → email@domain.com
+          const email = href.replace('mailto:', '').split('?')[0].split('&')[0].trim();
+          return email.includes('@') && email.includes('.') ? email : null;
+        }
+
+        function rectOverlaps(elementRect, searchArea) {
+          return !(
+            elementRect.right < searchArea.x ||
+            elementRect.left > searchArea.x + searchArea.width ||
+            elementRect.bottom < searchArea.y ||
+            elementRect.top > searchArea.y + searchArea.height
+          );
+        }
+
+        function calculateDistance(rect, cX, cY) {
+          const rectCenterX = rect.left + rect.width / 2;
+          const rectCenterY = rect.top + rect.height / 2;
+          return Math.sqrt(
+            Math.pow(rectCenterX - cX, 2) +
+            Math.pow(rectCenterY - cY, 2)
+          );
+        }
+
+        // ===== LAYER 1: DIRECT HIT =====
+        console.log('[EmailExtractor] Layer 1: Direct hit check');
+
+        const centerElement = document.elementFromPoint(centerX, centerY);
+
+        if (centerElement) {
+          // Check if center element IS a mailto link
+          if (centerElement.tagName === 'A' && centerElement.href?.startsWith('mailto:')) {
+            const email = extractEmailFromHref(centerElement.href);
+            if (email) {
+              console.log('[EmailExtractor] ✓ Layer 1 (direct-hit) succeeded:', email);
+              return {
+                value: email,
+                confidence: 95,
+                metadata: {
+                  method: 'mailto-link',
+                  layer: 'direct-hit',
+                  linkText: centerElement.textContent.trim(),
+                  searchRadius: 0
+                }
+              };
+            }
           }
 
-          // Check children for mailto links
-          const links = el.querySelectorAll('a[href^="mailto:"]');
-          for (const link of links) {
-            const rect = link.getBoundingClientRect();
-            // Check if link is within the search area
-            if (rect.right >= coords.x && rect.left <= coords.x + coords.width &&
-                rect.bottom >= coords.y && rect.top <= coords.y + coords.height) {
-              const email = link.href.replace('mailto:', '').split('?')[0];
+          // Check if center element is INSIDE a mailto link
+          const parentLink = centerElement.closest('a[href^="mailto:"]');
+          if (parentLink) {
+            const email = extractEmailFromHref(parentLink.href);
+            if (email) {
+              console.log('[EmailExtractor] ✓ Layer 1 (parent-link) succeeded:', email);
               return {
-                found: true,
-                email: email,
-                linkText: link.textContent.trim()
+                value: email,
+                confidence: 95,
+                metadata: {
+                  method: 'mailto-link',
+                  layer: 'direct-hit-parent',
+                  linkText: parentLink.textContent.trim(),
+                  centerElementTag: centerElement.tagName
+                }
               };
             }
           }
         }
 
-        return { found: false };
-      }, absoluteCoords);
+        // ===== LAYER 2: TEXT-TRIGGERED SEARCH =====
+        console.log('[EmailExtractor] Layer 2: Text-triggered search');
 
-      if (!result.found) {
+        if (centerElement) {
+          const centerText = centerElement.textContent.trim().toLowerCase();
+          const emailKeywords = ['email', 'e-mail', 'contact', 'mail'];
+
+          if (emailKeywords.some(keyword => centerText === keyword || centerText.startsWith(keyword))) {
+            console.log('[EmailExtractor] Center text matches email keyword:', centerText);
+
+            // Search parent for mailto link
+            const parent = centerElement.parentElement;
+            if (parent) {
+              // Check if parent has mailto children
+              const mailtoLinks = parent.querySelectorAll('a[href^="mailto:"]');
+              for (const link of mailtoLinks) {
+                const email = extractEmailFromHref(link.href);
+                if (email) {
+                  console.log('[EmailExtractor] ✓ Layer 2 (text-triggered) succeeded:', email);
+                  return {
+                    value: email,
+                    confidence: 92,
+                    metadata: {
+                      method: 'mailto-link',
+                      layer: 'text-triggered',
+                      triggerText: centerText,
+                      linkText: link.textContent.trim()
+                    }
+                  };
+                }
+              }
+
+              // Check siblings
+              const siblings = parent.children;
+              for (const sibling of siblings) {
+                if (sibling.tagName === 'A' && sibling.href?.startsWith('mailto:')) {
+                  const email = extractEmailFromHref(sibling.href);
+                  if (email) {
+                    console.log('[EmailExtractor] ✓ Layer 2 (sibling) succeeded:', email);
+                    return {
+                      value: email,
+                      confidence: 90,
+                      metadata: {
+                        method: 'mailto-link',
+                        layer: 'text-triggered-sibling',
+                        triggerText: centerText,
+                        linkText: sibling.textContent.trim()
+                      }
+                    };
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // ===== LAYER 3: EXPANDED AREA SCAN =====
+        console.log('[EmailExtractor] Layer 3: Expanded area scan');
+
+        const expandedArea = {
+          x: coords.x - 100,
+          y: coords.y - 50,
+          width: coords.width + 200,
+          height: coords.height + 100
+        };
+
+        const allMailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]'));
+        console.log('[EmailExtractor] Total mailto links on page:', allMailtoLinks.length);
+
+        const candidateLinks = allMailtoLinks
+          .map(link => {
+            const rect = link.getBoundingClientRect();
+            const email = extractEmailFromHref(link.href);
+            return {
+              element: link,
+              rect: rect,
+              email: email,
+              overlaps: rectOverlaps(rect, expandedArea)
+            };
+          })
+          .filter(candidate => candidate.email && candidate.overlaps)
+          .map(candidate => ({
+            ...candidate,
+            distance: calculateDistance(candidate.rect, centerX, centerY)
+          }))
+          .sort((a, b) => a.distance - b.distance);
+
+        console.log('[EmailExtractor] Candidates in expanded area:', candidateLinks.length);
+
+        if (candidateLinks.length > 0) {
+          const closest = candidateLinks[0];
+          console.log('[EmailExtractor] ✓ Layer 3 (area-scan) succeeded:', closest.email);
+          return {
+            value: closest.email,
+            confidence: 85,
+            metadata: {
+              method: 'mailto-link',
+              layer: 'expanded-area-scan',
+              linkText: closest.element.textContent.trim(),
+              searchRadius: 100,
+              candidatesFound: candidateLinks.length,
+              distance: Math.round(closest.distance)
+            }
+          };
+        }
+
+        // ===== LAYER 4: FAILURE =====
+        console.log('[EmailExtractor] ✗ All layers failed');
         return {
           value: null,
           confidence: 0,
           metadata: {
             method: 'mailto-link',
-            error: 'No mailto link found'
+            error: 'No mailto links found in search area',
+            layer: 'all-failed',
+            searchArea: expandedArea,
+            totalMailtoLinksOnPage: allMailtoLinks.length,
+            centerText: centerElement?.textContent?.trim()?.slice(0, 50),
+            suggestion: 'Try selecting a larger rectangle or use regex-email method'
           }
         };
+
+      }, absoluteCoords);
+
+      console.log('[EmailExtractor] mailto-link result:', result.value ? 'SUCCESS' : 'FAILED');
+
+      if (result.value) {
+        result.value = result.value.toLowerCase();
       }
 
-      return {
-        value: result.email.toLowerCase(),
-        confidence: 95, // High confidence for mailto links
-        metadata: {
-          method: 'mailto-link',
-          linkText: result.linkText
-        }
-      };
+      return result;
 
     } catch (error) {
       console.error('[EmailExtractor] Mailto extraction failed:', error.message);

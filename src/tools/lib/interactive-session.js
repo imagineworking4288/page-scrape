@@ -1357,9 +1357,9 @@ class InteractiveSession {
 
       this.logger.info(`[v2.3] Card at (${cardBox.x}, ${cardBox.y}), field relative coords: ${JSON.stringify(relativeCoords)}`);
 
-      // Get extraction tester and run tests
+      // Get extraction tester and run tests with auto-retry
       const tester = await this.getExtractionTester();
-      const testResult = await tester.testField(fieldName, cardElement, relativeCoords);
+      const testResult = await tester.testFieldWithRetry(fieldName, cardElement, relativeCoords);
 
       // Format results for UI
       const formattedResults = tester.formatForUI(testResult, fieldName);

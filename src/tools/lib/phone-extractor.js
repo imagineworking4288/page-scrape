@@ -156,12 +156,21 @@ class PhoneExtractor {
   }
 
   /**
-   * Extract phone from tel: links in the region
+   * Extract phone from tel: links using 4-layer detection strategy
+   * Handles various phone display patterns including Sullivan & Cromwell format
+   *
+   * Layer 1: Direct hit - click point is directly on tel link
+   * Layer 2: Text-triggered - center text contains phone keywords, find nearby tel
+   * Layer 3: Expanded area scan - search broader region for tel links
+   * Layer 4: Failure with diagnostic info
+   *
    * @param {Object} cardElement - Card element handle
    * @param {Object} fieldCoords - Relative coordinates within card
    * @returns {Object} {value, confidence, metadata}
    */
   async extractFromTelLink(cardElement, fieldCoords) {
+    console.log('[PhoneExtractor] Starting 4-layer tel-link extraction');
+
     try {
       const cardBox = await cardElement.boundingBox();
       if (!cardBox) {
@@ -175,64 +184,240 @@ class PhoneExtractor {
         height: fieldCoords.height
       };
 
+      console.log('[PhoneExtractor] Absolute coordinates:', absoluteCoords);
+
       const result = await this.page.evaluate((coords) => {
         const centerX = coords.x + coords.width / 2;
         const centerY = coords.y + coords.height / 2;
 
-        const elements = document.elementsFromPoint(centerX, centerY);
+        // ===== HELPER FUNCTIONS =====
 
-        for (const el of elements) {
-          // Check if element is a tel link
-          if (el.tagName === 'A' && el.href && el.href.startsWith('tel:')) {
-            const phone = el.href.replace('tel:', '').replace(/\s/g, '');
-            return {
-              found: true,
-              phone: phone,
-              linkText: el.textContent.trim()
-            };
+        function extractPhoneFromHref(href) {
+          if (!href || !href.startsWith('tel:')) return null;
+          // Extract: tel:+12125583960 → +12125583960
+          let phone = href.replace('tel:', '').trim();
+          // Keep digits, +, and dashes for formatted numbers
+          phone = phone.replace(/[^\d+\-]/g, '');
+          return phone.length >= 10 ? phone : null;
+        }
+
+        function formatPhone(phone) {
+          // If already formatted with dashes, return as-is
+          if (phone.includes('-') && phone.split('-').length >= 3) return phone;
+
+          // Remove all non-digit characters except +
+          const digits = phone.replace(/[^\d+]/g, '');
+
+          // Format +12125583960 → +1-212-558-3960
+          if (digits.startsWith('+1') && digits.length === 12) {
+            return `+1-${digits.slice(2, 5)}-${digits.slice(5, 8)}-${digits.slice(8)}`;
           }
 
-          // Check children for tel links
-          const links = el.querySelectorAll('a[href^="tel:"]');
-          for (const link of links) {
-            const rect = link.getBoundingClientRect();
-            if (rect.right >= coords.x && rect.left <= coords.x + coords.width &&
-                rect.bottom >= coords.y && rect.top <= coords.y + coords.height) {
-              const phone = link.href.replace('tel:', '').replace(/\s/g, '');
+          // Format 12125583960 → +1-212-558-3960
+          if (digits.startsWith('1') && digits.length === 11) {
+            return `+1-${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+          }
+
+          // Format 2125583960 → +1-212-558-3960
+          if (!digits.startsWith('+') && digits.length === 10) {
+            return `+1-${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+          }
+
+          return phone;
+        }
+
+        function rectOverlaps(elementRect, searchArea) {
+          return !(
+            elementRect.right < searchArea.x ||
+            elementRect.left > searchArea.x + searchArea.width ||
+            elementRect.bottom < searchArea.y ||
+            elementRect.top > searchArea.y + searchArea.height
+          );
+        }
+
+        function calculateDistance(rect, cX, cY) {
+          const rectCenterX = rect.left + rect.width / 2;
+          const rectCenterY = rect.top + rect.height / 2;
+          return Math.sqrt(
+            Math.pow(rectCenterX - cX, 2) +
+            Math.pow(rectCenterY - cY, 2)
+          );
+        }
+
+        // ===== LAYER 1: DIRECT HIT =====
+        console.log('[PhoneExtractor] Layer 1: Direct hit check');
+
+        const centerElement = document.elementFromPoint(centerX, centerY);
+
+        if (centerElement) {
+          // Check if center element IS a tel link
+          if (centerElement.tagName === 'A' && centerElement.href?.startsWith('tel:')) {
+            const phone = extractPhoneFromHref(centerElement.href);
+            if (phone) {
+              console.log('[PhoneExtractor] ✓ Layer 1 (direct-hit) succeeded:', phone);
               return {
-                found: true,
-                phone: phone,
-                linkText: link.textContent.trim()
+                value: formatPhone(phone),
+                confidence: 95,
+                metadata: {
+                  method: 'tel-link',
+                  layer: 'direct-hit',
+                  linkText: centerElement.textContent.trim(),
+                  rawPhone: phone
+                }
+              };
+            }
+          }
+
+          // Check if center element is INSIDE a tel link
+          const parentLink = centerElement.closest('a[href^="tel:"]');
+          if (parentLink) {
+            const phone = extractPhoneFromHref(parentLink.href);
+            if (phone) {
+              console.log('[PhoneExtractor] ✓ Layer 1 (parent-link) succeeded:', phone);
+              return {
+                value: formatPhone(phone),
+                confidence: 95,
+                metadata: {
+                  method: 'tel-link',
+                  layer: 'direct-hit-parent',
+                  linkText: parentLink.textContent.trim(),
+                  centerElementTag: centerElement.tagName
+                }
               };
             }
           }
         }
 
-        return { found: false };
-      }, absoluteCoords);
+        // ===== LAYER 2: TEXT-TRIGGERED SEARCH =====
+        console.log('[PhoneExtractor] Layer 2: Text-triggered search');
 
-      if (!result.found) {
+        if (centerElement) {
+          const centerText = centerElement.textContent.trim().toLowerCase();
+          const phoneKeywords = ['phone', 'tel', 'call', 'mobile', 'direct', 'fax'];
+
+          // Check for phone number pattern in text (like +1-212-558-3960)
+          const phonePattern = /\+?\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}/;
+          const hasPhonePattern = phonePattern.test(centerText);
+
+          if (hasPhonePattern || phoneKeywords.some(keyword => centerText.includes(keyword))) {
+            console.log('[PhoneExtractor] Center text matches phone pattern or keyword');
+
+            // Search parent and nearby for tel link
+            const parent = centerElement.parentElement;
+            if (parent) {
+              const telLinks = parent.querySelectorAll('a[href^="tel:"]');
+              for (const link of telLinks) {
+                const phone = extractPhoneFromHref(link.href);
+                if (phone) {
+                  console.log('[PhoneExtractor] ✓ Layer 2 (text-triggered) succeeded:', phone);
+                  return {
+                    value: formatPhone(phone),
+                    confidence: 92,
+                    metadata: {
+                      method: 'tel-link',
+                      layer: 'text-triggered',
+                      triggerText: centerText.slice(0, 50),
+                      linkText: link.textContent.trim()
+                    }
+                  };
+                }
+              }
+
+              // Check siblings
+              const siblings = parent.children;
+              for (const sibling of siblings) {
+                if (sibling.tagName === 'A' && sibling.href?.startsWith('tel:')) {
+                  const phone = extractPhoneFromHref(sibling.href);
+                  if (phone) {
+                    console.log('[PhoneExtractor] ✓ Layer 2 (sibling) succeeded:', phone);
+                    return {
+                      value: formatPhone(phone),
+                      confidence: 90,
+                      metadata: {
+                        method: 'tel-link',
+                        layer: 'text-triggered-sibling',
+                        triggerText: centerText.slice(0, 50),
+                        linkText: sibling.textContent.trim()
+                      }
+                    };
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // ===== LAYER 3: EXPANDED AREA SCAN =====
+        console.log('[PhoneExtractor] Layer 3: Expanded area scan');
+
+        const expandedArea = {
+          x: coords.x - 80,
+          y: coords.y - 40,
+          width: coords.width + 160,
+          height: coords.height + 80
+        };
+
+        const allTelLinks = Array.from(document.querySelectorAll('a[href^="tel:"]'));
+        console.log('[PhoneExtractor] Total tel links on page:', allTelLinks.length);
+
+        const candidateLinks = allTelLinks
+          .map(link => {
+            const rect = link.getBoundingClientRect();
+            const phone = extractPhoneFromHref(link.href);
+            return {
+              element: link,
+              rect: rect,
+              phone: phone,
+              overlaps: rectOverlaps(rect, expandedArea)
+            };
+          })
+          .filter(candidate => candidate.phone && candidate.overlaps)
+          .map(candidate => ({
+            ...candidate,
+            distance: calculateDistance(candidate.rect, centerX, centerY)
+          }))
+          .sort((a, b) => a.distance - b.distance);
+
+        console.log('[PhoneExtractor] Candidates in expanded area:', candidateLinks.length);
+
+        if (candidateLinks.length > 0) {
+          const closest = candidateLinks[0];
+          console.log('[PhoneExtractor] ✓ Layer 3 (area-scan) succeeded:', closest.phone);
+          return {
+            value: formatPhone(closest.phone),
+            confidence: 85,
+            metadata: {
+              method: 'tel-link',
+              layer: 'expanded-area-scan',
+              linkText: closest.element.textContent.trim(),
+              searchRadius: 80,
+              candidatesFound: candidateLinks.length,
+              distance: Math.round(closest.distance)
+            }
+          };
+        }
+
+        // ===== LAYER 4: FAILURE =====
+        console.log('[PhoneExtractor] ✗ All layers failed');
         return {
           value: null,
           confidence: 0,
           metadata: {
             method: 'tel-link',
-            error: 'No tel link found'
+            error: 'No tel links found in search area',
+            layer: 'all-failed',
+            searchArea: expandedArea,
+            totalTelLinksOnPage: allTelLinks.length,
+            centerText: centerElement?.textContent?.trim()?.slice(0, 50),
+            suggestion: 'Try selecting the phone number directly or use regex-phone method'
           }
         };
-      }
 
-      const normalized = this.normalizePhone(result.phone);
+      }, absoluteCoords);
 
-      return {
-        value: normalized,
-        confidence: 95, // High confidence for tel links
-        metadata: {
-          method: 'tel-link',
-          linkText: result.linkText,
-          original: result.phone
-        }
-      };
+      console.log('[PhoneExtractor] tel-link result:', result.value ? 'SUCCESS' : 'FAILED');
+
+      return result;
 
     } catch (error) {
       console.error('[PhoneExtractor] Tel extraction failed:', error.message);

@@ -45,6 +45,130 @@ class ExtractionTester {
   }
 
   /**
+   * Expand coordinates by a factor in all directions
+   * @param {Object} coords - {x, y, width, height}
+   * @param {number} factor - Expansion factor (0.5 = 50%, 1.0 = 100%)
+   * @returns {Object} Expanded coordinates
+   */
+  expandCoordinates(coords, factor) {
+    const widthExpansion = coords.width * factor / 2;
+    const heightExpansion = coords.height * factor / 2;
+
+    const expanded = {
+      x: Math.max(0, coords.x - widthExpansion),
+      y: Math.max(0, coords.y - heightExpansion),
+      width: coords.width * (1 + factor),
+      height: coords.height * (1 + factor)
+    };
+
+    console.log(`[ExtractionTester] Expanded coordinates by ${factor * 100}%:`, {
+      original: `${Math.round(coords.width)}x${Math.round(coords.height)}`,
+      expanded: `${Math.round(expanded.width)}x${Math.round(expanded.height)}`
+    });
+
+    return expanded;
+  }
+
+  /**
+   * Test field extraction with automatic area expansion on failure
+   * Strategy: Try original area first, then expand and retry if confidence < 70%
+   *
+   * @param {string} fieldName - Field to test
+   * @param {Object} cardElement - Puppeteer element handle for the card
+   * @param {Object} fieldCoords - Relative coordinates { x, y, width, height }
+   * @returns {Object} - { results: [...top 5], failedMethods: [...], totalMethodsTested }
+   */
+  async testFieldWithRetry(fieldName, cardElement, fieldCoords) {
+    console.log('');
+    console.log('========================================');
+    console.log(`[ExtractionTester] TESTING WITH AUTO-RETRY: ${fieldName.toUpperCase()}`);
+    console.log('========================================');
+
+    // Attempt 1: Original coordinates
+    console.log('[ExtractionTester] Attempt 1: Original area');
+    let results = await this.testField(fieldName, cardElement, fieldCoords);
+    const bestResult = results.results[0];
+
+    if (bestResult && bestResult.confidence >= 70) {
+      console.log(`[ExtractionTester] ✓ Original area succeeded with ${bestResult.confidence}% confidence`);
+      return results;
+    }
+
+    console.log(`[ExtractionTester] ⚠ Original area result: ${bestResult?.confidence || 0}% confidence`);
+
+    // Attempt 2: Expand by 50%
+    console.log('[ExtractionTester] Attempt 2: Expanding search area by 50%');
+    const expanded50 = this.expandCoordinates(fieldCoords, 0.5);
+    const results50 = await this.testField(fieldName, cardElement, expanded50);
+    const bestResult50 = results50.results[0];
+
+    if (bestResult50 && bestResult50.confidence >= 70) {
+      console.log(`[ExtractionTester] ✓ 50% expansion succeeded with ${bestResult50.confidence}% confidence`);
+      // Mark results as from expanded area
+      results50.results.forEach(r => {
+        r.metadata = { ...r.metadata, expandedArea: '50%', originalCoords: fieldCoords };
+      });
+      return results50;
+    }
+
+    console.log(`[ExtractionTester] ⚠ 50% expansion result: ${bestResult50?.confidence || 0}% confidence`);
+
+    // Attempt 3: Expand by 100%
+    console.log('[ExtractionTester] Attempt 3: Expanding search area by 100%');
+    const expanded100 = this.expandCoordinates(fieldCoords, 1.0);
+    const results100 = await this.testField(fieldName, cardElement, expanded100);
+    const bestResult100 = results100.results[0];
+
+    if (bestResult100 && bestResult100.confidence >= 70) {
+      console.log(`[ExtractionTester] ✓ 100% expansion succeeded with ${bestResult100.confidence}% confidence`);
+    } else {
+      console.log(`[ExtractionTester] ✗ All attempts completed (best: ${bestResult100?.confidence || 0}%)`);
+    }
+
+    // Mark results
+    results100.results.forEach(r => {
+      r.metadata = { ...r.metadata, expandedArea: '100%', originalCoords: fieldCoords };
+    });
+
+    // Return best results from all attempts combined
+    const allResults = [
+      ...results.results,
+      ...results50.results,
+      ...results100.results
+    ];
+
+    // Dedupe by method and keep highest confidence
+    const deduped = new Map();
+    allResults.forEach(r => {
+      const key = `${r.method}-${r.value}`;
+      if (!deduped.has(key) || deduped.get(key).confidence < r.confidence) {
+        deduped.set(key, r);
+      }
+    });
+
+    const sortedResults = Array.from(deduped.values())
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 5);
+
+    // Combine failed methods
+    const allFailedMethods = [
+      ...results.failedMethods,
+      ...results50.failedMethods.filter(f => !results.failedMethods.some(rf => rf.method === f.method)),
+      ...results100.failedMethods.filter(f => !results.failedMethods.some(rf => rf.method === f.method))
+    ];
+
+    console.log(`[ExtractionTester] Final best result: ${sortedResults[0]?.method || 'none'} (${sortedResults[0]?.confidence || 0}%)`);
+    console.log('========================================');
+
+    return {
+      results: sortedResults,
+      failedMethods: allFailedMethods,
+      totalMethodsTested: results.totalMethodsTested,
+      retriesAttempted: 2
+    };
+  }
+
+  /**
    * Test all extraction methods for a field and return ranked results
    * @param {string} fieldName - Field to test (e.g., 'name', 'email')
    * @param {Object} cardElement - Puppeteer element handle for the card
@@ -67,9 +191,11 @@ class ExtractionTester {
     // Test each method
     for (const methodId of applicableMethods) {
       try {
+        console.log(`[ExtractionTester] Running method: ${methodId}`);
         const result = await this.runMethod(methodId, cardElement, fieldCoords, fieldName);
 
         if (result.value && result.confidence > 0) {
+          console.log(`[ExtractionTester]   ✓ ${methodId}: "${result.value?.slice(0, 50)}" (${result.confidence}%)`);
           results.push({
             method: methodId,
             methodLabel: EXTRACTION_METHODS[methodId]?.label || methodId,
@@ -78,13 +204,14 @@ class ExtractionTester {
             metadata: result.metadata
           });
         } else {
+          console.log(`[ExtractionTester]   ✗ ${methodId}: ${result.metadata?.error || 'No value'}`);
           failedMethods.push({
             method: methodId,
             reason: result.metadata?.error || 'No value extracted'
           });
         }
       } catch (error) {
-        console.error(`[ExtractionTester] Method ${methodId} failed:`, error.message);
+        console.error(`[ExtractionTester]   ✗ ${methodId} exception:`, error.message);
         failedMethods.push({
           method: methodId,
           reason: error.message
