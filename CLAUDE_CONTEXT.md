@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns. 
 
-**Last Updated**: December 6, 15:25
+**Last Updated**: December 6, 17:30
 
 ---
 
@@ -28,6 +28,7 @@ page-scrape/
 ├── orchestrator.js              # Main entry point - CLI orchestration
 ├── package.json                 # Project dependencies and scripts
 ├── CLAUDE_CONTEXT.md            # This file - comprehensive project documentation
+├── REORGANIZATION_PLAN.md       # Detailed plan for codebase reorganization
 ├── configs/                     # Configuration files root
 │   ├── _default.json           # System: Default fallback config
 │   ├── _template.json          # System: Template for new configs
@@ -35,36 +36,60 @@ page-scrape/
 │   └── website-configs/        # Website-specific configs (domain-named)
 │       └── {domain}.json       # e.g., sullcrom-com.json, example-com.json
 ├── src/
+│   ├── index.js                # Main module index (unified imports)
+│   │
+│   ├── core/                   # [NEW] Core infrastructure
+│   │   ├── index.js            # Core exports
+│   │   ├── browser-manager.js  # Puppeteer browser handling
+│   │   ├── logger.js           # Winston logging setup
+│   │   └── rate-limiter.js     # Request throttling
+│   │
+│   ├── config/                 # [NEW] Configuration management
+│   │   ├── index.js            # Config exports
+│   │   ├── config-loader.js    # Config file loading/validation
+│   │   └── schemas.js          # v2.3 schema definitions
+│   │
+│   ├── extraction/             # [NEW] Field extraction system
+│   │   ├── index.js            # Extraction exports
+│   │   ├── multi-method-extractor.js  # Multi-method runtime extractor
+│   │   ├── smart-field-extractor.js   # Smart field detection
+│   │   └── extractors/         # Individual field extractors
+│   │       ├── index.js        # Extractor exports
+│   │       ├── email-extractor.js     # 4-layer mailto detection
+│   │       ├── phone-extractor.js     # 4-layer tel detection
+│   │       ├── link-extractor.js      # href/data-* extraction
+│   │       ├── label-extractor.js     # Label detection
+│   │       ├── screenshot-extractor.js # OCR extraction
+│   │       └── coordinate-extractor.js # Coordinate extraction
+│   │
 │   ├── scrapers/               # Core scraping implementations
 │   │   ├── index.js            # Scraper exports
 │   │   ├── base-scraper.js     # Abstract base class
 │   │   ├── simple-scraper.js   # HTML DOM-based scraper
 │   │   ├── select-scraper.js   # Text selection scraper
 │   │   ├── pdf-scraper.js      # PDF rendering scraper
-│   │   ├── config-scraper.js   # Config-driven scraper (main)
-│   │   └── visual-scraper.js   # v2.3 visual scraper (coordinate-based)
-│   ├── utils/                  # Utility modules
-│   │   ├── browser-manager.js  # Puppeteer browser handling
-│   │   ├── config-loader.js    # Config file loading/validation
+│   │   └── config-scraper.js   # Config-driven scraper (main)
+│   │
+│   ├── utils/                  # Legacy utilities (still used)
+│   │   ├── browser-manager.js  # [Legacy - use src/core/]
+│   │   ├── config-loader.js    # [Legacy - use src/config/]
 │   │   ├── contact-extractor.js # Shared extraction logic
 │   │   ├── domain-extractor.js # Email domain classification
-│   │   ├── logger.js           # Winston logging setup
-│   │   ├── rate-limiter.js     # Request throttling
+│   │   ├── logger.js           # [Legacy - use src/core/]
+│   │   ├── rate-limiter.js     # [Legacy - use src/core/]
 │   │   ├── text-parser.js      # Text-to-contact parsing
 │   │   ├── profile-visitor.js  # Profile page enrichment
 │   │   ├── google-sheets-exporter.js # Google Sheets export
 │   │   └── constants.js        # Shared constants
+│   │
 │   ├── features/
-│   │   ├── pagination/         # Pagination subsystem
-│   │   │   ├── index.js        # Exports
-│   │   │   ├── paginator.js    # Main pagination orchestrator
-│   │   │   ├── pattern-detector.js # Pattern discovery
-│   │   │   ├── binary-searcher.js  # True max page finder
-│   │   │   └── url-generator.js    # Page URL generation
-│   │   └── workflows/          # High-level workflows
+│   │   └── pagination/         # Pagination subsystem
 │   │       ├── index.js        # Exports
-│   │       ├── scraping-workflow.js # Main scraping flow
-│   │       └── export-workflow.js   # Data export flow
+│   │       ├── paginator.js    # Main pagination orchestrator
+│   │       ├── pattern-detector.js # Pattern discovery
+│   │       ├── binary-searcher.js  # True max page finder
+│   │       └── url-generator.js    # Page URL generation
+│   │
 │   └── tools/                  # Development/utility tools
 │       ├── config-generator.js # Interactive config creator (v2.3)
 │       ├── test-config.js      # v2.3 Config testing tool
@@ -75,29 +100,16 @@ page-scrape/
 │       └── lib/                # Tool-specific modules
 │           ├── interactive-session.js # v2.3 Browser UI session
 │           ├── element-capture.js     # Element selection
-│           ├── multi-method-extractor.js # Field extraction
 │           ├── config-builder.js      # v2.3 Config assembly
-│           ├── config-schemas.js      # v2.3 Schema definitions (15 methods)
-│           ├── extraction-tester.js   # v2.3 Multi-method testing orchestrator
-│           ├── screenshot-extractor.js # v2.3 OCR extraction (Tesseract.js)
-│           ├── coordinate-extractor.js # v2.3 Coordinate-based extraction
-│           ├── email-extractor.js     # v2.3 Email extraction (4-layer mailto detection)
-│           ├── phone-extractor.js     # v2.3 Phone extraction (4-layer tel detection)
-│           ├── link-extractor.js      # v2.3 Link/URL extraction (href, data-*)
-│           ├── label-extractor.js     # v2.3 Label detection ("Email:", etc.)
-│           ├── card-matcher.js        # Card pattern matching
-│           ├── smart-field-extractor.js # Smart field detection
-│           ├── enhanced-capture.js    # Enhanced element capture
-│           ├── profile-enrichment.js  # Profile page enrichment
-│           └── constants/
-│               └── field-requirements.js # Field requirement definitions
+│           ├── extraction-tester.js   # v2.3 Multi-method testing
+│           └── ... (other tool modules)
+│
 ├── tests/                      # Test files
 │   ├── scraper-test.js         # SimpleScraper tests
 │   ├── select-scraper-test.js  # SelectScraper tests
 │   ├── pagination-test.js      # Pagination tests
 │   ├── pagination-integration-test.js # Integration tests
 │   ├── pdf-scraper-test.js     # PDF scraper tests
-│   ├── refactoring-tests.js    # Refactoring validation
 │   ├── v22-integration.test.js # v2.2 integration tests
 │   └── test-utils.js           # Test utilities
 ├── .cache/                     # Tesseract OCR cache (gitignored)
@@ -106,6 +118,28 @@ page-scrape/
 │   ├── pdfs/                   # Rendered PDFs
 │   └── *.json|csv              # Scraped data
 └── logs/                       # Log files (gitignored)
+```
+
+### New Module Import System
+
+The reorganized codebase provides unified imports through `src/index.js`:
+
+```javascript
+// New recommended imports
+const { BrowserManager, logger, RateLimiter } = require('./src/core');
+const { ConfigLoader, validateConfigV23 } = require('./src/config');
+const { EmailExtractor, MultiMethodExtractor } = require('./src/extraction');
+
+// Or use the unified index
+const src = require('./src');
+const { BrowserManager, ConfigLoader, EmailExtractor } = src;
+```
+
+Legacy imports still work for backward compatibility:
+```javascript
+// These still work but new code should use src/core, src/config, etc.
+const logger = require('./src/utils/logger');
+const BrowserManager = require('./src/utils/browser-manager');
 ```
 
 ---
@@ -222,28 +256,6 @@ node orchestrator.js --url <url>           # Target URL (required)
 2. Card pattern detection
 3. Text parsing fallback
 4. Profile enrichment (optional)
-
----
-
-### src/scrapers/visual-scraper.js
-
-**Purpose**: Runtime scraper that uses v2.3 configs with user-validated methods.
-
-**Key Methods**:
-- `initialize(config)` - Setup with v2.3 config
-- `scrape(url, options)` - Extract contacts from URL
-- `extractContactFromCard(cardElement, index)` - Single card extraction
-- `extractField(cardElement, fieldName, fieldConfig)` - Field extraction using validated method
-- `extractWithOCR(cardElement, coords)` - OCR extraction
-- `extractWithCoordinates(cardElement, coords)` - Coordinate extraction
-- `cleanup()` - Release resources
-
-**Extraction Flow**:
-1. Navigate to URL
-2. Find cards using `config.cardPattern.primarySelector`
-3. For each card, extract fields using `config.fields[name].userValidatedMethod`
-4. Apply method-specific extraction (OCR, coordinates, selector, etc.)
-5. Return validated contacts
 
 ---
 
