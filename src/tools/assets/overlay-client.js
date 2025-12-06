@@ -1469,52 +1469,77 @@
   }
 
   /**
-   * Process field rectangle - send to backend for extraction
+   * Process field rectangle - send DIRECTLY to v2.3 multi-method testing
+   * IMPORTANT: This function bypasses v2.2 entirely and calls v2.3 directly
    */
   async function processFieldRectangle(box) {
     const fieldName = state.currentField;
-    console.log(`[ConfigGen v2.2] Processing field rectangle for ${fieldName}:`, box);
+    console.log('');
+    console.log('========================================');
+    console.log(`[v2.3 Routing] Processing field: ${fieldName.toUpperCase()}`);
+    console.log('========================================');
+    console.log(`[v2.3] Box coordinates:`, box);
 
     // Store the absolute box for v2.3 extraction testing
     state.lastFieldAbsoluteBox = box;
 
+    // Show progress feedback
+    const section = document.getElementById('feedbackSection');
+    if (section) {
+      section.className = 'feedback-section';
+      section.innerHTML = `
+        <div class="waiting-indicator">
+          <span class="pulse">●</span> Testing extraction methods for ${fieldName}...
+        </div>
+      `;
+    }
+
+    // Prepare test data - send ABSOLUTE box coordinates directly to v2.3
+    const testData = {
+      fieldName: fieldName,
+      box: box,  // Absolute viewport coordinates
+      cardSelector: state.previewData?.cardSelector || state.matchResult?.selector
+    };
+
+    console.log(`[v2.3 Routing] Field: ${fieldName} → Multi-method testing`);
+    console.log('[v2.3] Test data:', JSON.stringify(testData, null, 2));
+
     try {
-      // Send to backend for extraction
-      if (typeof __configGen_handleFieldRectangle === 'function') {
-        await __configGen_handleFieldRectangle({
-          fieldName: fieldName,
-          box: box
-        });
+      // Call v2.3 backend directly - skip v2.2 entirely
+      if (typeof __configGen_testFieldExtraction === 'function') {
+        console.log('[v2.3] Calling __configGen_testFieldExtraction...');
+        await __configGen_testFieldExtraction(testData);
+        console.log('[v2.3] Backend call completed, waiting for handleExtractionResults callback');
+        // Backend will call window.handleExtractionResults when done
       } else {
-        throw new Error('Backend function not available');
+        console.error('[v2.3] CRITICAL: __configGen_testFieldExtraction NOT AVAILABLE');
+        console.error('[v2.3] This is a v2.3 system - v2.2 fallback is NOT supported');
+        showErrorFeedback('v2.3 backend function not available - check console for details');
       }
     } catch (error) {
-      console.error('[ConfigGen v2.2] Field rectangle processing error:', error);
-      showErrorFeedback('Failed to process selection: ' + error.message);
+      console.error('[v2.3] Extraction test failed:', error);
+      console.error('[v2.3] Error stack:', error.stack);
+      showErrorFeedback('Extraction testing failed: ' + error.message);
     }
   }
 
   /**
-   * Handle field rectangle result from backend
-   * Called by backend via page.evaluate
+   * DEPRECATED: Handle field rectangle result from backend
+   * This function is no longer used - processFieldRectangle now calls v2.3 directly
+   * Kept for backwards compatibility but should never be called
    */
   window.handleFieldRectangleResult = function(result) {
-    console.log('[ConfigGen v2.3] Field rectangle result:', result);
+    console.warn('[DEPRECATED] handleFieldRectangleResult called - this should not happen in v2.3');
+    console.warn('[DEPRECATED] processFieldRectangle should call __configGen_testFieldExtraction directly');
+    console.log('[DEPRECATED] Result received:', result);
 
-    if (!result.success) {
+    // If somehow called, still try to process via v2.3
+    if (result.success && result.fieldName) {
+      console.log('[DEPRECATED] Attempting v2.3 extraction as fallback...');
+      triggerV23Extraction(result.fieldName, result);
+    } else {
       showErrorFeedback(result.error || 'Could not extract field value');
-      return;
     }
-
-    const fieldName = result.fieldName;
-
-    // ===========================
-    // v2.3: ALL FIELDS - MULTI-METHOD EXTRACTION
-    // ===========================
-    // Trigger v2.3 multi-method extraction testing for ALL fields
-    // This tests multiple extraction methods and lets user validate the best one
-    console.log(`[ConfigGen v2.3] ${fieldName.toUpperCase()} field detected - triggering multi-method extraction`);
-    triggerV23Extraction(fieldName, result);
   };
 
   /**
