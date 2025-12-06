@@ -2,6 +2,8 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
+**Last Updated**: December 2024
+
 ---
 
 ## Project Overview
@@ -10,12 +12,12 @@ This document provides comprehensive context for Claude when editing this projec
 
 ### Key Features
 - **Multi-method extraction**: DOM-based, text selection, and PDF rendering
+- **v2.3 Visual Config Generator**: Interactive tool with 4-layer detection and multi-method extraction testing
 - **Automatic pagination**: Detects and handles URL-based and offset-based pagination
 - **Anti-detection**: Stealth browser configuration with random user agents
 - **Domain classification**: Identifies business vs personal email domains
-- **Config generation v2.3**: Visual tool with multi-method extraction testing and user validation
-- **Multiple output formats**: JSON, CSV, Google Sheets export
 - **OCR extraction**: Tesseract.js-based screenshot text extraction
+- **Multiple output formats**: JSON, CSV, Google Sheets export
 
 ---
 
@@ -25,6 +27,7 @@ This document provides comprehensive context for Claude when editing this projec
 page-scrape/
 ├── orchestrator.js              # Main entry point - CLI orchestration
 ├── package.json                 # Project dependencies and scripts
+├── CLAUDE_CONTEXT.md            # This file - comprehensive project documentation
 ├── configs/                     # Site-specific configuration files
 │   ├── _default.json           # Default fallback config
 │   ├── _template.json          # Template for new configs
@@ -62,7 +65,7 @@ page-scrape/
 │   │       ├── scraping-workflow.js # Main scraping flow
 │   │       └── export-workflow.js   # Data export flow
 │   └── tools/                  # Development/utility tools
-│       ├── config-generator.js # Interactive config creator
+│       ├── config-generator.js # Interactive config creator (v2.3)
 │       ├── test-config.js      # v2.3 Config testing tool
 │       ├── site-tester.js      # Site testing utility
 │       ├── assets/             # UI assets for config generator
@@ -77,16 +80,25 @@ page-scrape/
 │           ├── extraction-tester.js   # v2.3 Multi-method testing orchestrator
 │           ├── screenshot-extractor.js # v2.3 OCR extraction (Tesseract.js)
 │           ├── coordinate-extractor.js # v2.3 Coordinate-based extraction
-│           ├── email-extractor.js     # v2.3 Email extraction (regex, mailto:)
-│           ├── phone-extractor.js     # v2.3 Phone extraction (regex, tel:)
+│           ├── email-extractor.js     # v2.3 Email extraction (4-layer mailto detection)
+│           ├── phone-extractor.js     # v2.3 Phone extraction (4-layer tel detection)
 │           ├── link-extractor.js      # v2.3 Link/URL extraction (href, data-*)
 │           ├── label-extractor.js     # v2.3 Label detection ("Email:", etc.)
-│           └── ...                    # Other helpers
+│           ├── card-matcher.js        # Card pattern matching
+│           ├── smart-field-extractor.js # Smart field detection
+│           ├── enhanced-capture.js    # Enhanced element capture
+│           ├── profile-enrichment.js  # Profile page enrichment
+│           └── constants/
+│               └── field-requirements.js # Field requirement definitions
 ├── tests/                      # Test files
 │   ├── scraper-test.js         # SimpleScraper tests
 │   ├── select-scraper-test.js  # SelectScraper tests
 │   ├── pagination-test.js      # Pagination tests
-│   └── ...                     # Other tests
+│   ├── pagination-integration-test.js # Integration tests
+│   ├── pdf-scraper-test.js     # PDF scraper tests
+│   ├── refactoring-tests.js    # Refactoring validation
+│   ├── v22-integration.test.js # v2.2 integration tests
+│   └── test-utils.js           # Test utilities
 ├── .cache/                     # Tesseract OCR cache (gitignored)
 │   └── tesseract/              # Language data and worker files
 ├── output/                     # Generated output (gitignored)
@@ -113,22 +125,19 @@ page-scrape/
 **CLI Options**:
 ```bash
 node orchestrator.js --url <url>           # Target URL (required)
-                     --method <method>     # select|simple|pdf|config (default: config)
+                     --method <method>     # html|pdf|hybrid|select|config (default: hybrid)
+                     --config <name>       # Config file for --method config
                      --limit <n>           # Max contacts
                      --headless <bool>     # Browser mode (default: true)
                      --delay <ms>          # Request delay range (default: 2000-5000)
-                     --output <file>       # Output filename
-                     --format <format>     # json|csv|both
+                     --output <format>     # json|csv|sheets|all
                      --keep                # Keep PDF files
+                     --paginate            # Enable pagination
                      --start-page <n>      # Resume from page
                      --max-pages <n>       # Max pages to scrape
+                     --scroll              # Enable infinite scroll handling
+                     --max-scrolls <n>     # Max scroll attempts (default: 50)
 ```
-
-**Key Functions**:
-- `main()` - Entry point, initializes components and runs workflow
-- `runScrapeWorkflow()` - Orchestrates the scraping process
-- `handlePagination()` - Coordinates pagination discovery and execution
-- `exportResults()` - Saves data to files
 
 **Dependencies**: All scrapers, browser-manager, rate-limiter, logger, paginator
 
@@ -192,14 +201,6 @@ node orchestrator.js --url <url>           # Target URL (required)
 - `scrollPage(page, scrollConfig)` - Handle lazy-loaded content
 - `detectContainerPattern(page, startPos, endPos)` - Auto-detect containers
 
-**Algorithm**:
-1. Load config for domain
-2. Navigate and scroll to load content
-3. Find start/end markers (text or coordinate)
-4. Try DOM extraction first
-5. Fall back to text selection if DOM fails
-6. Parse text into contacts
-
 ---
 
 ### src/scrapers/config-scraper.js
@@ -220,6 +221,28 @@ node orchestrator.js --url <url>           # Target URL (required)
 2. Card pattern detection
 3. Text parsing fallback
 4. Profile enrichment (optional)
+
+---
+
+### src/scrapers/visual-scraper.js
+
+**Purpose**: Runtime scraper that uses v2.3 configs with user-validated methods.
+
+**Key Methods**:
+- `initialize(config)` - Setup with v2.3 config
+- `scrape(url, options)` - Extract contacts from URL
+- `extractContactFromCard(cardElement, index)` - Single card extraction
+- `extractField(cardElement, fieldName, fieldConfig)` - Field extraction using validated method
+- `extractWithOCR(cardElement, coords)` - OCR extraction
+- `extractWithCoordinates(cardElement, coords)` - Coordinate extraction
+- `cleanup()` - Release resources
+
+**Extraction Flow**:
+1. Navigate to URL
+2. Find cards using `config.cardPattern.primarySelector`
+3. For each card, extract fields using `config.fields[name].userValidatedMethod`
+4. Apply method-specific extraction (OCR, coordinates, selector, etc.)
+5. Return validated contacts
 
 ---
 
@@ -310,12 +333,6 @@ node orchestrator.js --url <url>           # Target URL (required)
 - `findNameInContext(beforeContext, email, emailPos)` - Find name near email
 - `calculateConfidence(name, email, phone)` - 'high'/'medium'/'low'
 - `getUniversalExtractionCode()` - Browser-injectable extraction code
-
-**Browser Context Functions** (for Puppeteer evaluate):
-- `extractEmailsFromElement(element)` - Multi-strategy email extraction
-- `extractPhonesFromElement(element)` - Multi-strategy phone extraction
-- `extractNameFromElement(element)` - Multi-strategy name extraction
-- `extractContactFromCard(card)` - Complete card extraction
 
 ---
 
@@ -426,11 +443,6 @@ node orchestrator.js --url <url>           # Target URL (required)
 }
 ```
 
-**Delegates To**:
-- `PatternDetector` - Pattern discovery
-- `BinarySearcher` - True max page finding
-- `UrlGenerator` - Page URL generation
-
 ---
 
 ### src/features/pagination/pattern-detector.js
@@ -443,60 +455,12 @@ node orchestrator.js --url <url>           # Target URL (required)
 3. Visual controls + navigation
 4. URL analysis (fallback)
 
-**Key Methods**:
-- `discoverPattern(page, currentUrl, siteConfig)` - Main discovery
-- `detectPaginationControls(page)` - Find visual controls (next/prev buttons, page numbers)
-- `detectInfiniteScroll(page)` - Check for infinite scroll
-- `calculatePatternConfidence(pattern, controls)` - Score 0-100
-
 **Pattern Types**:
 - `parameter` - URL query param (`?page=2`)
 - `path` - URL path segment (`/page/2`)
 - `offset` - Offset-based (`?start=20`)
 - `cursor` - Cursor-based (not fully supported)
 - `infinite-scroll` - Infinite scroll detected
-
----
-
-### src/features/pagination/binary-searcher.js
-
-**Purpose**: Finds true maximum page number using binary search.
-
-**Algorithm**:
-1. Start with visual max or hard cap
-2. Binary search between known good and potential max
-3. Test each page for content
-4. Return confirmed maximum
-
----
-
-### src/features/pagination/url-generator.js
-
-**Purpose**: Generates page URLs from patterns.
-
-**Key Methods**:
-- `generatePageUrl(pattern, pageNum)` - Generate single page URL
-- `createGenerator(pattern)` - Create reusable generator function
-
----
-
-### src/tools/config-generator.js
-
-**Purpose**: CLI tool to visually create site-specific configs.
-
-**Usage**:
-```bash
-node src/tools/config-generator.js --url "https://example.com/directory"
-```
-
-**Process**:
-1. Opens browser in visible mode
-2. User draws rectangle around a contact card
-3. System finds similar cards on the page
-4. User selects each field (name, email, phone, profileUrl, etc.)
-5. v2.3: System tests multiple extraction methods per field
-6. v2.3: User validates best extraction method
-7. Generates and saves config file
 
 ---
 
@@ -514,9 +478,27 @@ Instead of relying on auto-detection, v2.3:
 5. Config stores user-validated method with coordinates for each field
 6. Runtime scraper uses validated methods to extract data from all cards
 
-**v2.3 now applies to ALL fields** (name, email, phone, title, location, profileUrl), not just NAME.
+**v2.3 now applies to ALL fields** (name, email, phone, title, location, profileUrl).
 
-**Field Validation Requirements**:
+### Most Recent Implementation (December 2024)
+
+**Key Changes**:
+
+1. **Pure v2.3 Routing**: `processFieldRectangle()` in overlay-client.js now calls `__configGen_testFieldExtraction` directly, bypassing v2.2 entirely
+2. **4-Layer Detection Strategy**: Both email and phone extractors use a sophisticated 4-layer detection:
+   - Layer 1: Direct hit - click point is directly on mailto:/tel: link
+   - Layer 2: Text-triggered - center text contains keywords, find nearby link
+   - Layer 3: Expanded area scan - search broader region for links
+   - Layer 4: Failure with diagnostic info
+
+3. **Auto-Retry with Area Expansion**: `testFieldWithRetry()` in extraction-tester.js automatically expands search area on failure:
+   - Attempt 1: Original coordinates
+   - Attempt 2: 50% expanded area
+   - Attempt 3: 100% expanded area
+
+4. **Deprecated v2.2**: `handleFieldRectangleResult()` is now deprecated and logs warnings if called
+
+### Field Validation Requirements
 - **Required fields** (name, email, profileUrl): Must be validated before config can be saved
 - **Optional fields** (phone, title, location): Can be skipped if not available on the page
 
@@ -536,14 +518,14 @@ v2.3 supports 15 extraction methods organized by field applicability:
 #### Email-Specific Methods
 | Method | ID | Description | Priority |
 |--------|-----|-------------|----------|
-| Mailto Link | `mailto-link` | Extract from mailto: href (most reliable) | 1 |
+| Mailto Link | `mailto-link` | Extract from mailto: href (4-layer detection) | 1 |
 | Email RegEx | `regex-email` | Regex pattern matching in region | 2 |
 | Email Label | `label-email` | Find "Email:" label and extract adjacent value | 4 |
 
 #### Phone-Specific Methods
 | Method | ID | Description | Priority |
 |--------|-----|-------------|----------|
-| Tel Link | `tel-link` | Extract from tel: href (most reliable) | 1 |
+| Tel Link | `tel-link` | Extract from tel: href (4-layer detection) | 1 |
 | Phone RegEx | `regex-phone` | Regex pattern matching in region | 2 |
 | Phone Label | `label-phone` | Find "Phone:" label and extract adjacent value | 4 |
 
@@ -559,7 +541,9 @@ v2.3 supports 15 extraction methods organized by field applicability:
 | Title Label | `label-title` | Find "Title:" or "Position:" label | 3 |
 | Location Label | `label-location` | Find "Location:" or "Office:" label | 3 |
 
-### Key Files
+---
+
+### Key v2.3 Files
 
 #### src/tools/lib/config-schemas.js
 
@@ -568,6 +552,7 @@ v2.3 supports 15 extraction methods organized by field applicability:
 **Exports**:
 - `FIELD_ORDER` - Field processing order: ['name', 'email', 'phone', 'profileUrl', 'title', 'location']
 - `REQUIRED_FIELDS` - ['name', 'email', 'profileUrl']
+- `OPTIONAL_FIELDS` - ['phone', 'title', 'location']
 - `FIELD_METADATA` - Labels, prompts, validation hints per field
 - `EXTRACTION_METHODS` - Method definitions with priorities
 - `createFieldSchema()` - Create empty field schema
@@ -579,13 +564,129 @@ v2.3 supports 15 extraction methods organized by field applicability:
 {
   required: Boolean,
   skipped: Boolean,
-  userValidatedMethod: String,  // e.g., 'coordinate-text', 'screenshot-ocr'
+  userValidatedMethod: String,  // e.g., 'coordinate-text', 'mailto-link'
   coordinates: { x, y, width, height },  // Relative to card
   selector: String | null,
   sampleValue: String,
   confidence: Number,  // 0-100
   extractionOptions: Array,  // All tested options
   failedMethods: Array
+}
+```
+
+---
+
+#### src/tools/lib/email-extractor.js
+
+**Purpose**: Specialized email extraction with 4-layer mailto detection.
+
+**Key Methods**:
+- `extractFromRegion(cardElement, fieldCoords)` - Extract email using regex patterns
+- `extractFromMailtoLink(cardElement, fieldCoords)` - **4-layer mailto detection**
+
+**4-Layer Detection Strategy**:
+```javascript
+// Layer 1: Direct hit - click point is directly on mailto link
+// Layer 2: Text-triggered - center text is "Email" keyword, find nearby mailto
+// Layer 3: Expanded area scan - search broader region (±100px) for mailto links
+// Layer 4: Failure with diagnostic info (suggestions for user)
+```
+
+**Email Regex**: `/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}/gi`
+
+**Returns**:
+```javascript
+{
+  value: String,           // Extracted email address
+  confidence: Number,      // 0-100 based on detection layer
+  metadata: {
+    method: 'regex-email' | 'mailto-link',
+    layer: 'direct-hit' | 'text-triggered' | 'expanded-area-scan' | 'all-failed',
+    linkText: String,      // Text of the link element
+    searchRadius: Number   // Pixels searched
+  }
+}
+```
+
+---
+
+#### src/tools/lib/phone-extractor.js
+
+**Purpose**: Specialized phone number extraction with 4-layer tel detection.
+
+**Key Methods**:
+- `extractFromRegion(cardElement, fieldCoords)` - Extract phone using regex patterns
+- `extractFromTelLink(cardElement, fieldCoords)` - **4-layer tel link detection**
+
+**4-Layer Detection Strategy**:
+```javascript
+// Layer 1: Direct hit - click point is directly on tel link
+// Layer 2: Text-triggered - center text contains phone pattern or keyword
+// Layer 3: Expanded area scan - search broader region (±80px) for tel links
+// Layer 4: Failure with diagnostic info
+```
+
+**Phone Patterns** (tested in order):
+1. `+1-212-558-3960` - International with country code
+2. `(212) 558-3960` - Standard US format
+3. `212-558-3960` - Dashed format
+4. `212.558.3960` - Dotted format
+5. `2125583960` - Plain 10 digits
+
+**Phone Normalization**:
+```javascript
+normalizePhone(phone) {
+  // Always outputs: +1-XXX-XXX-XXXX format
+  // Examples:
+  //   "2125583960" → "+1-212-558-3960"
+  //   "+12125583960" → "+1-212-558-3960"
+  //   "(212) 558-3960" → "+1-212-558-3960"
+}
+```
+
+---
+
+#### src/tools/lib/extraction-tester.js
+
+**Purpose**: Orchestrates multiple extraction methods and returns ranked results.
+
+**Key Methods**:
+- `initialize()` - Setup all extractors, initialize OCR
+- `terminate()` - Cleanup all extractors
+- `expandCoordinates(coords, factor)` - Expand coordinates for retry
+- `testFieldWithRetry(fieldName, cardElement, fieldCoords)` - **Auto-retry with area expansion**
+- `testField(fieldName, cardElement, fieldCoords)` - Test all applicable methods
+- `getMethodsForField(fieldName)` - Get methods for specific field type
+- `runMethod(methodId, cardElement, fieldCoords, fieldName)` - Execute single method
+- `formatForUI(testResults, fieldName)` - Format results for overlay display
+
+**Auto-Retry Strategy**:
+```javascript
+async testFieldWithRetry(fieldName, cardElement, fieldCoords) {
+  // Attempt 1: Original coordinates
+  let results = await this.testField(fieldName, cardElement, fieldCoords);
+  if (bestResult.confidence >= 70) return results;
+
+  // Attempt 2: Expand by 50%
+  const expanded50 = this.expandCoordinates(fieldCoords, 0.5);
+  const results50 = await this.testField(fieldName, cardElement, expanded50);
+  if (bestResult.confidence >= 70) return results50;
+
+  // Attempt 3: Expand by 100%
+  const expanded100 = this.expandCoordinates(fieldCoords, 1.0);
+  return await this.testField(fieldName, cardElement, expanded100);
+}
+```
+
+**Returns**:
+```javascript
+{
+  results: [
+    { method, methodLabel, value, confidence, metadata }
+  ],  // Top 5 sorted by confidence
+  failedMethods: [{ method, reason }],
+  totalMethodsTested: Number,
+  retriesAttempted: Number
 }
 ```
 
@@ -625,209 +726,9 @@ this.worker = await Tesseract.createWorker('eng', 1, {
 });
 ```
 
-**Returns**:
-```javascript
-{
-  value: String,
-  confidence: Number,
-  metadata: { method: 'screenshot-ocr', ocrConfidence, rawText, ... }
-}
-```
-
 ---
 
-#### src/tools/lib/coordinate-extractor.js
-
-**Purpose**: DOM-based text extraction at specific coordinates.
-
-**Key Methods**:
-- `extractFromRegion(cardElement, fieldCoords)` - Find text at coordinates
-- `extractLinkFromRegion(cardElement, fieldCoords)` - Extract href
-- `extractMailtoFromRegion(cardElement, fieldCoords)` - Extract email from mailto:
-- `extractTelFromRegion(cardElement, fieldCoords)` - Extract phone from tel:
-
-**Algorithm**:
-1. Calculate absolute coordinates from card + field offset
-2. Use TreeWalker to find text nodes in region
-3. Check rect overlap with target region
-4. Combine overlapping texts
-5. Calculate confidence based on overlap quality
-
----
-
-#### src/tools/lib/email-extractor.js
-
-**Purpose**: Specialized email extraction using regex patterns and mailto: links.
-
-**Key Methods**:
-- `extractFromRegion(cardElement, fieldCoords)` - Extract email using regex patterns
-- `extractFromMailtoLink(cardElement, fieldCoords)` - Extract from mailto: href attribute
-- `findEmailsInText(text)` - Find all email patterns in text
-- `scoreEmail(email)` - Score email confidence based on domain patterns
-
-**Email Regex**: `/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}/gi`
-
-**Returns**:
-```javascript
-{
-  value: String,           // Extracted email address
-  confidence: Number,      // 0-100 based on domain scoring
-  metadata: { method: 'regex-email' | 'mailto-link', ... }
-}
-```
-
----
-
-#### src/tools/lib/phone-extractor.js
-
-**Purpose**: Specialized phone number extraction using multiple regex patterns.
-
-**Key Methods**:
-- `extractFromRegion(cardElement, fieldCoords)` - Extract phone using regex patterns
-- `extractFromTelLink(cardElement, fieldCoords)` - Extract from tel: href attribute
-- `findPhonesInText(text)` - Find all phone patterns in text
-- `normalizePhone(phone)` - Normalize to consistent format
-
-**Phone Patterns** (tested in order):
-1. `+1 (XXX) XXX-XXXX` - International with country code
-2. `(XXX) XXX-XXXX` - Standard US format
-3. `XXX-XXX-XXXX` - Dashed format
-4. `XXX.XXX.XXXX` - Dotted format
-5. `XXXXXXXXXX` - Plain 10 digits
-
-**Returns**:
-```javascript
-{
-  value: String,           // Normalized phone number
-  confidence: Number,      // Higher for tel: links
-  metadata: { method: 'regex-phone' | 'tel-link', format, ... }
-}
-```
-
----
-
-#### src/tools/lib/link-extractor.js
-
-**Purpose**: Extracts profile URLs from anchor tags and data attributes.
-
-**Key Methods**:
-- `extractFromRegion(cardElement, fieldCoords)` - Extract href from anchor tags
-- `extractDataAttribute(cardElement, fieldCoords)` - Extract from data-url attributes
-- `scoreLink(link)` - Score link for profile URL likelihood
-
-**Link Scoring**:
-- +15 points: URL contains profile-related paths (/profile, /lawyer, /team, /bio)
-- +10 points: Link text contains profile-related words (profile, view, bio)
-- +15 points: Link text looks like a name (2-4 capitalized words)
-- +5 points: Direct hit at click coordinates
-- -30 points: javascript: or # links
-- -10 points: Social media links (LinkedIn, Twitter, Facebook)
-
-**Data Attributes Checked**: `data-url`, `data-href`, `data-link`, `data-profile-url`, `data-profile`, `data-bio-url`
-
-**Returns**:
-```javascript
-{
-  value: String,           // Full URL (converted to absolute if needed)
-  confidence: Number,      // Based on link scoring
-  metadata: {
-    method: 'href-link' | 'data-url',
-    linkText: String,
-    totalLinks: Number,
-    allLinks: Array       // Top 5 links with scores
-  }
-}
-```
-
----
-
-#### src/tools/lib/label-extractor.js
-
-**Purpose**: Finds labeled fields (e.g., "Email:", "Phone:") and extracts adjacent values.
-
-**Label Patterns**:
-```javascript
-{
-  email: /\b(email|e-mail|contact|mail)\s*:?/i,
-  phone: /\b(phone|tel|telephone|call|fax|mobile|cell)\s*:?/i,
-  location: /\b(location|office|address|city|region)\s*:?/i,
-  title: /\b(title|position|role|designation)\s*:?/i,
-  name: /\b(name|attorney|lawyer|counsel)\s*:?/i
-}
-```
-
-**Key Methods**:
-- `extractFromRegion(cardElement, fieldCoords, fieldName)` - Find label and extract value
-- `cleanValue(value, fieldName)` - Clean extracted value based on field type
-
-**Value Detection Algorithm**:
-1. Find label using pattern matching
-2. Check for value after colon in same text node
-3. Check next sibling text nodes
-4. Look for text to the right of label (same Y position)
-
-**Returns**:
-```javascript
-{
-  value: String,           // Cleaned extracted value
-  confidence: 75,          // Fixed confidence for label detection
-  metadata: {
-    method: 'label-detection',
-    label: String,         // Original label text found
-    labelRect: Object      // Label position
-  }
-}
-```
-
----
-
-#### src/tools/lib/extraction-tester.js
-
-**Purpose**: Orchestrates multiple extraction methods and returns ranked results.
-
-**Dependencies**: All specialized extractors (ScreenshotExtractor, CoordinateExtractor, EmailExtractor, PhoneExtractor, LinkExtractor, LabelExtractor)
-
-**Key Methods**:
-- `initialize()` - Setup all extractors, initialize OCR
-- `terminate()` - Cleanup all extractors
-- `testField(fieldName, cardElement, fieldCoords)` - Test all applicable methods
-- `getMethodsForField(fieldName)` - Get methods for specific field type
-- `runMethod(methodId, cardElement, fieldCoords, fieldName)` - Execute single method
-- `applyFieldValidation(fieldName, results)` - Field-specific validation/filtering
-- `formatForUI(testResults, fieldName)` - Format results for overlay display
-
-**Method Routing**:
-```javascript
-switch (methodId) {
-  case 'screenshot-ocr':    // ScreenshotExtractor
-  case 'coordinate-text':   // CoordinateExtractor
-  case 'mailto-link':       // EmailExtractor.extractFromMailtoLink
-  case 'regex-email':       // EmailExtractor.extractFromRegion
-  case 'tel-link':          // PhoneExtractor.extractFromTelLink
-  case 'regex-phone':       // PhoneExtractor.extractFromRegion
-  case 'href-link':         // LinkExtractor.extractFromRegion
-  case 'data-url':          // LinkExtractor.extractDataAttribute
-  case 'label-email':       // LabelExtractor (fieldName='email')
-  case 'label-phone':       // LabelExtractor (fieldName='phone')
-  case 'label-title':       // LabelExtractor (fieldName='title')
-  case 'label-location':    // LabelExtractor (fieldName='location')
-}
-```
-
-**Returns**:
-```javascript
-{
-  results: [
-    { method, methodLabel, value, confidence, metadata }
-  ],  // Top 5 sorted by confidence
-  failedMethods: [{ method, reason }],
-  totalMethodsTested: Number
-}
-```
-
----
-
-#### src/tools/lib/interactive-session.js (v2.3)
+#### src/tools/lib/interactive-session.js
 
 **Purpose**: Manages the interactive config generation session.
 
@@ -838,32 +739,19 @@ this.v23Selections = {};  // User-validated extraction methods
 ```
 
 **v2.3 Exposed Functions**:
-- `__configGen_testFieldExtraction(data)` - Test extraction methods
+- `__configGen_testFieldExtraction(data)` - Test extraction methods (v2.3 main entry)
 - `__configGen_confirmFieldExtraction(data)` - User confirms selection
 - `__configGen_generateV23Config(selections)` - Generate final config
 
 **v2.3 Handler Methods**:
 - `getExtractionTester()` - Lazy-load ExtractionTester
-- `handleTestFieldExtraction(data)` - Run all methods, send results to UI
+- `handleTestFieldExtraction(data)` - Calls `testFieldWithRetry()`, sends results to UI
 - `handleConfirmFieldExtraction(data)` - Store user's validated choice
 - `handleGenerateV23Config(selections)` - Build and save v2.3 config
 
 ---
 
-#### src/tools/lib/config-builder.js (v2.3)
-
-**Purpose**: Builds site-specific configuration files.
-
-**v2.3 Methods**:
-- `buildConfigV23(selections, matchResult, metadata)` - Build v2.3 config
-- `buildFieldsV23(selections)` - Build all field configs
-- `buildFieldV23(fieldData, fieldName, required)` - Build single field
-- `validateConfigV23(config)` - Validate with scoring
-- `isV23Config(config)` - Check if config is v2.3 format
-
----
-
-#### src/tools/assets/overlay-client.js (v2.3)
+#### src/tools/assets/overlay-client.js
 
 **Purpose**: Browser-side UI for the config generator overlay.
 
@@ -885,55 +773,48 @@ state.v23RequiredFields = ['name', 'email', 'profileUrl'];
 state.v23OptionalFields = ['phone', 'title', 'location'];
 ```
 
-**v2.3 States**:
-- `EXTRACTION_RESULTS` - Showing extraction method results for user validation
+**Critical v2.3 Function (Most Recent Fix)**:
+```javascript
+// processFieldRectangle - now calls v2.3 directly
+async function processFieldRectangle(box) {
+  const fieldName = state.currentField;
+  console.log(`[v2.3 Routing] Processing field: ${fieldName.toUpperCase()}`);
 
-**v2.3 Functions**:
+  const testData = {
+    fieldName: fieldName,
+    box: box,  // Absolute viewport coordinates
+    cardSelector: state.previewData?.cardSelector
+  };
+
+  // Call v2.3 backend directly - skip v2.2 entirely
+  if (typeof __configGen_testFieldExtraction === 'function') {
+    await __configGen_testFieldExtraction(testData);
+    // Backend will call window.handleExtractionResults when done
+  } else {
+    console.error('[v2.3] CRITICAL: __configGen_testFieldExtraction NOT AVAILABLE');
+    showErrorFeedback('v2.3 backend function not available');
+  }
+}
+```
+
+**Deprecated Function**:
+```javascript
+// handleFieldRectangleResult - DEPRECATED in v2.3
+window.handleFieldRectangleResult = function(result) {
+  console.warn('[DEPRECATED] handleFieldRectangleResult called - this should not happen in v2.3');
+  // Logs warning if called, attempts fallback
+};
+```
+
+**v2.3 UI Functions**:
 - `window.handleExtractionResults(result)` - Receive results from backend
 - `buildExtractionResultsPanel(fieldName, result)` - Build UI with method options
 - `selectExtractionResult(index)` - User selects a result
 - `window.confirmExtractionResult()` - Confirm selection and update progress
 - `window.retryFieldExtraction()` - Reselect area
 - `window.skipFieldFromResults()` - Skip optional field
-
-**Field Progress Tracking**:
-- `updateFieldProgressUI()` - Update visual indicators for completed fields
-- `updateFinishButtonStateV23()` - Enable/disable Finish button based on required fields
-
-**v2.3 Workflow** (ALL fields now use v2.3):
-```javascript
-window.handleFieldRectangleResult = function(result) {
-  // v2.3: ALL FIELDS - MULTI-METHOD EXTRACTION
-  console.log(`[ConfigGen v2.3] ${fieldName.toUpperCase()} field detected`);
-  triggerV23Extraction(fieldName, result);
-};
-```
-
-**Finish Button Validation**:
-- Finish button only enabled when ALL required fields (name, email, profileUrl) are validated
-- Optional fields (phone, title, location) can be skipped
-
----
-
-#### src/scrapers/visual-scraper.js
-
-**Purpose**: Runtime scraper that uses v2.3 configs with user-validated methods.
-
-**Key Methods**:
-- `initialize(config)` - Setup with v2.3 config
-- `scrape(url, options)` - Extract contacts from URL
-- `extractContactFromCard(cardElement, index)` - Single card extraction
-- `extractField(cardElement, fieldName, fieldConfig)` - Field extraction
-- `extractWithOCR(cardElement, coords)` - OCR extraction
-- `extractWithCoordinates(cardElement, coords)` - Coordinate extraction
-- `cleanup()` - Release resources
-
-**Extraction Flow**:
-1. Navigate to URL
-2. Find cards using `config.cardPattern.primarySelector`
-3. For each card, extract fields using `config.fields[name].userValidatedMethod`
-4. Apply method-specific extraction (OCR, coordinates, selector, etc.)
-5. Return validated contacts
+- `updateFieldProgressUI()` - Update visual indicators
+- `updateFinishButtonStateV23()` - Enable/disable Finish button
 
 ---
 
@@ -976,6 +857,17 @@ window.handleFieldRectangleResult = function(result) {
       "confidence": 95,
       "extractionOptions": [],
       "failedMethods": []
+    },
+    "phone": {
+      "required": false,
+      "skipped": false,
+      "userValidatedMethod": "tel-link",
+      "coordinates": { "x": 10, "y": 90, "width": 150, "height": 25 },
+      "selector": null,
+      "sampleValue": "+1-212-558-3960",
+      "confidence": 95,
+      "extractionOptions": [],
+      "failedMethods": []
     }
     // ... other fields
   },
@@ -990,15 +882,80 @@ window.handleFieldRectangleResult = function(result) {
 
 ---
 
-### src/tools/lib/multi-method-extractor.js
+## Other Tool Library Files
 
-**Purpose**: Tries multiple extraction methods for each field.
+### src/tools/lib/link-extractor.js
 
-**Methods Priority**:
-1. Direct selectors (a[href^="mailto:"], a[href^="tel:"])
-2. Data attributes
-3. Text content with regex
-4. Obfuscated patterns
+**Purpose**: Extracts profile URLs from anchor tags and data attributes.
+
+**Key Methods**:
+- `extractFromRegion(cardElement, fieldCoords)` - Extract href from anchor tags
+- `extractDataAttribute(cardElement, fieldCoords)` - Extract from data-url attributes
+- `scoreLink(link)` - Score link for profile URL likelihood
+
+**Link Scoring**:
+- +15 points: URL contains profile-related paths (/profile, /lawyer, /team, /bio)
+- +10 points: Link text contains profile-related words
+- +15 points: Link text looks like a name
+- +5 points: Direct hit at click coordinates
+- -30 points: javascript: or # links
+- -10 points: Social media links
+
+---
+
+### src/tools/lib/label-extractor.js
+
+**Purpose**: Finds labeled fields (e.g., "Email:", "Phone:") and extracts adjacent values.
+
+**Label Patterns**:
+```javascript
+{
+  email: /\b(email|e-mail|contact|mail)\s*:?/i,
+  phone: /\b(phone|tel|telephone|call|fax|mobile|cell)\s*:?/i,
+  location: /\b(location|office|address|city|region)\s*:?/i,
+  title: /\b(title|position|role|designation)\s*:?/i,
+  name: /\b(name|attorney|lawyer|counsel)\s*:?/i
+}
+```
+
+---
+
+### src/tools/lib/coordinate-extractor.js
+
+**Purpose**: DOM-based text extraction at specific coordinates.
+
+**Key Methods**:
+- `extractFromRegion(cardElement, fieldCoords)` - Find text at coordinates
+- `extractLinkFromRegion(cardElement, fieldCoords)` - Extract href
+- `extractMailtoFromRegion(cardElement, fieldCoords)` - Extract email from mailto:
+- `extractTelFromRegion(cardElement, fieldCoords)` - Extract phone from tel:
+
+**Algorithm**:
+1. Calculate absolute coordinates from card + field offset
+2. Use TreeWalker to find text nodes in region
+3. Check rect overlap with target region
+4. Combine overlapping texts
+5. Calculate confidence based on overlap quality
+
+---
+
+### src/tools/config-generator.js
+
+**Purpose**: CLI tool to visually create site-specific configs.
+
+**Usage**:
+```bash
+node src/tools/config-generator.js --url "https://example.com/directory"
+```
+
+**Process**:
+1. Opens browser in visible mode
+2. User draws rectangle around a contact card
+3. System finds similar cards on the page
+4. User selects each field (name, email, phone, profileUrl, etc.)
+5. v2.3: System tests multiple extraction methods per field with auto-retry
+6. v2.3: User validates best extraction method
+7. Generates and saves config file
 
 ---
 
@@ -1016,48 +973,12 @@ node src/tools/test-config.js <config-path> [--limit N] [--verbose] [--show]
 - `--verbose` - Show detailed extraction results per card
 - `--show` - Show browser window (not headless)
 
-**Example**:
-```bash
-node src/tools/test-config.js configs/example-com.json --limit 5 --verbose
-```
-
 **What It Tests**:
 1. Loads the v2.3 config
 2. Navigates to the config's source URL
 3. Finds cards using `cardPattern.primarySelector`
 4. For each card, extracts each field using `userValidatedMethod`
 5. Reports success rate per field
-
-**Output**:
-```
-=======================================================
-CONFIG TEST RESULTS
-=======================================================
-Config: example-com
-Version: 2.3
-Cards tested: 5
-
-✓ NAME: 100% success rate
-   5 successful, 0 failed out of 5
-   Samples: John Smith, Jane Doe, Robert Johnson
-
-✓ EMAIL: 80% success rate
-   4 successful, 1 failed out of 5
-   Samples: john@example.com, jane@example.com
-
-⚠ PHONE: 60% success rate
-   3 successful, 2 failed out of 5
-
-Overall success rate: 80%
-✓ Config is ready for production use
-```
-
-**Success Rate Indicators**:
-- ✓ Green: 80%+ success rate - Ready for production
-- ⚠ Yellow: 50-79% success rate - May need refinement
-- ✗ Red: <50% success rate - Needs significant improvement
-
-**Dependencies**: Uses same extractors as config generator (ScreenshotExtractor, CoordinateExtractor, EmailExtractor, PhoneExtractor, LinkExtractor, LabelExtractor)
 
 ---
 
@@ -1112,46 +1033,23 @@ Overall success rate: 80%
 }
 ```
 
-### Marker Types
-
-1. **Text Markers**: Find element by text content
-   ```json
-   {"type": "text", "value": "Contact Directory"}
-   ```
-
-2. **Coordinate Markers**: Use fixed Y position
-   ```json
-   {"type": "coordinate", "value": {"x": 0, "y": 500}}
-   ```
-
 ---
 
 ## Test Files
 
 ### tests/scraper-test.js
-
-Tests for SimpleScraper including:
-- Email/phone regex patterns
-- Name validation
-- Contact deduplication
-- Domain extraction
-- Live URL testing (optional)
-
-**Run**: `npm test`
+Tests for SimpleScraper including email/phone regex, name validation, deduplication.
 
 ### tests/select-scraper-test.js
-
-Tests for SelectScraper including:
-- Text parsing
-- Marker detection
-- Config loading
+Tests for SelectScraper including text parsing, marker detection.
 
 ### tests/pagination-test.js
+Tests for pagination system including pattern detection, URL generation.
 
-Tests for pagination system including:
-- Pattern detection
-- URL generation
-- Binary search
+### tests/v22-integration.test.js
+Integration tests for v2.2 compatibility.
+
+**Run**: `npm test`
 
 ---
 
@@ -1181,6 +1079,8 @@ Tests for pagination system including:
 - `commander` - CLI argument parsing
 - `dotenv` - Environment variables
 - `googleapis` - Google Sheets export
+- `cheerio` - HTML parsing
+- `cli-table3` - CLI table output
 
 ---
 
@@ -1212,7 +1112,6 @@ All browser operations use async/await:
 async scrape(url) {
   const page = this.browserManager.getPage();
   await page.goto(url);
-  // ...
 }
 ```
 
@@ -1233,10 +1132,9 @@ Always try methods in order of reliability:
 3. For each field, draw rectangle around the field content
 4. Review the extraction method results (up to 5 options shown)
 5. Select the best extraction method from the results
-6. Repeat for all fields (name, email, phone, profileUrl, title, location)
-7. **Required fields**: name, email, profileUrl must be validated before Finish is enabled
-8. **Optional fields**: phone, title, location can be skipped
-9. Config saved to `configs/{domain}.json` with v2.3 format
+6. **Required fields**: name, email, profileUrl must be validated
+7. **Optional fields**: phone, title, location can be skipped
+8. Config saved to `configs/{domain}.json` with v2.3 format
 
 ### Testing a v2.3 Config
 ```bash
@@ -1250,25 +1148,14 @@ node src/tools/test-config.js configs/example-com.json --limit 10 --verbose
 node src/tools/test-config.js configs/example-com.json --limit 3 --show
 ```
 
-### Testing a URL
+### Scraping with a v2.3 Config
 ```bash
-node tests/scraper-test.js --url "https://example.com/agents"
+node orchestrator.js --url "URL" --method config --config example-com
 ```
 
 ### Scraping with Pagination
 ```bash
-node orchestrator.js --url "URL" --max-pages 50 --format both
-```
-
-### Using v2.3 Visual Scraper
-```javascript
-const VisualScraper = require('./src/scrapers/visual-scraper');
-const config = require('./configs/example-com.json');
-
-const scraper = new VisualScraper(browserManager, logger);
-await scraper.initialize(config);
-const result = await scraper.scrape('https://example.com/people', { limit: 50 });
-await scraper.cleanup();
+node orchestrator.js --url "URL" --paginate --max-pages 50 --format both
 ```
 
 ### Debugging
@@ -1295,3 +1182,22 @@ Set `LOG_LEVEL=debug` in `.env` for verbose output.
 5. **Log appropriately**: Use logger levels correctly (error/warn/info/debug)
 6. **Handle errors**: Always wrap async operations in try/catch
 7. **Preserve extraction priority**: Don't change method order without reason
+8. **v2.3 logging**: Use `[v2.3]` prefix for v2.3-specific logs to distinguish from v2.2
+9. **4-layer detection**: When modifying email/phone extractors, maintain the 4-layer strategy
+10. **Auto-retry**: When modifying extraction-tester, maintain the 3-attempt retry strategy
+
+---
+
+## Recent Bug Fixes (December 2024)
+
+### v2.3 Routing Bypass Fix
+**Problem**: `processFieldRectangle()` was calling `__configGen_handleFieldRectangle` (v2.2) instead of `__configGen_testFieldExtraction` (v2.3), causing EMAIL and PHONE fields to bypass multi-method extraction.
+
+**Solution**: Replaced `processFieldRectangle()` to call v2.3 directly and deprecated `handleFieldRectangleResult()`.
+
+**Verification**: Console should show `[v2.3 Routing]` for all fields, never `[v2.2]`.
+
+### Tesseract Worker Crash Fix
+**Problem**: Tesseract worker was crashing silently on Windows due to cache path issues.
+
+**Solution**: Simplified to use Tesseract.js default cache location instead of custom `.cache/tesseract` path.
