@@ -27,9 +27,14 @@ const SinglePageScraper = require('./single-page-scraper');
 function createScraper(paginationType, browserManager, rateLimiter, logger, configLoader = null, options = {}) {
   const normalizedType = paginationType.toLowerCase().replace(/_/g, '-');
 
+  logger.info(`[createScraper] Creating scraper for type: ${paginationType} (normalized: ${normalizedType})`);
+
+  let scraper;
   switch (normalizedType) {
     case 'infinite-scroll':
-      return new InfiniteScrollScraper(browserManager, rateLimiter, logger, options);
+      logger.info('[createScraper] Creating InfiniteScrollScraper');
+      scraper = new InfiniteScrollScraper(browserManager, rateLimiter, logger, options);
+      break;
 
     case 'pagination':
     case 'traditional':
@@ -37,17 +42,25 @@ function createScraper(paginationType, browserManager, rateLimiter, logger, conf
       if (!configLoader) {
         logger.warn('[createScraper] ConfigLoader not provided for pagination scraper, some features may be limited');
       }
-      return new PaginationScraper(browserManager, rateLimiter, logger, configLoader, options);
+      logger.info('[createScraper] Creating PaginationScraper');
+      scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, options);
+      break;
 
     case 'single-page':
     case 'single':
     case 'none':
-      return new SinglePageScraper(browserManager, rateLimiter, logger, options);
+      logger.info('[createScraper] Creating SinglePageScraper');
+      scraper = new SinglePageScraper(browserManager, rateLimiter, logger, options);
+      break;
 
     default:
       logger.warn(`[createScraper] Unknown pagination type: ${paginationType}, defaulting to single-page`);
-      return new SinglePageScraper(browserManager, rateLimiter, logger, options);
+      scraper = new SinglePageScraper(browserManager, rateLimiter, logger, options);
+      break;
   }
+
+  logger.info(`[createScraper] Scraper created successfully: ${scraper.scraperType || 'unknown'}`);
+  return scraper;
 }
 
 /**

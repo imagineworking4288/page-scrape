@@ -661,17 +661,28 @@
     console.log('[v2.3-UI] Config generation SUCCEEDED!');
     console.log('[v2.3-UI] Showing config preview instead of completing...');
 
+    // Extract domain-based config name for loading later (e.g., "sullcrom-com")
+    var configName = result.configName;
+    if (!configName || configName.includes('/') || configName.includes('\\')) {
+      // Extract from path: "configs/website-configs/sullcrom-com.json" -> "sullcrom-com"
+      var pathParts = result.configPath.split(/[/\\]/);
+      var filename = pathParts[pathParts.length - 1];
+      configName = filename.replace('.json', '');
+    }
+    console.log('[v2.3-UI] Extracted config name for scraping:', configName);
+
     // Store config data for preview and saving later
     state.generatedConfigData = {
       configPath: result.configPath,
-      configName: result.configName,
-      config: result.config,  // The actual config object
+      configName: configName,  // Domain-based name for loading config file
+      config: result.config,   // The actual config object
       validation: result.validation,
       score: result.validation?.score || 80,
       fields: result.fields || extractFieldsFromSelections()
     };
 
     console.log('[v2.3-UI] Stored config data:', state.generatedConfigData);
+    console.log('[v2.3-UI] Config name for scraping:', configName);
 
     // Build and show preview panel
     buildConfigPreviewPanel(state.generatedConfigData);
@@ -1655,6 +1666,15 @@
   window.startScraping = async function(mode) {
     console.log('[Scraping] Starting scraping in ' + mode + ' mode...');
 
+    // Validate config name is available
+    if (!state.generatedConfigData?.configName) {
+      console.error('[Scraping] Config name not available');
+      showToast('Config name not available. Please regenerate config.', 'error');
+      state.scrapingInProgress = false;
+      showPanel('configPreviewPanel');
+      return;
+    }
+
     // Get pagination type (manual override or detected)
     const manualOverride = document.getElementById('manualPaginationType').value;
     const paginationType = manualOverride || state.diagnosisResults?.type;
@@ -1674,12 +1694,15 @@
     var scrapingConfig = {
       paginationType: paginationType,
       limit: 0,  // No limit for "all" mode
-      diagnosisResults: state.diagnosisResults
+      diagnosisResults: state.diagnosisResults,
+      configName: state.generatedConfigData.configName,  // Pass config name for loading
+      configPath: state.generatedConfigData.configPath   // Pass config path as backup
     };
 
     try {
       if (typeof __configGen_startScraping === 'function') {
         console.log('[Scraping] Calling backend with config:', scrapingConfig);
+        console.log('[Scraping] Config name:', scrapingConfig.configName);
         await __configGen_startScraping(scrapingConfig);
         // Backend will handle progress and completion
         // Session will resolve when scraping is complete
@@ -1711,6 +1734,15 @@
 
     console.log('[Scraping] Starting scraping with limit: ' + limit + '...');
 
+    // Validate config name is available
+    if (!state.generatedConfigData?.configName) {
+      console.error('[Scraping] Config name not available');
+      showToast('Config name not available. Please regenerate config.', 'error');
+      state.scrapingInProgress = false;
+      showPanel('configPreviewPanel');
+      return;
+    }
+
     // Get pagination type
     var manualOverride = document.getElementById('manualPaginationType').value;
     var paginationType = manualOverride || state.diagnosisResults?.type;
@@ -1731,12 +1763,15 @@
     var scrapingConfig = {
       paginationType: paginationType,
       limit: limit,
-      diagnosisResults: state.diagnosisResults
+      diagnosisResults: state.diagnosisResults,
+      configName: state.generatedConfigData.configName,  // Pass config name for loading
+      configPath: state.generatedConfigData.configPath   // Pass config path as backup
     };
 
     try {
       if (typeof __configGen_startScraping === 'function') {
         console.log('[Scraping] Calling backend with config:', scrapingConfig);
+        console.log('[Scraping] Config name:', scrapingConfig.configName);
         await __configGen_startScraping(scrapingConfig);
       } else {
         console.error('[Scraping] Backend function not available');

@@ -1821,17 +1821,63 @@ class InteractiveSession {
    * @returns {Promise<Object>}
    */
   async handleStartScraping(scrapingConfig) {
+    this.logger.info('');
     this.logger.info('========================================');
     this.logger.info('[Scraping] STARTING SCRAPING PROCESS');
     this.logger.info('========================================');
+    this.logger.info(`[Scraping] Config received:`, JSON.stringify(scrapingConfig, null, 2));
     this.logger.info(`[Scraping] Pagination type: ${scrapingConfig.paginationType}`);
     this.logger.info(`[Scraping] Limit: ${scrapingConfig.limit || 'unlimited'}`);
+    this.logger.info(`[Scraping] Config name: ${scrapingConfig.configName}`);
+    this.logger.info(`[Scraping] Config path: ${scrapingConfig.configPath}`);
 
     try {
-      // Import config scrapers dynamically
+      // Step 1: Load the config from file or session
+      let config = null;
+
+      // First try to use session config (already in memory)
+      if (this.sessionResult?.config) {
+        config = this.sessionResult.config;
+        this.logger.info('[Scraping] Using config from session memory');
+      }
+      // If config path provided, try loading from file
+      else if (scrapingConfig.configPath) {
+        this.logger.info(`[Scraping] Loading config from path: ${scrapingConfig.configPath}`);
+        const fs = require('fs');
+        if (fs.existsSync(scrapingConfig.configPath)) {
+          const content = fs.readFileSync(scrapingConfig.configPath, 'utf8');
+          config = JSON.parse(content);
+          this.logger.info('[Scraping] Config loaded from file successfully');
+        }
+      }
+
+      // Validate config was loaded
+      if (!config) {
+        throw new Error('No config available for scraping. Config name: ' + scrapingConfig.configName);
+      }
+
+      // Validate config has required fields
+      if (!config.fieldExtraction || !config.fieldExtraction.fields) {
+        this.logger.error('[Scraping] Config structure:', JSON.stringify(Object.keys(config), null, 2));
+        throw new Error('Config missing fieldExtraction.fields - config may be invalid format');
+      }
+
+      if (!config.cardPattern || !config.cardPattern.primarySelector) {
+        throw new Error('Config missing cardPattern.primarySelector');
+      }
+
+      this.logger.info('[Scraping] Config validation passed');
+      this.logger.info(`[Scraping] Config name: ${config.name}`);
+      this.logger.info(`[Scraping] Config version: ${config.version}`);
+      this.logger.info(`[Scraping] Config domain: ${config.domain}`);
+      this.logger.info(`[Scraping] Available fields: ${Object.keys(config.fieldExtraction.fields).join(', ')}`);
+      this.logger.info(`[Scraping] Card selector: ${config.cardPattern.primarySelector}`);
+
+      // Step 2: Import config scrapers and create scraper with config
       const { createScraper } = require('../../scrapers/config-scrapers');
 
-      // Create appropriate scraper
+      // Create appropriate scraper - pass config directly
+      this.logger.info('[Scraping] Creating scraper...');
       const scraper = createScraper(
         scrapingConfig.paginationType,
         this.browserManager,
@@ -1846,15 +1892,10 @@ class InteractiveSession {
         }
       );
 
-      // Load the config that was generated
-      if (this.sessionResult?.config) {
-        scraper.config = this.sessionResult.config;
-        scraper.initializeCardSelector();
-      } else if (this.sessionResult?.configPath) {
-        scraper.loadConfig(this.sessionResult.configPath);
-      } else {
-        throw new Error('No config available for scraping');
-      }
+      // Set config directly on scraper and initialize
+      scraper.config = config;
+      scraper.initializeCardSelector();
+      this.logger.info('[Scraping] Scraper created and configured');
 
       // Set output path
       scraper.setOutputPath(this.options.outputDir || 'output');

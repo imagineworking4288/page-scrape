@@ -1599,3 +1599,75 @@ if (!method) return; // Skip field entirely
   ]
 }
 ```
+
+---
+
+### Config Loading Fix for Scraping Workflow (December 7)
+**Change**: Fixed critical bug where scraping failed with `TypeError: Cannot read properties of undefined (reading 'fields')` because the config wasn't being passed properly from the visual config generator to the scraper.
+
+**Root Cause**: When users clicked "Start Scraping" from the Config Preview Panel, the `scrapingConfig` object didn't include the config name or path, and the backend wasn't properly loading the config before initializing the scraper.
+
+**Files Modified**:
+
+1. **`src/tools/assets/overlay-client.js`**
+   - In `handleConfigComplete()`: Extract clean config name from path for scraping
+   - In `startScraping()`: Added config validation and pass `configName` + `configPath` to backend
+   - In `startScrapingWithLimit()`: Same config validation and passing
+
+2. **`src/tools/lib/interactive-session.js`**
+   - In `handleStartScraping()`: Complete rewrite with proper config loading
+     - First tries session config from memory (`this.sessionResult?.config`)
+     - Falls back to loading from file path
+     - Validates config has `fieldExtraction.fields` and `cardPattern.primarySelector`
+     - Detailed logging at each step
+
+3. **`src/scrapers/config-scrapers/index.js`**
+   - Enhanced `createScraper()` with logging for scraper type creation
+
+4. **`src/scrapers/config-scrapers/base-config-scraper.js`**
+   - `initializeCardSelector()`: Added config existence validation with detailed error messages
+   - `initializeExtractors()`: Added config structure validation before accessing fields
+
+**Data Flow (Fixed)**:
+```
+Frontend (overlay-client.js)
+  ↓ state.generatedConfigData.configName = "sullcrom-com"
+  ↓ state.generatedConfigData.configPath = "configs/website-configs/sullcrom-com.json"
+  ↓ state.generatedConfigData.config = {...actual config object...}
+  ↓
+startScraping() → scrapingConfig = { configName, configPath, ... }
+  ↓
+Backend (interactive-session.js)
+  ↓ handleStartScraping(scrapingConfig)
+  ↓ config = this.sessionResult?.config  // Use session config if available
+  ↓ Validate: config.fieldExtraction.fields exists
+  ↓ Validate: config.cardPattern.primarySelector exists
+  ↓
+createScraper() → scraper instance
+  ↓ scraper.config = config
+  ↓ scraper.initializeCardSelector()
+  ↓ scraper.initializeExtractors(page)
+  ↓
+Extraction begins with proper config
+```
+
+**Key Validation Points**:
+```javascript
+// In handleStartScraping:
+if (!config.fieldExtraction || !config.fieldExtraction.fields) {
+  throw new Error('Config missing fieldExtraction.fields');
+}
+if (!config.cardPattern || !config.cardPattern.primarySelector) {
+  throw new Error('Config missing cardPattern.primarySelector');
+}
+
+// In base-config-scraper initializeCardSelector:
+if (!this.config) {
+  throw new Error('Config is not set - call loadConfig() first');
+}
+
+// In base-config-scraper initializeExtractors:
+if (!this.config.fieldExtraction) {
+  throw new Error('Config missing fieldExtraction object');
+}
+```

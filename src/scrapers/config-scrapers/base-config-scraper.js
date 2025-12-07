@@ -129,6 +129,16 @@ class BaseConfigScraper extends BaseScraper {
    * Initialize card selector from config
    */
   initializeCardSelector() {
+    this.logger.info('[BaseConfigScraper] Initializing card selector...');
+
+    // Validate config exists
+    if (!this.config) {
+      throw new Error('[BaseConfigScraper] Config is not set - call loadConfig() or set scraper.config first');
+    }
+
+    this.logger.info(`[BaseConfigScraper] Config name: ${this.config.name}`);
+    this.logger.info(`[BaseConfigScraper] Config version: ${this.config.version}`);
+
     if (this.config.cardPattern) {
       this.cardSelector = this.config.cardPattern.primarySelector ||
                          this.config.cardPattern.selector;
@@ -136,10 +146,11 @@ class BaseConfigScraper extends BaseScraper {
     }
 
     if (!this.cardSelector) {
+      this.logger.error('[BaseConfigScraper] Config cardPattern:', JSON.stringify(this.config.cardPattern, null, 2));
       throw new Error('Config is missing card selector (cardPattern.primarySelector or cardPattern.selector)');
     }
 
-    this.logger.info(`[BaseConfigScraper] Card selector: ${this.cardSelector}`);
+    this.logger.info(`[BaseConfigScraper] Card selector initialized: ${this.cardSelector}`);
     if (this.cardFallbacks.length > 0) {
       this.logger.info(`[BaseConfigScraper] Fallback selectors: ${this.cardFallbacks.length}`);
     }
@@ -152,7 +163,23 @@ class BaseConfigScraper extends BaseScraper {
   async initializeExtractors(page) {
     this.logger.info('[BaseConfigScraper] Initializing extractors...');
 
+    // Validate config and fieldExtraction exist
+    if (!this.config) {
+      throw new Error('[BaseConfigScraper] Config is not set - cannot initialize extractors');
+    }
+
+    if (!this.config.fieldExtraction) {
+      this.logger.error('[BaseConfigScraper] Config keys:', Object.keys(this.config));
+      throw new Error('[BaseConfigScraper] Config missing fieldExtraction object');
+    }
+
+    if (!this.config.fieldExtraction.fields) {
+      this.logger.error('[BaseConfigScraper] fieldExtraction keys:', Object.keys(this.config.fieldExtraction));
+      throw new Error('[BaseConfigScraper] Config missing fieldExtraction.fields');
+    }
+
     const fields = this.config.fieldExtraction.fields;
+    this.logger.info(`[BaseConfigScraper] Fields to extract: ${Object.keys(fields).join(', ')}`);
     const methodsNeeded = new Set();
 
     // Collect all methods needed
