@@ -109,13 +109,13 @@ class BaseConfigScraper extends BaseScraper {
       this.logger.warn(`[BaseConfigScraper] Config version ${version} detected. Optimal results require v2.3 configs.`);
     }
 
-    // Verify fieldExtraction exists
-    if (!this.config.fieldExtraction || !this.config.fieldExtraction.fields) {
-      throw new Error('Config is missing fieldExtraction.fields');
+    // Verify fields exists (v2.3 has fields at top level, NOT nested under fieldExtraction)
+    if (!this.config.fields) {
+      throw new Error('Config is missing fields object');
     }
 
     // Verify at least one field has userValidatedMethod
-    const fields = this.config.fieldExtraction.fields;
+    const fields = this.config.fields;
     const hasValidatedMethod = Object.values(fields).some(f => f.userValidatedMethod);
 
     if (!hasValidatedMethod) {
@@ -163,22 +163,18 @@ class BaseConfigScraper extends BaseScraper {
   async initializeExtractors(page) {
     this.logger.info('[BaseConfigScraper] Initializing extractors...');
 
-    // Validate config and fieldExtraction exist
+    // Validate config exists
     if (!this.config) {
       throw new Error('[BaseConfigScraper] Config is not set - cannot initialize extractors');
     }
 
-    if (!this.config.fieldExtraction) {
+    // v2.3 configs have fields at top level, NOT nested under fieldExtraction
+    if (!this.config.fields) {
       this.logger.error('[BaseConfigScraper] Config keys:', Object.keys(this.config));
-      throw new Error('[BaseConfigScraper] Config missing fieldExtraction object');
+      throw new Error('[BaseConfigScraper] Config missing fields object');
     }
 
-    if (!this.config.fieldExtraction.fields) {
-      this.logger.error('[BaseConfigScraper] fieldExtraction keys:', Object.keys(this.config.fieldExtraction));
-      throw new Error('[BaseConfigScraper] Config missing fieldExtraction.fields');
-    }
-
-    const fields = this.config.fieldExtraction.fields;
+    const fields = this.config.fields;
     this.logger.info(`[BaseConfigScraper] Fields to extract: ${Object.keys(fields).join(', ')}`);
     const methodsNeeded = new Set();
 
@@ -270,7 +266,7 @@ class BaseConfigScraper extends BaseScraper {
       _extractionMethods: {}
     };
 
-    const fields = this.config.fieldExtraction.fields;
+    const fields = this.config.fields;
     let successCount = 0;
 
     for (const [fieldName, fieldConfig] of Object.entries(fields)) {

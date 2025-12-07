@@ -1618,7 +1618,7 @@ if (!method) return; // Skip field entirely
    - In `handleStartScraping()`: Complete rewrite with proper config loading
      - First tries session config from memory (`this.sessionResult?.config`)
      - Falls back to loading from file path
-     - Validates config has `fieldExtraction.fields` and `cardPattern.primarySelector`
+     - Validates config has `fields` and `cardPattern.primarySelector`
      - Detailed logging at each step
 
 3. **`src/scrapers/config-scrapers/index.js`**
@@ -1640,7 +1640,7 @@ startScraping() → scrapingConfig = { configName, configPath, ... }
 Backend (interactive-session.js)
   ↓ handleStartScraping(scrapingConfig)
   ↓ config = this.sessionResult?.config  // Use session config if available
-  ↓ Validate: config.fieldExtraction.fields exists
+  ↓ Validate: config.fields exists (v2.3 has fields at top level)
   ↓ Validate: config.cardPattern.primarySelector exists
   ↓
 createScraper() → scraper instance
@@ -1654,8 +1654,9 @@ Extraction begins with proper config
 **Key Validation Points**:
 ```javascript
 // In handleStartScraping:
-if (!config.fieldExtraction || !config.fieldExtraction.fields) {
-  throw new Error('Config missing fieldExtraction.fields');
+// v2.3 configs have fields at top level, NOT nested under fieldExtraction
+if (!config.fields) {
+  throw new Error('Config missing fields');
 }
 if (!config.cardPattern || !config.cardPattern.primarySelector) {
   throw new Error('Config missing cardPattern.primarySelector');
@@ -1667,7 +1668,60 @@ if (!this.config) {
 }
 
 // In base-config-scraper initializeExtractors:
-if (!this.config.fieldExtraction) {
-  throw new Error('Config missing fieldExtraction object');
+// v2.3 configs have fields at top level, NOT nested under fieldExtraction
+if (!this.config.fields) {
+  throw new Error('Config missing fields object');
 }
 ```
+
+---
+
+### Config Structure Validation Fix (December 7)
+**Change**: Fixed critical validation mismatch where code expected `config.fieldExtraction.fields` but v2.3 configs have `config.fields` directly at the top level.
+
+**Root Cause**: The scraping workflow validation code was written assuming the older `fieldExtraction.fields` structure, but v2.3 configs store fields directly at the top level (`config.fields`).
+
+**v2.3 Config Structure**:
+```json
+{
+  "version": "2.3",
+  "name": "example-com",
+  "cardPattern": {
+    "primarySelector": ".card"
+  },
+  "fields": {           // <-- Fields at TOP LEVEL, not nested
+    "name": { ... },
+    "email": { ... },
+    "phone": { ... }
+  }
+}
+```
+
+**Files Modified**:
+
+1. **`src/tools/lib/interactive-session.js`**
+   - Changed `config.fieldExtraction.fields` → `config.fields` in validation
+   - Updated log message to correctly reference `config.fields`
+
+2. **`src/scrapers/config-scrapers/base-config-scraper.js`**
+   - `validateConfigVersion()`: Changed `this.config.fieldExtraction.fields` → `this.config.fields`
+   - `initializeExtractors()`: Changed `this.config.fieldExtraction.fields` → `this.config.fields`
+   - `extractContactFromCard()`: Changed `this.config.fieldExtraction.fields` → `this.config.fields`
+
+**Key Changes**:
+```javascript
+// BEFORE (incorrect):
+if (!config.fieldExtraction || !config.fieldExtraction.fields) {
+  throw new Error('Config missing fieldExtraction.fields');
+}
+const fields = this.config.fieldExtraction.fields;
+
+// AFTER (correct):
+// v2.3 configs have fields at top level, NOT nested under fieldExtraction
+if (!config.fields) {
+  throw new Error('Config missing fields');
+}
+const fields = this.config.fields;
+```
+
+**Note**: The `fieldExtraction` structure is still used by older config versions (v2.1/v2.2) and their associated builders in `config-builder.js`. This fix only affects the v2.3 config-based scrapers.

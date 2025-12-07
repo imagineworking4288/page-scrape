@@ -1857,9 +1857,10 @@ class InteractiveSession {
       }
 
       // Validate config has required fields
-      if (!config.fieldExtraction || !config.fieldExtraction.fields) {
+      // v2.3 configs have fields at top level, NOT nested under fieldExtraction
+      if (!config.fields) {
         this.logger.error('[Scraping] Config structure:', JSON.stringify(Object.keys(config), null, 2));
-        throw new Error('Config missing fieldExtraction.fields - config may be invalid format');
+        throw new Error('Config missing fields - config may be invalid format');
       }
 
       if (!config.cardPattern || !config.cardPattern.primarySelector) {
@@ -1870,7 +1871,7 @@ class InteractiveSession {
       this.logger.info(`[Scraping] Config name: ${config.name}`);
       this.logger.info(`[Scraping] Config version: ${config.version}`);
       this.logger.info(`[Scraping] Config domain: ${config.domain}`);
-      this.logger.info(`[Scraping] Available fields: ${Object.keys(config.fieldExtraction.fields).join(', ')}`);
+      this.logger.info(`[Scraping] Available fields: ${Object.keys(config.fields).join(', ')}`);
       this.logger.info(`[Scraping] Card selector: ${config.cardPattern.primarySelector}`);
 
       // Step 2: Import config scrapers and create scraper with config
