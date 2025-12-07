@@ -704,14 +704,40 @@ class InteractiveSession {
       this.logger.info(`[v2.2-BACKEND] Config saved to: ${configPath}`);
       this.logger.info(`[v2.2-BACKEND] Config score: ${validation.score}/100`);
 
-      // Send result to overlay
+      // Build field details for preview panel
+      const fieldsForPreview = {};
+      for (const [fieldName, fieldData] of Object.entries(capturedData.fields || {})) {
+        fieldsForPreview[fieldName] = {
+          value: fieldData.value,
+          found: !!fieldData.value,
+          method: fieldData.method || fieldData.userValidatedMethod || 'manual',
+          methodLabel: fieldData.methodLabel || this.formatMethodName(fieldData.method || fieldData.userValidatedMethod),
+          confidence: fieldData.confidence || 85
+        };
+      }
+
+      // Add missing fields as not found
+      const allFields = ['name', 'email', 'phone', 'profileUrl', 'title', 'location'];
+      allFields.forEach(fieldName => {
+        if (!fieldsForPreview[fieldName]) {
+          fieldsForPreview[fieldName] = {
+            value: null,
+            found: false
+          };
+        }
+      });
+
+      // Send result to overlay with additional data for preview
       const result = {
         success: true,
         configPath: configPath,
         configName: config.name,
         configVersion: config.version,
         validation: validation,
-        selectionMethod: 'manual'
+        selectionMethod: 'manual',
+        config: config,  // Include actual config for preview
+        fields: fieldsForPreview,  // Field details for preview panel
+        score: validation.score || 80
       };
 
       this.logger.info('[v2.2-BACKEND] Sending result to overlay:', JSON.stringify(result, null, 2));
@@ -1170,6 +1196,18 @@ class InteractiveSession {
   }
 
   /**
+   * Format method name for display (e.g., 'coordinate-text' -> 'Coordinate Text')
+   * @param {string} method - Method name
+   * @returns {string} - Formatted method name
+   */
+  formatMethodName(method) {
+    if (!method) return 'Manual';
+    return method
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  }
+
+  /**
    * Handle retry request
    */
   async handleRetryRequested() {
@@ -1506,13 +1544,39 @@ class InteractiveSession {
       this.logger.info(`[v2.3] Config saved to: ${configPath}`);
       this.logger.info(`[v2.3] Config score: ${validation.score}/100`);
 
-      // Send result to overlay
+      // Build field details for preview panel
+      const fieldsForPreview = {};
+      for (const [fieldName, fieldData] of Object.entries(selections || {})) {
+        fieldsForPreview[fieldName] = {
+          value: fieldData.value,
+          found: !!fieldData.value,
+          method: fieldData.userValidatedMethod || fieldData.method || 'manual',
+          methodLabel: fieldData.methodLabel || this.formatMethodName(fieldData.userValidatedMethod || fieldData.method),
+          confidence: fieldData.confidence || 85
+        };
+      }
+
+      // Add missing fields as not found
+      const allFields = ['name', 'email', 'phone', 'profileUrl', 'title', 'location'];
+      allFields.forEach(fieldName => {
+        if (!fieldsForPreview[fieldName]) {
+          fieldsForPreview[fieldName] = {
+            value: null,
+            found: false
+          };
+        }
+      });
+
+      // Send result to overlay with additional data for preview
       const result = {
         success: true,
         configPath: configPath,
         configName: config.name,
         configVersion: config.version,
-        validation: validation
+        validation: validation,
+        config: config,  // Include actual config for preview
+        fields: fieldsForPreview,  // Field details for preview panel
+        score: validation.score || 80
       };
 
       await this.page.evaluate((res) => {

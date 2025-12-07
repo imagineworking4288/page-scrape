@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns. 
 
-**Last Updated**: December 6, 17:30
+**Last Updated**: December 7, 2025
 
 ---
 
@@ -28,7 +28,7 @@ page-scrape/
 ├── orchestrator.js              # Main entry point - CLI orchestration
 ├── package.json                 # Project dependencies and scripts
 ├── CLAUDE_CONTEXT.md            # This file - comprehensive project documentation
-├── REORGANIZATION_PLAN.md       # Detailed plan for codebase reorganization
+├── REORGANIZATION_PLAN.md       # Completed reorganization plan (reference only)
 ├── configs/                     # Configuration files root
 │   ├── _default.json           # System: Default fallback config
 │   ├── _template.json          # System: Template for new configs
@@ -38,18 +38,18 @@ page-scrape/
 ├── src/
 │   ├── index.js                # Main module index (unified imports)
 │   │
-│   ├── core/                   # [NEW] Core infrastructure
+│   ├── core/                   # Core infrastructure (reorganized Dec 2024)
 │   │   ├── index.js            # Core exports
 │   │   ├── browser-manager.js  # Puppeteer browser handling
 │   │   ├── logger.js           # Winston logging setup
 │   │   └── rate-limiter.js     # Request throttling
 │   │
-│   ├── config/                 # [NEW] Configuration management
+│   ├── config/                 # Configuration management (reorganized Dec 2024)
 │   │   ├── index.js            # Config exports
 │   │   ├── config-loader.js    # Config file loading/validation
 │   │   └── schemas.js          # v2.3 schema definitions
 │   │
-│   ├── extraction/             # [NEW] Field extraction system
+│   ├── extraction/             # Field extraction system (reorganized Dec 2024)
 │   │   ├── index.js            # Extraction exports
 │   │   ├── multi-method-extractor.js  # Multi-method runtime extractor
 │   │   ├── smart-field-extractor.js   # Smart field detection
@@ -70,17 +70,17 @@ page-scrape/
 │   │   ├── pdf-scraper.js      # PDF rendering scraper
 │   │   └── config-scraper.js   # Config-driven scraper (main)
 │   │
-│   ├── utils/                  # Legacy utilities (still used)
-│   │   ├── browser-manager.js  # [Legacy - use src/core/]
-│   │   ├── config-loader.js    # [Legacy - use src/config/]
-│   │   ├── contact-extractor.js # Shared extraction logic
-│   │   ├── domain-extractor.js # Email domain classification
-│   │   ├── logger.js           # [Legacy - use src/core/]
-│   │   ├── rate-limiter.js     # [Legacy - use src/core/]
-│   │   ├── text-parser.js      # Text-to-contact parsing
-│   │   ├── profile-visitor.js  # Profile page enrichment
-│   │   ├── google-sheets-exporter.js # Google Sheets export
-│   │   └── constants.js        # Shared constants
+│   ├── utils/                  # Utilities (legacy + active)
+│   │   ├── browser-manager.js  # [Legacy - prefer src/core/]
+│   │   ├── config-loader.js    # [Legacy - prefer src/config/]
+│   │   ├── logger.js           # [Legacy - prefer src/core/]
+│   │   ├── rate-limiter.js     # [Legacy - prefer src/core/]
+│   │   ├── contact-extractor.js # Shared extraction logic (active)
+│   │   ├── domain-extractor.js # Email domain classification (active)
+│   │   ├── text-parser.js      # Text-to-contact parsing (active)
+│   │   ├── profile-visitor.js  # Profile page enrichment (active)
+│   │   ├── google-sheets-exporter.js # Google Sheets export (active)
+│   │   └── constants.js        # Shared constants (active)
 │   │
 │   ├── features/
 │   │   └── pagination/         # Pagination subsystem
@@ -112,6 +112,7 @@ page-scrape/
 │   ├── pdf-scraper-test.js     # PDF scraper tests
 │   ├── v22-integration.test.js # v2.2 integration tests
 │   └── test-utils.js           # Test utilities
+│   # Note: refactoring-tests.js was DELETED (deprecated)
 ├── .cache/                     # Tesseract OCR cache (gitignored)
 │   └── tesseract/              # Language data and worker files
 ├── output/                     # Generated output (gitignored)
@@ -1242,6 +1243,9 @@ Set `LOG_LEVEL=debug` in `.env` for verbose output.
 8. **v2.3 logging**: Use `[v2.3]` prefix for v2.3-specific logs to distinguish from v2.2
 9. **4-layer detection**: When modifying email/phone extractors, maintain the 4-layer strategy
 10. **Auto-retry**: When modifying extraction-tester, maintain the 3-attempt retry strategy
+11. **Use feature-based imports**: For new code, prefer `src/core`, `src/config`, `src/extraction` imports
+12. **Update index.js files**: When adding new modules, update the relevant index.js exports
+13. **No dead code**: Do not create files that aren't imported/used by the main orchestrator
 
 ---
 
@@ -1289,3 +1293,65 @@ configs/
   - Maintains backward compatibility with legacy paths
 
 **Backward Compatibility**: Configs in the old location (`configs/{domain}.json`) will still be found and loaded with a warning suggesting migration to the new location.
+
+---
+
+### Codebase Reorganization (December 7)
+**Change**: Major reorganization from utility-based to feature-based directory structure.
+
+**Goals Achieved**:
+1. ✅ Removed deprecated/unused code (bloat removal)
+2. ✅ Reorganized into feature-based structure
+3. ✅ Created unified module import system
+4. ✅ Maintained backward compatibility
+
+**New Directory Structure**:
+```
+src/
+├── index.js         # Unified module exports
+├── core/            # Core infrastructure
+│   ├── browser-manager.js
+│   ├── logger.js
+│   ├── rate-limiter.js
+│   └── index.js
+├── config/          # Configuration management
+│   ├── config-loader.js
+│   ├── schemas.js
+│   └── index.js
+└── extraction/      # Field extraction system
+    ├── multi-method-extractor.js
+    ├── smart-field-extractor.js
+    ├── extractors/
+    │   ├── email-extractor.js
+    │   ├── phone-extractor.js
+    │   ├── link-extractor.js
+    │   ├── label-extractor.js
+    │   ├── screenshot-extractor.js
+    │   ├── coordinate-extractor.js
+    │   └── index.js
+    └── index.js
+```
+
+**Files Deleted (Deprecated)**:
+| File | Reason |
+|------|--------|
+| `src/scrapers/visual-scraper.js` | Unused - never imported by orchestrator |
+| `tests/refactoring-tests.js` | Deprecated test file for removed features |
+| `src/features/workflows/` directory | Only used by deprecated refactoring-tests.js |
+
+**New Import System**:
+```javascript
+// Recommended: Feature-based imports
+const { BrowserManager, logger, RateLimiter } = require('./src/core');
+const { ConfigLoader, validateConfigV23 } = require('./src/config');
+const { EmailExtractor, MultiMethodExtractor } = require('./src/extraction');
+
+// Unified single import
+const src = require('./src');
+const { BrowserManager, ConfigLoader, EmailExtractor } = src;
+
+// Legacy imports still work (backward compatible)
+const logger = require('./src/utils/logger');
+```
+
+**Module Verification**: All new modules load correctly - verified with `node -e` require tests.

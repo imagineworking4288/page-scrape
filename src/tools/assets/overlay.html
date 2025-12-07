@@ -1157,6 +1157,122 @@
       padding: 10px 8px;
       font-size: 12px;
     }
+
+    /* ===========================
+       v2.3 Config Preview Panel Styles
+       =========================== */
+
+    .config-preview-panel .config-fields-list {
+      margin-bottom: 16px;
+    }
+
+    .config-field-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      gap: 12px;
+    }
+
+    .config-field-row .field-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .config-field-row .field-label {
+      font-weight: 600;
+      color: #333;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .config-field-row .field-value {
+      font-family: monospace;
+      font-size: 11px;
+      color: #666;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .config-field-row .field-method {
+      font-size: 10px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    .config-field-row .field-badges {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .config-field-row .confidence-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .config-field-row .confidence-badge.high {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .config-field-row .confidence-badge.medium {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .config-field-row .confidence-badge.low {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .warning-tip {
+      background: #fff3cd;
+      border-left-color: #ffc107;
+    }
+
+    .config-preview-panel .stats-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .config-preview-panel .stat-box {
+      flex: 1;
+      text-align: center;
+      padding: 12px 8px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin: 0 4px;
+    }
+
+    .config-preview-panel .stat-box:first-child {
+      margin-left: 0;
+    }
+
+    .config-preview-panel .stat-box:last-child {
+      margin-right: 0;
+    }
+
+    .config-preview-panel .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .config-preview-panel .stat-label {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -1345,6 +1461,46 @@
           </button>
           <button class="btn btn-success btn-sm" id="finishManualBtn" onclick="finishManualSelection()" disabled>
             Finish Selection
+          </button>
+        </div>
+      </div>
+
+      <!-- ===========================
+           v2.3 Config Preview Panel
+           =========================== -->
+      <div id="configPreviewPanel" class="panel-content config-preview-panel">
+        <h3 style="margin-bottom: 16px; font-size: 16px; color: #333;">Generated Config Preview</h3>
+
+        <div class="config-fields-list" id="configFieldsList">
+          <!-- Dynamically populated with field results -->
+        </div>
+
+        <div class="stats-row" style="margin: 16px 0;">
+          <div class="stat-box">
+            <div class="stat-value" id="configCardsCount">0</div>
+            <div class="stat-label">Cards Found</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="configFieldsCount">0/6</div>
+            <div class="stat-label">Fields Detected</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="configScoreValue">0</div>
+            <div class="stat-label">Config Score</div>
+          </div>
+        </div>
+
+        <div id="configWarningsSection" style="display: none;" class="tip warning-tip">
+          <span class="tip-icon">⚠️</span>
+          <span class="tip-text" id="configWarningsText"></span>
+        </div>
+
+        <div class="btn-group-vertical" style="margin-top: 20px;">
+          <button class="btn btn-success btn-block" id="saveConfigBtn" onclick="saveAndCloseConfig()">
+            Save & Close
+          </button>
+          <button class="btn btn-secondary btn-block" onclick="backToEditConfig()">
+            Back to Edit
           </button>
         </div>
       </div>

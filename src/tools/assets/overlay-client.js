@@ -84,6 +84,7 @@
     EXTRACTION_RESULTS: 'EXTRACTION_RESULTS',  // v2.3: Showing extraction method results
     LINK_DISAMBIGUATION: 'LINK_DISAMBIGUATION',
     GENERATING: 'GENERATING',
+    CONFIG_PREVIEW: 'CONFIG_PREVIEW',  // v2.3: Preview generated config before saving
     COMPLETE: 'COMPLETE'
   };
 
@@ -141,7 +142,10 @@
       profileUrl: false
     },
     v23RequiredFields: ['name', 'email', 'profileUrl'],  // Required for config generation
-    v23OptionalFields: ['phone', 'title', 'location']    // Optional fields
+    v23OptionalFields: ['phone', 'title', 'location'],   // Optional fields
+
+    // v2.3: Config preview state
+    generatedConfigData: null  // Stores config data for preview before final save
   };
 
   // DOM Elements
@@ -232,9 +236,10 @@
       'confirmationPanel',
       'progressPanel',
       'completePanel',
-      'previewPanel',    // v2.2
-      'manualPanel',     // v2.2
-      'extractionResultsPanel'  // v2.3
+      'previewPanel',         // v2.2
+      'manualPanel',          // v2.2
+      'extractionResultsPanel', // v2.3
+      'configPreviewPanel'    // v2.3: Config preview before save
     ];
     panels.forEach(id => {
       const panel = document.getElementById(id);
@@ -618,48 +623,91 @@
   /**
    * Handle config generation complete
    * Called by backend via page.evaluate
+   * v2.3: Now shows preview panel instead of completing immediately
    */
   window.handleConfigComplete = function(result) {
     console.log('');
     console.log('========================================');
-    console.log('[v2.2-UI] CONFIG GENERATION COMPLETE');
+    console.log('[v2.3-UI] CONFIG GENERATION COMPLETE');
     console.log('========================================');
-    console.log('[v2.2-UI] Timestamp:', new Date().toISOString());
-    console.log('[v2.2-UI] Result received:', result);
-    console.log('[v2.2-UI] Success status:', result?.success);
-    console.log('[v2.2-UI] Config path:', result?.configPath);
-    console.log('[v2.2-UI] Config name:', result?.configName);
-    console.log('[v2.2-UI] Config version:', result?.configVersion);
-    console.log('[v2.2-UI] Selection method:', result?.selectionMethod);
-    console.log('[v2.2-UI] Validation:', result?.validation);
+    console.log('[v2.3-UI] Timestamp:', new Date().toISOString());
+    console.log('[v2.3-UI] Result received:', result);
+    console.log('[v2.3-UI] Success status:', result?.success);
+    console.log('[v2.3-UI] Config path:', result?.configPath);
+    console.log('[v2.3-UI] Config name:', result?.configName);
+    console.log('[v2.3-UI] Config version:', result?.configVersion);
+    console.log('[v2.3-UI] Selection method:', result?.selectionMethod);
+    console.log('[v2.3-UI] Validation:', result?.validation);
     console.log('========================================');
     console.log('');
 
     if (!result.success) {
-      console.error('[v2.2-UI] Config generation FAILED');
-      console.error('[v2.2-UI] Error:', result.error);
+      console.error('[v2.3-UI] Config generation FAILED');
+      console.error('[v2.3-UI] Error:', result.error);
       showToast(result.error || 'Config generation failed', 'error');
-      showPanel('confirmationPanel');
+      showPanel('manualPanel');
       return;
     }
 
-    console.log('[v2.2-UI] Config generation SUCCEEDED!');
+    console.log('[v2.3-UI] Config generation SUCCEEDED!');
+    console.log('[v2.3-UI] Showing config preview instead of completing...');
 
-    // Clear highlights
-    clearHighlights();
+    // Store config data for preview and saving later
+    state.generatedConfigData = {
+      configPath: result.configPath,
+      configName: result.configName,
+      config: result.config,  // The actual config object
+      validation: result.validation,
+      score: result.validation?.score || 80,
+      fields: result.fields || extractFieldsFromSelections()
+    };
 
-    // Update complete panel
-    document.getElementById('completeCardCount').textContent =
-      `${state.detectedCards.length} cards detected`;
-    document.getElementById('completeConfigPath').textContent =
-      result.configPath || 'configs/generated.json';
+    console.log('[v2.3-UI] Stored config data:', state.generatedConfigData);
 
-    // Show complete panel
-    showPanel('completePanel');
-    document.getElementById('panelSubtitle').textContent = 'Complete!';
+    // Build and show preview panel
+    buildConfigPreviewPanel(state.generatedConfigData);
+    state.currentState = STATES.CONFIG_PREVIEW;
+    showPanel('configPreviewPanel');
+    document.getElementById('panelSubtitle').textContent = 'Review Generated Config';
 
-    console.log('[v2.2-UI] Complete panel displayed');
+    console.log('[v2.3-UI] Config preview panel displayed');
   };
+
+  /**
+   * Extract field information from manual selections for preview
+   * Used when backend doesn't provide field details
+   */
+  function extractFieldsFromSelections() {
+    const fields = {};
+    FIELD_ORDER.forEach(fieldName => {
+      const selection = state.manualSelections[fieldName];
+      if (selection) {
+        fields[fieldName] = {
+          value: selection.value,
+          found: true,
+          method: selection.userValidatedMethod || selection.method || 'manual',
+          methodLabel: selection.methodLabel || formatMethodName(selection.userValidatedMethod),
+          confidence: selection.confidence || 85
+        };
+      } else {
+        fields[fieldName] = {
+          value: null,
+          found: false
+        };
+      }
+    });
+    return fields;
+  }
+
+  /**
+   * Format method name for display (e.g., 'coordinate-text' -> 'Coordinate Text')
+   */
+  function formatMethodName(method) {
+    if (!method) return 'Manual';
+    return method
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  }
 
   /**
    * Close panel and notify backend
@@ -1216,6 +1264,186 @@
       statusContainer.innerHTML = html;
     }
   }
+
+  // ===========================
+  // v2.3: CONFIG PREVIEW PANEL FUNCTIONS
+  // ===========================
+
+  /**
+   * Build the config preview panel with generated config data
+   * Shows all fields with their extraction status, values, methods, and confidence
+   */
+  function buildConfigPreviewPanel(configData) {
+    console.log('[v2.3] Building config preview panel:', configData);
+
+    const container = document.getElementById('configFieldsList');
+    if (!container) {
+      console.error('[v2.3] configFieldsList container not found');
+      return;
+    }
+
+    container.innerHTML = '';
+
+    let foundCount = 0;
+
+    // Build field rows for each field in order
+    FIELD_ORDER.forEach(fieldName => {
+      const meta = FIELD_METADATA[fieldName];
+      const fieldData = configData.fields[fieldName];
+      const found = fieldData?.found || false;
+
+      if (found) foundCount++;
+
+      const row = document.createElement('div');
+      row.className = 'config-field-row';
+
+      // Field info column
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'field-info';
+
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'field-label';
+      labelDiv.textContent = meta.label;
+      if (meta.required) {
+        labelDiv.innerHTML += ' <span style="color: #dc3545;">*</span>';
+      }
+
+      const valueDiv = document.createElement('div');
+      valueDiv.className = 'field-value';
+      valueDiv.textContent = found ? truncate(fieldData.value, 50) : '(not detected)';
+      valueDiv.style.color = found ? '#333' : '#999';
+
+      infoDiv.appendChild(labelDiv);
+      infoDiv.appendChild(valueDiv);
+
+      // Method info if available
+      if (found && fieldData.method) {
+        const methodDiv = document.createElement('div');
+        methodDiv.className = 'field-method';
+        methodDiv.textContent = `Method: ${fieldData.methodLabel || formatMethodName(fieldData.method)}`;
+        infoDiv.appendChild(methodDiv);
+      }
+
+      // Badges column
+      const badgesDiv = document.createElement('div');
+      badgesDiv.className = 'field-badges';
+
+      // Status badge
+      const statusBadge = document.createElement('span');
+      statusBadge.className = 'status-badge ' + (found ? 'found' : 'missing');
+      statusBadge.textContent = found ? 'Found' : 'Missing';
+      badgesDiv.appendChild(statusBadge);
+
+      // Confidence badge if available
+      if (found && fieldData.confidence) {
+        const confidenceBadge = document.createElement('span');
+        const conf = fieldData.confidence;
+        const confClass = conf >= 90 ? 'high' : conf >= 70 ? 'medium' : 'low';
+        confidenceBadge.className = `confidence-badge ${confClass}`;
+        confidenceBadge.textContent = `${Math.round(conf)}%`;
+        badgesDiv.appendChild(confidenceBadge);
+      }
+
+      row.appendChild(infoDiv);
+      row.appendChild(badgesDiv);
+      container.appendChild(row);
+    });
+
+    // Update stats
+    const cardsCountEl = document.getElementById('configCardsCount');
+    const fieldsCountEl = document.getElementById('configFieldsCount');
+    const scoreValueEl = document.getElementById('configScoreValue');
+
+    if (cardsCountEl) {
+      cardsCountEl.textContent = state.detectedCards?.length || 0;
+    }
+    if (fieldsCountEl) {
+      fieldsCountEl.textContent = `${foundCount}/${FIELD_ORDER.length}`;
+    }
+    if (scoreValueEl) {
+      scoreValueEl.textContent = `${configData.score || 0}/100`;
+    }
+
+    // Show warnings if any
+    const warningsSection = document.getElementById('configWarningsSection');
+    const warningsText = document.getElementById('configWarningsText');
+
+    if (warningsSection && warningsText) {
+      if (configData.validation?.warnings && configData.validation.warnings.length > 0) {
+        warningsSection.style.display = 'block';
+        warningsText.textContent = configData.validation.warnings.join('. ');
+      } else {
+        // Check for missing required fields
+        const missingRequired = REQUIRED_FIELDS.filter(f => !configData.fields[f]?.found);
+        if (missingRequired.length > 0) {
+          warningsSection.style.display = 'block';
+          warningsText.textContent = `Missing required: ${missingRequired.map(f => FIELD_METADATA[f].label).join(', ')}. Config may not work reliably.`;
+        } else {
+          warningsSection.style.display = 'none';
+        }
+      }
+    }
+
+    console.log('[v2.3] Config preview built:', {
+      totalFields: FIELD_ORDER.length,
+      foundCount,
+      score: configData.score
+    });
+  }
+
+  /**
+   * Save config and close (from preview panel)
+   */
+  window.saveAndCloseConfig = function() {
+    console.log('[v2.3] User confirmed config save from preview');
+
+    if (!state.generatedConfigData) {
+      console.error('[v2.3] No config data to save');
+      showToast('Config data not available', 'error');
+      return;
+    }
+
+    // Clear highlights
+    clearHighlights();
+
+    // Update complete panel with saved data
+    const completeCardCount = document.getElementById('completeCardCount');
+    const completeConfigPath = document.getElementById('completeConfigPath');
+
+    if (completeCardCount) {
+      completeCardCount.textContent = `${state.detectedCards?.length || 0} cards detected`;
+    }
+    if (completeConfigPath) {
+      completeConfigPath.textContent = state.generatedConfigData.configPath || 'configs/generated.json';
+    }
+
+    // Show complete panel
+    state.currentState = STATES.COMPLETE;
+    showPanel('completePanel');
+    document.getElementById('panelSubtitle').textContent = 'Complete!';
+
+    console.log('[v2.3] Config saved successfully, showing completion');
+
+    // Note: Actual file save already happened in backend during generation
+    // This just confirms to user and allows them to close
+  };
+
+  /**
+   * Return to editing from config preview
+   */
+  window.backToEditConfig = function() {
+    console.log('[v2.3] User wants to return to editing from preview');
+
+    // Return to manual selection panel
+    state.currentState = STATES.MANUAL_SELECTION;
+    showPanel('manualPanel');
+    document.getElementById('panelSubtitle').textContent = 'Manual Selection Mode';
+
+    // Reset to current field or last field
+    showFieldPrompt(state.currentFieldIndex);
+
+    showToast('You can modify field selections and regenerate config', 'info');
+  };
 
   // ===========================
   // v2.2: FIELD RECTANGLE SELECTION FUNCTIONS
