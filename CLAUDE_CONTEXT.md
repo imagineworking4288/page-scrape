@@ -1355,3 +1355,88 @@ const logger = require('./src/utils/logger');
 ```
 
 **Module Verification**: All new modules load correctly - verified with `node -e` require tests.
+
+---
+
+### Config Preview Panel Implementation (December 7)
+**Change**: Added a Config Preview Panel that displays after field selection but before browser closure, allowing users to review the generated config before final save.
+
+**Problem Solved**: Previously, clicking "Finish Selection" would immediately generate the config, save it, and close the browser - users had no chance to review the config or go back to edit fields.
+
+**New User Flow**:
+1. User completes field selection workflow
+2. User clicks "Finish Selection"
+3. Backend generates config and saves file (but does NOT close browser)
+4. **NEW**: Config Preview Panel displays with:
+   - All 6 fields showing Found/Missing status
+   - Extracted values for each field
+   - Extraction method and confidence scores
+   - Stats: Cards Found, Fields Detected, Config Score
+   - Warnings for missing required fields
+5. User can click "Back to Edit" to return to field selection
+6. User clicks "Save & Close" to finalize
+7. Backend cleans up and closes browser
+
+**Files Modified**:
+
+1. **`src/tools/assets/overlay.html`**:
+   - Added `configPreviewPanel` div (lines 1352-1390)
+   - Added CSS styles for `.config-preview-panel`, `.config-field-row`, `.field-badges`, `.confidence-badge` (lines 1161-1275)
+
+2. **`src/tools/assets/overlay-client.js`**:
+   - Added `CONFIG_PREVIEW` state to `STATES` enum
+   - Added `generatedConfigData` to state object for storing config before final save
+   - Updated `showPanel()` to include `configPreviewPanel`
+   - Modified `handleConfigComplete()` to show preview instead of completing immediately
+   - Added `extractFieldsFromSelections()` helper function
+   - Added `formatMethodName()` helper function
+   - Added `buildConfigPreviewPanel(configData)` - builds the preview UI
+   - Updated `saveAndCloseConfig()` to be async and call backend `__configGen_finalSaveAndClose`
+   - Added `backToEditConfig()` - returns to manual selection panel
+
+3. **`src/tools/lib/interactive-session.js`**:
+   - Added `__configGen_finalSaveAndClose` exposed function (line 362-366)
+   - Modified `handleConfirmWithSelections()` to NOT resolve session immediately
+   - Modified `handleGenerateV23Config()` to NOT resolve session immediately
+   - Added `handleFinalSaveAndClose()` method - finalizes session when user confirms
+   - Added `formatMethodName()` helper method
+   - Both config generation methods now include additional data for preview:
+     - `config` - The actual config object
+     - `fields` - Field details with values, methods, confidence
+     - `score` - Config validation score
+
+**Key Architecture Change - Deferred Session Resolution**:
+```javascript
+// BEFORE: Session resolved immediately after config generation
+this.sessionComplete = true;
+this.sessionResult = { ... };
+if (this.resolveSession) {
+  this.resolveSession(this.sessionResult);  // Browser closes immediately!
+}
+
+// AFTER: Session result stored but NOT resolved
+this.sessionResult = { ... };
+// Browser stays open for preview panel
+// Session resolved only when user clicks "Save & Close":
+// handleFinalSaveAndClose() -> this.resolveSession(this.sessionResult)
+```
+
+**Config Preview Panel UI Elements**:
+```html
+<div id="configPreviewPanel" class="panel-content config-preview-panel">
+  <h3>Generated Config Preview</h3>
+  <div id="configFieldsList"><!-- Dynamic field rows --></div>
+  <div class="stats-row">
+    <div class="stat-box"><span id="configCardsCount">0</span> Cards Found</div>
+    <div class="stat-box"><span id="configFieldsCount">0/6</span> Fields Detected</div>
+    <div class="stat-box"><span id="configScoreValue">0</span> Config Score</div>
+  </div>
+  <div id="configWarningsSection"><!-- Warnings if any --></div>
+  <button id="saveConfigBtn" onclick="saveAndCloseConfig()">Save & Close</button>
+  <button onclick="backToEditConfig()">Back to Edit</button>
+</div>
+```
+
+**Backend-Frontend Communication**:
+- `handleConfigComplete(result)` - Receives config data, shows preview panel
+- `__configGen_finalSaveAndClose()` - Called when user clicks "Save & Close", resolves session

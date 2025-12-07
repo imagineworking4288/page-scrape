@@ -1393,8 +1393,9 @@
 
   /**
    * Save config and close (from preview panel)
+   * Calls backend to finalize session and close browser
    */
-  window.saveAndCloseConfig = function() {
+  window.saveAndCloseConfig = async function() {
     console.log('[v2.3] User confirmed config save from preview');
 
     if (!state.generatedConfigData) {
@@ -1403,29 +1404,76 @@
       return;
     }
 
-    // Clear highlights
-    clearHighlights();
-
-    // Update complete panel with saved data
-    const completeCardCount = document.getElementById('completeCardCount');
-    const completeConfigPath = document.getElementById('completeConfigPath');
-
-    if (completeCardCount) {
-      completeCardCount.textContent = `${state.detectedCards?.length || 0} cards detected`;
-    }
-    if (completeConfigPath) {
-      completeConfigPath.textContent = state.generatedConfigData.configPath || 'configs/generated.json';
+    // Show saving indicator
+    const saveBtn = document.getElementById('saveConfigBtn');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
     }
 
-    // Show complete panel
-    state.currentState = STATES.COMPLETE;
-    showPanel('completePanel');
-    document.getElementById('panelSubtitle').textContent = 'Complete!';
+    // Call backend to finalize and close session
+    try {
+      if (typeof __configGen_finalSaveAndClose === 'function') {
+        console.log('[v2.3] Calling backend finalSaveAndClose...');
+        const result = await __configGen_finalSaveAndClose();
 
-    console.log('[v2.3] Config saved successfully, showing completion');
+        if (result.success) {
+          console.log('[v2.3] Session finalized successfully');
+          console.log('[v2.3] Config saved to:', result.configPath);
 
-    // Note: Actual file save already happened in backend during generation
-    // This just confirms to user and allows them to close
+          // Clear highlights
+          clearHighlights();
+
+          // Show success message briefly before browser closes
+          showToast('Config saved successfully! Browser closing...', 'success');
+
+          // Update complete panel (may not be visible if browser closes quickly)
+          const completeCardCount = document.getElementById('completeCardCount');
+          const completeConfigPath = document.getElementById('completeConfigPath');
+
+          if (completeCardCount) {
+            completeCardCount.textContent = `${state.detectedCards?.length || 0} cards detected`;
+          }
+          if (completeConfigPath) {
+            completeConfigPath.textContent = state.generatedConfigData.configPath || 'configs/generated.json';
+          }
+
+          // Show complete panel
+          state.currentState = STATES.COMPLETE;
+          showPanel('completePanel');
+          document.getElementById('panelSubtitle').textContent = 'Complete!';
+
+          // Browser will close automatically via backend session resolution
+        } else {
+          console.error('[v2.3] Session finalization failed:', result.error);
+          showToast('Error finalizing session: ' + result.error, 'error');
+
+          // Re-enable save button on error
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save & Close';
+          }
+        }
+      } else {
+        console.error('[v2.3] __configGen_finalSaveAndClose not available');
+        showToast('Backend function not available', 'error');
+
+        // Re-enable save button
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save & Close';
+        }
+      }
+    } catch (error) {
+      console.error('[v2.3] Error calling finalSaveAndClose:', error);
+      showToast('Error: ' + error.message, 'error');
+
+      // Re-enable save button on error
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & Close';
+      }
+    }
   };
 
   /**

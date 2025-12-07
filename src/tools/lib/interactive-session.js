@@ -358,6 +358,12 @@ class InteractiveSession {
       this.logger.info('[v2.3] Generating config with validated extraction methods');
       return await this.handleGenerateV23Config(selections);
     });
+
+    // Final save and close (v2.3 - from preview panel)
+    await this.page.exposeFunction('__configGen_finalSaveAndClose', async () => {
+      this.logger.info('[v2.3] User confirmed final save from preview panel');
+      return await this.handleFinalSaveAndClose();
+    });
   }
 
   // ===========================
@@ -753,8 +759,7 @@ class InteractiveSession {
 
       this.logger.info('[v2.2-BACKEND] Result sent to overlay');
 
-      // Mark session complete
-      this.sessionComplete = true;
+      // Store session result but DO NOT resolve yet - wait for user confirmation in preview panel
       this.sessionResult = {
         success: true,
         configPath: configPath,
@@ -763,13 +768,11 @@ class InteractiveSession {
         selectionMethod: 'manual'
       };
 
-      if (this.resolveSession) {
-        this.logger.info('[v2.2-BACKEND] Resolving session promise');
-        this.resolveSession(this.sessionResult);
-      }
+      this.logger.info('[v2.3] Config generated and saved, waiting for user confirmation in preview panel');
+      this.logger.info('[v2.3] Browser will remain open until user clicks "Save & Close"');
 
       this.logger.info('========================================');
-      this.logger.info('[v2.2-BACKEND] MANUAL SELECTION COMPLETE');
+      this.logger.info('[v2.2-BACKEND] CONFIG READY FOR PREVIEW');
       this.logger.info('========================================');
 
       return result;
@@ -1585,8 +1588,7 @@ class InteractiveSession {
         }
       }, result);
 
-      // Mark session complete
-      this.sessionComplete = true;
+      // Store session result but DO NOT resolve yet - wait for user confirmation in preview panel
       this.sessionResult = {
         success: true,
         configPath: configPath,
@@ -1594,15 +1596,10 @@ class InteractiveSession {
         validation: validation
       };
 
-      if (this.resolveSession) {
-        this.resolveSession(this.sessionResult);
-      }
+      this.logger.info('[v2.3] Config generated and saved, waiting for user confirmation in preview panel');
+      this.logger.info('[v2.3] Browser will remain open until user clicks "Save & Close"');
 
-      // Cleanup extraction tester
-      if (this.extractionTester) {
-        await this.extractionTester.terminate();
-        this.extractionTester = null;
-      }
+      // NOTE: Do NOT cleanup extraction tester here - do it in handleFinalSaveAndClose
 
       return result;
 
@@ -1616,6 +1613,58 @@ class InteractiveSession {
       }, error.message);
 
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle final save and close from preview panel
+   * This is called when user clicks "Save & Close" in the preview
+   * @returns {Promise<Object>}
+   */
+  async handleFinalSaveAndClose() {
+    this.logger.info('========================================');
+    this.logger.info('[v2.3] FINALIZING SESSION AFTER USER CONFIRMATION');
+    this.logger.info('========================================');
+
+    try {
+      // Config was already saved during generation
+      // Just mark session as complete and close
+
+      this.sessionComplete = true;
+
+      this.logger.info('[v2.3] Session marked as complete');
+      this.logger.info('[v2.3] Config path:', this.sessionResult?.configPath);
+
+      // Cleanup extraction tester if present
+      if (this.extractionTester) {
+        this.logger.info('[v2.3] Cleaning up extraction tester...');
+        await this.extractionTester.terminate();
+        this.extractionTester = null;
+      }
+
+      // Resolve session to close browser
+      if (this.resolveSession) {
+        this.logger.info('[v2.3] Resolving session promise - browser will close');
+        this.resolveSession(this.sessionResult);
+      }
+
+      this.logger.info('========================================');
+      this.logger.info('[v2.3] SESSION FINALIZED SUCCESSFULLY');
+      this.logger.info('========================================');
+
+      return {
+        success: true,
+        message: 'Session completed successfully',
+        configPath: this.sessionResult?.configPath
+      };
+
+    } catch (error) {
+      this.logger.error(`[v2.3] Final save error: ${error.message}`);
+      this.logger.error(`[v2.3] Error stack: ${error.stack}`);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 }
