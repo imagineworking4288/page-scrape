@@ -364,6 +364,22 @@ class InteractiveSession {
       this.logger.info('[v2.3] User confirmed final save from preview panel');
       return await this.handleFinalSaveAndClose();
     });
+
+    // ===========================
+    // Diagnosis & Scraping Functions
+    // ===========================
+
+    // Diagnose pagination type
+    await this.page.exposeFunction('__configGen_diagnosePagination', async () => {
+      this.logger.info('[Diagnosis] Starting pagination diagnosis...');
+      return await this.handleDiagnosePagination();
+    });
+
+    // Start scraping with config
+    await this.page.exposeFunction('__configGen_startScraping', async (scrapingConfig) => {
+      this.logger.info('[Scraping] Starting scraping with config:', JSON.stringify(scrapingConfig));
+      return await this.handleStartScraping(scrapingConfig);
+    });
   }
 
   // ===========================
@@ -1666,6 +1682,348 @@ class InteractiveSession {
         error: error.message
       };
     }
+  }
+
+  // ===========================
+  // Diagnosis & Scraping Handlers
+  // ===========================
+
+  /**
+   * Handle pagination diagnosis request
+   * Analyzes the page to determine pagination type
+   * @returns {Promise<Object>}
+   */
+  async handleDiagnosePagination() {
+    this.logger.info('========================================');
+    this.logger.info('[Diagnosis] STARTING PAGINATION ANALYSIS');
+    this.logger.info('========================================');
+
+    try {
+      // Get card selector from session result (config)
+      const cardSelector = this.sessionResult?.config?.cardPattern?.primarySelector ||
+                          this.sessionResult?.config?.cardPattern?.selector ||
+                          this.captureData?.selector;
+
+      if (!cardSelector) {
+        throw new Error('No card selector available for diagnosis');
+      }
+
+      this.logger.info(`[Diagnosis] Using card selector: ${cardSelector}`);
+
+      // Count initial cards
+      const initialCards = await this.page.$$(cardSelector);
+      const initialCount = initialCards.length;
+      this.logger.info(`[Diagnosis] Initial cards: ${initialCount}`);
+
+      // Check for pagination controls
+      const paginationControls = await this.page.evaluate(() => {
+        const selectors = {
+          numeric: ['.pagination', '[class*="pagination"]', '.pager', '[class*="pager"]'],
+          nextButton: ['a[rel="next"]', '[class*="next"]', 'button[aria-label*="next" i]'],
+          loadMore: ['[class*="load-more"]', 'button[class*="more"]', '[data-load-more]'],
+          infiniteScroll: ['[data-infinite-scroll]', '[class*="infinite"]', '[class*="lazy-load"]']
+        };
+
+        const results = {};
+        for (const [type, sels] of Object.entries(selectors)) {
+          for (const sel of sels) {
+            try {
+              const el = document.querySelector(sel);
+              if (el) {
+                results[type] = { found: true, selector: sel };
+                break;
+              }
+            } catch (e) {}
+          }
+          if (!results[type]) results[type] = { found: false };
+        }
+        return results;
+      });
+
+      this.logger.info(`[Diagnosis] Controls detected: ${JSON.stringify(paginationControls)}`);
+
+      // Determine type
+      let detectedType = 'single-page';
+      let confidence = 'high';
+      const details = { cardCounts: { initial: initialCount } };
+
+      if (paginationControls.numeric?.found || paginationControls.nextButton?.found) {
+        detectedType = 'pagination';
+        details.controlsFound = paginationControls;
+        this.logger.info('[Diagnosis] Detected traditional pagination controls');
+      } else if (paginationControls.infiniteScroll?.found || paginationControls.loadMore?.found) {
+        detectedType = 'infinite-scroll';
+        details.controlsFound = paginationControls;
+        this.logger.info('[Diagnosis] Detected infinite scroll indicators');
+      } else {
+        // Test scroll behavior
+        this.logger.info('[Diagnosis] Testing scroll behavior...');
+        const scrollY = await this.page.evaluate(() => window.scrollY);
+        await this.page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
+        await this.sleep(2000);
+
+        const afterScrollCards = await this.page.$$(cardSelector);
+        const afterScrollCount = afterScrollCards.length;
+
+        details.cardCounts.afterScroll = afterScrollCount;
+        details.scrollsPerformed = 1;
+
+        if (afterScrollCount > initialCount) {
+          detectedType = 'infinite-scroll';
+          confidence = 'medium';
+          details.note = 'Detected via scroll test';
+          this.logger.info(`[Diagnosis] Scroll test: ${initialCount} -> ${afterScrollCount} cards (infinite scroll detected)`);
+        }
+
+        // Scroll back
+        await this.page.evaluate((y) => window.scrollTo(0, y), scrollY);
+      }
+
+      const diagnosis = {
+        success: true,
+        type: detectedType,
+        confidence: confidence,
+        cardSelector: cardSelector,
+        ...details
+      };
+
+      this.logger.info(`[Diagnosis] Result: ${detectedType} (${confidence})`);
+      this.logger.info('========================================');
+
+      // Send result to frontend
+      await this.page.evaluate((res) => {
+        if (window.handleDiagnosisComplete) {
+          window.handleDiagnosisComplete(res);
+        }
+      }, diagnosis);
+
+      return diagnosis;
+
+    } catch (error) {
+      this.logger.error(`[Diagnosis] Error: ${error.message}`);
+
+      const errorResult = { success: false, error: error.message };
+
+      await this.page.evaluate((res) => {
+        if (window.handleDiagnosisComplete) {
+          window.handleDiagnosisComplete(res);
+        }
+      }, errorResult);
+
+      return errorResult;
+    }
+  }
+
+  /**
+   * Handle start scraping request
+   * Creates appropriate scraper and starts extraction
+   * @param {Object} scrapingConfig - Scraping configuration
+   * @returns {Promise<Object>}
+   */
+  async handleStartScraping(scrapingConfig) {
+    this.logger.info('========================================');
+    this.logger.info('[Scraping] STARTING SCRAPING PROCESS');
+    this.logger.info('========================================');
+    this.logger.info(`[Scraping] Pagination type: ${scrapingConfig.paginationType}`);
+    this.logger.info(`[Scraping] Limit: ${scrapingConfig.limit || 'unlimited'}`);
+
+    try {
+      // Import config scrapers dynamically
+      const { createScraper } = require('../../scrapers/config-scrapers');
+
+      // Create appropriate scraper
+      const scraper = createScraper(
+        scrapingConfig.paginationType,
+        this.browserManager,
+        this.rateLimiter,
+        this.logger,
+        this.configLoader,
+        {
+          maxScrolls: 100,
+          maxPages: 200,
+          scrollDelay: 2000,
+          pageDelay: 2000
+        }
+      );
+
+      // Load the config that was generated
+      if (this.sessionResult?.config) {
+        scraper.config = this.sessionResult.config;
+        scraper.initializeCardSelector();
+      } else if (this.sessionResult?.configPath) {
+        scraper.loadConfig(this.sessionResult.configPath);
+      } else {
+        throw new Error('No config available for scraping');
+      }
+
+      // Set output path
+      scraper.setOutputPath(this.options.outputDir || 'output');
+
+      // Initialize extractors
+      await scraper.initializeExtractors(this.page);
+
+      // Progress callback
+      const updateProgress = async (progress) => {
+        try {
+          await this.page.evaluate((prog) => {
+            if (window.handleScrapingProgress) {
+              window.handleScrapingProgress(prog);
+            }
+          }, progress);
+        } catch (e) {
+          // Page might be navigating, ignore
+        }
+      };
+
+      // Start scraping based on type
+      const url = this.page.url();
+      let result;
+
+      if (scrapingConfig.paginationType === 'single-page') {
+        result = await this.scrapeSinglePage(scraper, scrapingConfig.limit, updateProgress);
+      } else if (scrapingConfig.paginationType === 'infinite-scroll') {
+        result = await this.scrapeInfiniteScroll(scraper, scrapingConfig.limit, updateProgress);
+      } else if (scrapingConfig.paginationType === 'pagination') {
+        result = await this.scrapePagination(scraper, url, scrapingConfig.limit, scrapingConfig.diagnosisResults, updateProgress);
+      } else {
+        result = await this.scrapeSinglePage(scraper, scrapingConfig.limit, updateProgress);
+      }
+
+      this.logger.info(`[Scraping] Completed. Total contacts: ${result.totalContacts}`);
+      this.logger.info(`[Scraping] Output: ${result.outputPath}`);
+
+      // Send result to frontend
+      await this.page.evaluate((res) => {
+        if (window.handleScrapingComplete) {
+          window.handleScrapingComplete(res);
+        }
+      }, result);
+
+      // Store scraping result
+      this.sessionResult = {
+        ...this.sessionResult,
+        scrapingResult: result
+      };
+
+      // Mark session as complete
+      this.sessionComplete = true;
+
+      // Resolve session after a short delay to allow UI to update
+      setTimeout(() => {
+        if (this.resolveSession) {
+          this.resolveSession(this.sessionResult);
+        }
+      }, 3000);
+
+      return result;
+
+    } catch (error) {
+      this.logger.error(`[Scraping] Error: ${error.message}`);
+      this.logger.error(`[Scraping] Stack: ${error.stack}`);
+
+      const errorResult = { success: false, error: error.message };
+
+      await this.page.evaluate((res) => {
+        if (window.handleScrapingComplete) {
+          window.handleScrapingComplete(res);
+        }
+      }, errorResult);
+
+      return errorResult;
+    }
+  }
+
+  /**
+   * Scrape single page
+   */
+  async scrapeSinglePage(scraper, limit, updateProgress) {
+    this.logger.info('[Scraping] Single page mode');
+
+    const cardElements = await scraper.findCardElements(this.page);
+    this.logger.info(`[Scraping] Found ${cardElements.length} cards`);
+
+    const cardsToProcess = limit > 0 ? cardElements.slice(0, limit) : cardElements;
+
+    for (let i = 0; i < cardsToProcess.length; i++) {
+      const contact = await scraper.extractContactFromCard(cardsToProcess[i], i);
+      if (contact) {
+        scraper.addContact(contact);
+      }
+
+      if ((i + 1) % 10 === 0) {
+        await updateProgress({ contactCount: scraper.contactCount, cards: `${i + 1}/${cardsToProcess.length}` });
+      }
+
+      if (limit > 0 && scraper.contactCount >= limit) break;
+    }
+
+    return scraper.getResults();
+  }
+
+  /**
+   * Scrape infinite scroll
+   */
+  async scrapeInfiniteScroll(scraper, limit, updateProgress) {
+    this.logger.info('[Scraping] Infinite scroll mode');
+
+    let scrollCount = 0;
+    let noNewContentCount = 0;
+    let processedCardCount = 0;
+    const processedCardIds = new Set();
+    const maxScrolls = 100;
+
+    while (scrollCount < maxScrolls && noNewContentCount < 3) {
+      if (limit > 0 && scraper.contactCount >= limit) break;
+
+      const cardElements = await scraper.findCardElements(this.page);
+      let newCardsThisScroll = 0;
+
+      for (let i = processedCardCount; i < cardElements.length; i++) {
+        const cardId = `card-${i}-${Date.now()}`;
+        if (processedCardIds.has(cardId)) continue;
+        processedCardIds.add(cardId);
+
+        const contact = await scraper.extractContactFromCard(cardElements[i], i);
+        if (contact) {
+          scraper.addContact(contact);
+          newCardsThisScroll++;
+        }
+
+        if (limit > 0 && scraper.contactCount >= limit) break;
+      }
+
+      processedCardCount = cardElements.length;
+
+      if (newCardsThisScroll === 0) {
+        noNewContentCount++;
+      } else {
+        noNewContentCount = 0;
+      }
+
+      await updateProgress({
+        contactCount: scraper.contactCount,
+        scroll: `${scrollCount + 1}/${maxScrolls}`,
+        cards: processedCardCount
+      });
+
+      // Scroll down
+      await this.page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
+      scrollCount++;
+      await this.sleep(2000);
+    }
+
+    return scraper.getResults();
+  }
+
+  /**
+   * Scrape pagination
+   */
+  async scrapePagination(scraper, url, limit, diagnosisResults, updateProgress) {
+    this.logger.info('[Scraping] Pagination mode');
+
+    // For now, just scrape current page
+    // TODO: Implement full pagination with URL generation
+    return await this.scrapeSinglePage(scraper, limit, updateProgress);
   }
 }
 

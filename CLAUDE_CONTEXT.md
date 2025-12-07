@@ -1440,3 +1440,162 @@ this.sessionResult = { ... };
 **Backend-Frontend Communication**:
 - `handleConfigComplete(result)` - Receives config data, shows preview panel
 - `__configGen_finalSaveAndClose()` - Called when user clicks "Save & Close", resolves session
+
+---
+
+### Config-Based Scrapers with Diagnosis Integration (December 7)
+**Change**: Implemented specialized config-based scrapers with diagnosis integration for scraping contacts directly from the Config Preview Panel.
+
+**New User Flow** (from Config Preview Panel):
+1. User generates config via visual field selection
+2. Config Preview Panel displays with "Start Scraping" button
+3. User clicks "Start Scraping"
+4. **Diagnosis Panel** appears:
+   - Shows "Analyzing..." while detecting pagination type
+   - Displays detected type badge (Infinite Scroll / Pagination / Single Page)
+   - Shows diagnosis details table
+   - Allows manual type override
+   - Contact limit input (0 = unlimited)
+5. User clicks "Scrape All Contacts" or "Scrape First X Contacts"
+6. Progress panel shows scraping progress
+7. Complete panel shows results with contact count
+
+**Files Created**:
+
+1. **`src/scrapers/config-scrapers/base-config-scraper.js`** (~400 lines)
+   - Abstract base class for all config-based scrapers
+   - Loads and validates v2.3 configs
+   - STRICT extraction using ONLY `userValidatedMethod` from config
+   - Initializes extractors dynamically based on config methods
+   - `loadConfig()`, `validateConfigVersion()`, `initializeCardSelector()`
+   - `initializeExtractors()`, `findCardElements()`, `extractContactFromCard()`
+   - `extractField()`, `normalizeFieldValue()`, `isDuplicateContact()`
+   - Contact buffer with incremental file writes (every 100 contacts)
+   - `reportProgress()` for terminal updates
+
+2. **`src/scrapers/config-scrapers/single-page-scraper.js`** (~100 lines)
+   - Extends BaseConfigScraper
+   - Scrapes all cards visible on page without pagination
+   - Simple: find cards -> extract contacts -> return results
+
+3. **`src/scrapers/config-scrapers/infinite-scroll-scraper.js`** (~200 lines)
+   - Extends BaseConfigScraper
+   - Handles infinite scroll pages
+   - Scroll loop: extract -> scroll -> check for new cards -> repeat
+   - Stops when no new cards (3x threshold) or max scrolls reached
+   - `getCardIdentifier()` for deduplication
+
+4. **`src/scrapers/config-scrapers/pagination-scraper.js`** (~200 lines)
+   - Extends BaseConfigScraper
+   - Handles traditional paginated pages
+   - Uses Paginator for URL pattern discovery
+   - Sequential page navigation with rate limiting
+   - Contact deduplication across pages
+
+5. **`src/scrapers/config-scrapers/index.js`** (~200 lines)
+   - Module exports
+   - `createScraper(paginationType, ...)` - Factory method for scraper selection
+   - `diagnosePagination(page, ...)` - Pagination type detection
+
+**Files Modified**:
+
+1. **`src/tools/assets/overlay.html`**
+   - Added "Start Scraping" button to Config Preview Panel (line 1499)
+   - Added Diagnosis Panel HTML (lines 1511-1570)
+   - Added CSS styles for diagnosis panel (lines 1277-1394)
+
+2. **`src/tools/assets/overlay-client.js`**
+   - Added `DIAGNOSIS` and `SCRAPING` states to STATES enum
+   - Added state variables: `diagnosisResults`, `manualPaginationType`, `scrapingInProgress`, `contactLimit`
+   - Updated `showPanel()` to include 'diagnosisPanel'
+   - Added diagnosis functions:
+     - `startDiagnosis()` - Initiates diagnosis from Config Preview
+     - `handleDiagnosisComplete(results)` - Handles backend diagnosis results
+     - `formatDiagnosisType()` - Formats type for display
+     - `buildDiagnosisDetails()` - Builds diagnosis table
+   - Added scraping functions:
+     - `startScraping(mode)` - Starts scraping (all mode)
+     - `startScrapingWithLimit()` - Starts with user limit
+     - `backToConfigPreview()` - Returns to config preview
+     - `handleScrapingProgress(progress)` - Updates progress UI
+     - `handleScrapingComplete(results)` - Handles completion
+
+3. **`src/tools/lib/interactive-session.js`**
+   - Added exposed functions:
+     - `__configGen_diagnosePagination` (line 373)
+     - `__configGen_startScraping` (line 379)
+   - Added handler methods:
+     - `handleDiagnosePagination()` - Pagination type detection logic
+     - `handleStartScraping(scrapingConfig)` - Scraping orchestration
+     - `scrapeSinglePage()` - Single page extraction
+     - `scrapeInfiniteScroll()` - Infinite scroll extraction
+     - `scrapePagination()` - Paginated extraction
+
+**Diagnosis Algorithm**:
+```javascript
+// 1. Check for explicit pagination controls
+const controls = {
+  numeric: ['.pagination', '[class*="pagination"]', '.pager'],
+  nextButton: ['a[rel="next"]', '[class*="next"]'],
+  loadMore: ['[class*="load-more"]', 'button[class*="more"]'],
+  infiniteScroll: ['[data-infinite-scroll]', '[class*="infinite"]']
+};
+
+// 2. If pagination controls found -> 'pagination'
+// 3. If infinite scroll indicators found -> 'infinite-scroll'
+// 4. Otherwise, test scroll behavior:
+//    - Scroll down 80% of viewport
+//    - Wait 2 seconds
+//    - Count cards before/after
+//    - If more cards -> 'infinite-scroll'
+//    - Else -> 'single-page'
+```
+
+**STRICT Extraction Mode**:
+```javascript
+// Only uses userValidatedMethod from v2.3 config
+// NO fallbacks to other methods
+const method = fieldConfig.userValidatedMethod || fieldConfig.method;
+if (!method) return; // Skip field entirely
+
+// Method mapping:
+// 'mailto-link' -> EmailExtractor.extractFromMailtoLink()
+// 'regex-email' -> EmailExtractor.extractFromRegion()
+// 'tel-link' -> PhoneExtractor or CoordinateExtractor
+// 'href-link' -> LinkExtractor or CoordinateExtractor
+// 'coordinate-text' -> CoordinateExtractor.extractFromRegion()
+```
+
+**Progress Reporting**:
+- Single page: "Contacts: X | Cards: Y/Z"
+- Infinite scroll: "Contacts: X | Scroll: Y/100 | Cards: Z"
+- Pagination: "Contacts: X | Page: Y/Z"
+
+**Output File Structure**:
+```json
+{
+  "metadata": {
+    "configName": "sullcrom-lawyers",
+    "configVersion": "2.3",
+    "scrapeDate": "2024-12-07T...",
+    "totalContacts": 150,
+    "duration": 45000
+  },
+  "contacts": [
+    {
+      "name": "John Smith",
+      "email": "jsmith@firm.com",
+      "phone": "+1 555-123-4567",
+      "profileUrl": "https://...",
+      "title": "Partner",
+      "location": "New York",
+      "_cardIndex": 0,
+      "_extractionMethods": {
+        "name": { "method": "coordinate-text", "confidence": 85 },
+        "email": { "method": "mailto-link", "confidence": 95 }
+      },
+      "confidence": 0.9
+    }
+  ]
+}
+```

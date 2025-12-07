@@ -85,6 +85,8 @@
     LINK_DISAMBIGUATION: 'LINK_DISAMBIGUATION',
     GENERATING: 'GENERATING',
     CONFIG_PREVIEW: 'CONFIG_PREVIEW',  // v2.3: Preview generated config before saving
+    DIAGNOSIS: 'DIAGNOSIS',  // Pagination diagnosis state
+    SCRAPING: 'SCRAPING',    // Scraping in progress state
     COMPLETE: 'COMPLETE'
   };
 
@@ -145,7 +147,13 @@
     v23OptionalFields: ['phone', 'title', 'location'],   // Optional fields
 
     // v2.3: Config preview state
-    generatedConfigData: null  // Stores config data for preview before final save
+    generatedConfigData: null,  // Stores config data for preview before final save
+
+    // Diagnosis state
+    diagnosisResults: null,       // Pagination diagnosis results
+    manualPaginationType: null,   // User override for pagination type
+    scrapingInProgress: false,    // Flag for scraping in progress
+    contactLimit: 0               // User-specified contact limit (0 = no limit)
   };
 
   // DOM Elements
@@ -239,7 +247,8 @@
       'previewPanel',         // v2.2
       'manualPanel',          // v2.2
       'extractionResultsPanel', // v2.3
-      'configPreviewPanel'    // v2.3: Config preview before save
+      'configPreviewPanel',   // v2.3: Config preview before save
+      'diagnosisPanel'        // Diagnosis panel for pagination detection
     ];
     panels.forEach(id => {
       const panel = document.getElementById(id);
@@ -1491,6 +1500,318 @@
     showFieldPrompt(state.currentFieldIndex);
 
     showToast('You can modify field selections and regenerate config', 'info');
+  };
+
+  // ===========================
+  // DIAGNOSIS & SCRAPING FUNCTIONS
+  // ===========================
+
+  /**
+   * Start pagination diagnosis
+   * Called when user clicks "Start Scraping" from config preview
+   */
+  window.startDiagnosis = async function() {
+    console.log('[Diagnosis] Starting pagination diagnosis...');
+
+    // Update state
+    state.currentState = STATES.DIAGNOSIS;
+    state.diagnosisResults = null;
+    state.manualPaginationType = null;
+
+    // Show diagnosis panel with analyzing state
+    showPanel('diagnosisPanel');
+    document.getElementById('panelSubtitle').textContent = 'Analyzing Pagination...';
+
+    // Update badge to analyzing state
+    const badge = document.getElementById('diagnosisBadge');
+    badge.className = 'diagnosis-badge analyzing';
+    document.getElementById('diagnosisBadgeText').textContent = 'Analyzing...';
+
+    // Hide details and options sections initially
+    document.getElementById('diagnosisDetailsSection').style.display = 'none';
+    document.getElementById('manualOverrideSection').style.display = 'none';
+    document.getElementById('scrapingOptionsSection').style.display = 'none';
+
+    try {
+      // Call backend to perform diagnosis
+      if (typeof __configGen_diagnosePagination === 'function') {
+        console.log('[Diagnosis] Calling backend diagnosis function...');
+        await __configGen_diagnosePagination();
+        // Backend will call handleDiagnosisComplete when done
+      } else {
+        console.error('[Diagnosis] Backend function not available');
+        showToast('Diagnosis function not available', 'error');
+        showPanel('configPreviewPanel');
+      }
+    } catch (error) {
+      console.error('[Diagnosis] Error:', error);
+      showToast('Diagnosis failed: ' + error.message, 'error');
+      showPanel('configPreviewPanel');
+    }
+  };
+
+  /**
+   * Handle diagnosis complete from backend
+   * Called by backend via page.evaluate
+   */
+  window.handleDiagnosisComplete = function(results) {
+    console.log('[Diagnosis] Results received:', results);
+
+    if (!results.success) {
+      showToast(results.error || 'Diagnosis failed', 'error');
+      showPanel('configPreviewPanel');
+      return;
+    }
+
+    // Store results
+    state.diagnosisResults = results;
+
+    // Update badge
+    const badge = document.getElementById('diagnosisBadge');
+    const badgeText = document.getElementById('diagnosisBadgeText');
+
+    const typeClass = results.type.toLowerCase().replace(/_/g, '-');
+    badge.className = 'diagnosis-badge ' + typeClass;
+    badgeText.textContent = formatDiagnosisType(results.type);
+
+    // Build and show details table
+    buildDiagnosisDetails(results);
+    document.getElementById('diagnosisDetailsSection').style.display = 'block';
+
+    // Show manual override
+    document.getElementById('manualOverrideSection').style.display = 'block';
+
+    // Show scraping options
+    document.getElementById('scrapingOptionsSection').style.display = 'block';
+
+    // Update subtitle
+    document.getElementById('panelSubtitle').textContent = 'Detected: ' + formatDiagnosisType(results.type);
+
+    console.log('[Diagnosis] Panel updated with results');
+  };
+
+  /**
+   * Format pagination type for display
+   */
+  function formatDiagnosisType(type) {
+    const types = {
+      'infinite-scroll': 'Infinite Scroll',
+      'infinite_scroll': 'Infinite Scroll',
+      'pagination': 'Traditional Pagination',
+      'single-page': 'Single Page',
+      'single_page': 'Single Page'
+    };
+    return types[type] || type;
+  }
+
+  /**
+   * Build diagnosis details table based on pagination type
+   */
+  function buildDiagnosisDetails(results) {
+    const table = document.getElementById('diagnosisDetailsTable');
+    table.innerHTML = '';
+
+    const rows = [];
+
+    // Common rows
+    rows.push({ label: 'Type', value: formatDiagnosisType(results.type) });
+    rows.push({ label: 'Confidence', value: results.confidence || 'N/A' });
+
+    // Type-specific rows
+    if (results.type === 'infinite-scroll' || results.type === 'infinite_scroll') {
+      rows.push({ label: 'Initial Cards', value: results.cardCounts?.initial || 0 });
+      rows.push({ label: 'After Scroll', value: results.cardCounts?.afterScroll || 0 });
+      rows.push({ label: 'Scrolls Performed', value: results.scrollsPerformed || 1 });
+    } else if (results.type === 'pagination') {
+      rows.push({ label: 'Total Pages', value: results.totalPages || '?' });
+      if (results.sampleUrls && results.sampleUrls.length > 0) {
+        rows.push({
+          label: 'Sample URLs',
+          value: results.sampleUrls.slice(0, 3).map(function(url) { return url.split('/').pop(); }).join(', ')
+        });
+      }
+    } else if (results.type === 'single-page' || results.type === 'single_page') {
+      rows.push({ label: 'Cards Found', value: results.cardCounts?.initial || 0 });
+    }
+
+    // Build table
+    rows.forEach(function(row) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      const td2 = document.createElement('td');
+
+      td1.textContent = row.label;
+      td2.textContent = row.value;
+
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      table.appendChild(tr);
+    });
+  }
+
+  /**
+   * Start scraping with "all" mode
+   */
+  window.startScraping = async function(mode) {
+    console.log('[Scraping] Starting scraping in ' + mode + ' mode...');
+
+    // Get pagination type (manual override or detected)
+    const manualOverride = document.getElementById('manualPaginationType').value;
+    const paginationType = manualOverride || state.diagnosisResults?.type;
+
+    if (!paginationType) {
+      showToast('No pagination type available', 'error');
+      return;
+    }
+
+    // Update state
+    state.scrapingInProgress = true;
+    state.currentState = STATES.SCRAPING;
+
+    // Show progress
+    showProgress('Scraping Contacts', 'Initializing scraper...');
+
+    var scrapingConfig = {
+      paginationType: paginationType,
+      limit: 0,  // No limit for "all" mode
+      diagnosisResults: state.diagnosisResults
+    };
+
+    try {
+      if (typeof __configGen_startScraping === 'function') {
+        console.log('[Scraping] Calling backend with config:', scrapingConfig);
+        await __configGen_startScraping(scrapingConfig);
+        // Backend will handle progress and completion
+        // Session will resolve when scraping is complete
+      } else {
+        console.error('[Scraping] Backend function not available');
+        showToast('Scraping function not available', 'error');
+        state.scrapingInProgress = false;
+        showPanel('diagnosisPanel');
+      }
+    } catch (error) {
+      console.error('[Scraping] Error:', error);
+      showToast('Scraping failed: ' + error.message, 'error');
+      state.scrapingInProgress = false;
+      showPanel('diagnosisPanel');
+    }
+  };
+
+  /**
+   * Start scraping with user-specified limit
+   */
+  window.startScrapingWithLimit = async function() {
+    var limitInput = document.getElementById('contactLimitInput');
+    var limit = parseInt(limitInput.value) || 0;
+
+    if (limit <= 0) {
+      showToast('Please enter a valid contact limit', 'warning');
+      return;
+    }
+
+    console.log('[Scraping] Starting scraping with limit: ' + limit + '...');
+
+    // Get pagination type
+    var manualOverride = document.getElementById('manualPaginationType').value;
+    var paginationType = manualOverride || state.diagnosisResults?.type;
+
+    if (!paginationType) {
+      showToast('No pagination type available', 'error');
+      return;
+    }
+
+    // Update state
+    state.scrapingInProgress = true;
+    state.currentState = STATES.SCRAPING;
+    state.contactLimit = limit;
+
+    // Show progress
+    showProgress('Scraping Contacts', 'Scraping first ' + limit + ' contacts...');
+
+    var scrapingConfig = {
+      paginationType: paginationType,
+      limit: limit,
+      diagnosisResults: state.diagnosisResults
+    };
+
+    try {
+      if (typeof __configGen_startScraping === 'function') {
+        console.log('[Scraping] Calling backend with config:', scrapingConfig);
+        await __configGen_startScraping(scrapingConfig);
+      } else {
+        console.error('[Scraping] Backend function not available');
+        showToast('Scraping function not available', 'error');
+        state.scrapingInProgress = false;
+        showPanel('diagnosisPanel');
+      }
+    } catch (error) {
+      console.error('[Scraping] Error:', error);
+      showToast('Scraping failed: ' + error.message, 'error');
+      state.scrapingInProgress = false;
+      showPanel('diagnosisPanel');
+    }
+  };
+
+  /**
+   * Return to config preview from diagnosis
+   */
+  window.backToConfigPreview = function() {
+    console.log('[Diagnosis] Returning to config preview...');
+    state.currentState = STATES.CONFIG_PREVIEW;
+    state.diagnosisResults = null;
+    state.manualPaginationType = null;
+    showPanel('configPreviewPanel');
+    document.getElementById('panelSubtitle').textContent = 'Review Generated Config';
+  };
+
+  /**
+   * Handle scraping progress update from backend
+   */
+  window.handleScrapingProgress = function(progress) {
+    console.log('[Scraping] Progress:', progress);
+
+    var progressMessage = document.getElementById('progressMessage');
+    if (progressMessage) {
+      var message = 'Contacts: ' + (progress.contactCount || 0);
+      if (progress.page) {
+        message += ' | Page: ' + progress.page;
+      }
+      if (progress.scroll) {
+        message += ' | Scroll: ' + progress.scroll;
+      }
+      progressMessage.textContent = message;
+    }
+  };
+
+  /**
+   * Handle scraping complete from backend
+   */
+  window.handleScrapingComplete = function(results) {
+    console.log('[Scraping] Complete:', results);
+
+    state.scrapingInProgress = false;
+
+    if (results.success) {
+      // Show complete panel
+      state.currentState = STATES.COMPLETE;
+      showPanel('completePanel');
+      document.getElementById('panelSubtitle').textContent = 'Scraping Complete!';
+
+      var completeCardCount = document.getElementById('completeCardCount');
+      var completeConfigPath = document.getElementById('completeConfigPath');
+
+      if (completeCardCount) {
+        completeCardCount.textContent = (results.totalContacts || 0) + ' contacts extracted';
+      }
+      if (completeConfigPath && results.outputPath) {
+        completeConfigPath.textContent = results.outputPath;
+      }
+
+      showToast('Scraping complete! ' + (results.totalContacts || 0) + ' contacts extracted', 'success');
+    } else {
+      showToast('Scraping failed: ' + (results.error || 'Unknown error'), 'error');
+      showPanel('diagnosisPanel');
+    }
   };
 
   // ===========================

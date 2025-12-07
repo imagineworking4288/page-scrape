@@ -1273,6 +1273,125 @@
       color: #666;
       margin-top: 4px;
     }
+
+    /* ===========================
+       Diagnosis Panel Styles
+       =========================== */
+
+    .diagnosis-panel h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 16px;
+    }
+
+    .diagnosis-badge-container {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+
+    .diagnosis-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .diagnosis-badge .badge-icon {
+      font-size: 18px;
+    }
+
+    .diagnosis-badge.infinite-scroll {
+      background: #d4edda;
+      color: #155724;
+      border: 2px solid #28a745;
+    }
+
+    .diagnosis-badge.pagination {
+      background: #cce5ff;
+      color: #004085;
+      border: 2px solid #007bff;
+    }
+
+    .diagnosis-badge.single-page {
+      background: #e2e3e5;
+      color: #383d41;
+      border: 2px solid #6c757d;
+    }
+
+    .diagnosis-badge.analyzing {
+      background: #fff3cd;
+      color: #856404;
+      border: 2px solid #ffc107;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .diagnosis-details-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+
+    .diagnosis-details-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .diagnosis-details-table td:first-child {
+      font-weight: 500;
+      color: #666;
+      width: 40%;
+    }
+
+    .diagnosis-details-table td:last-child {
+      color: #333;
+    }
+
+    .manual-override-select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      background: white;
+      cursor: pointer;
+    }
+
+    .manual-override-select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    #scrapingOptionsSection h4 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 12px;
+    }
+
+    #contactLimitInput {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    #contactLimitInput:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
   </style>
 </head>
 <body>
@@ -1496,12 +1615,76 @@
         </div>
 
         <div class="btn-group-vertical" style="margin-top: 20px;">
+          <button class="btn btn-primary btn-block" id="startScrapingBtn" onclick="startDiagnosis()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); border: none;">
+            Start Scraping
+          </button>
           <button class="btn btn-success btn-block" id="saveConfigBtn" onclick="saveAndCloseConfig()">
             Save & Close
           </button>
           <button class="btn btn-secondary btn-block" onclick="backToEditConfig()">
             Back to Edit
           </button>
+        </div>
+      </div>
+
+      <!-- ===========================
+           Diagnosis Panel (Pagination Detection)
+           =========================== -->
+      <div id="diagnosisPanel" class="panel-content diagnosis-panel">
+        <h3 style="margin-bottom: 16px; font-size: 16px; color: #333;">Pagination Diagnosis</h3>
+
+        <!-- Diagnosis Badge -->
+        <div class="diagnosis-badge-container">
+          <div id="diagnosisBadge" class="diagnosis-badge analyzing">
+            <span class="badge-icon">&#9881;</span>
+            <span class="badge-text" id="diagnosisBadgeText">Analyzing...</span>
+          </div>
+        </div>
+
+        <!-- Diagnosis Details Table -->
+        <div id="diagnosisDetailsSection" style="display: none;">
+          <table class="diagnosis-details-table" id="diagnosisDetailsTable">
+            <!-- Dynamically populated -->
+          </table>
+        </div>
+
+        <!-- Manual Override Dropdown -->
+        <div id="manualOverrideSection" style="display: none; margin: 16px 0;">
+          <label for="manualPaginationType" style="font-size: 13px; color: #666; display: block; margin-bottom: 8px;">
+            Override detected type (optional):
+          </label>
+          <select id="manualPaginationType" class="manual-override-select">
+            <option value="">Use detected type</option>
+            <option value="infinite-scroll">Infinite Scroll</option>
+            <option value="pagination">Traditional Pagination</option>
+            <option value="single-page">Single Page</option>
+          </select>
+        </div>
+
+        <!-- Scraping Options -->
+        <div id="scrapingOptionsSection" style="display: none;">
+          <h4 style="font-size: 14px; color: #333; margin-bottom: 12px;">Scraping Options</h4>
+
+          <!-- Contact Limit Input -->
+          <div style="margin-bottom: 12px;">
+            <label for="contactLimitInput" style="font-size: 13px; color: #666; display: block; margin-bottom: 4px;">
+              Limit contacts (0 = no limit):
+            </label>
+            <input type="number" id="contactLimitInput" min="0" value="0" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="btn-group-vertical">
+            <button class="btn btn-success btn-block" id="scrapeAllBtn" onclick="startScraping('all')">
+              Scrape All Contacts
+            </button>
+            <button class="btn btn-primary btn-block" id="scrapeWithLimitBtn" onclick="startScrapingWithLimit()">
+              Scrape First X Contacts
+            </button>
+            <button class="btn btn-secondary btn-block" onclick="backToConfigPreview()">
+              Back to Config
+            </button>
+          </div>
         </div>
       </div>
 
