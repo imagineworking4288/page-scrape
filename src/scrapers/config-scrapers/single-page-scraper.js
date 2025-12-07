@@ -25,6 +25,10 @@ class SinglePageScraper extends BaseConfigScraper {
     this.logger.info(`[SinglePageScraper] Starting scrape: ${url}`);
     this.logger.info(`[SinglePageScraper] Limit: ${limit || 'unlimited'}`);
     this.startTime = Date.now();
+    this.requestedLimit = limit;
+
+    // Ensure output path is set
+    this.ensureOutputPath();
 
     // Get browser page
     const page = await this.browserManager.getPage();

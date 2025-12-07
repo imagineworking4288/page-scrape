@@ -1725,3 +1725,100 @@ const fields = this.config.fields;
 ```
 
 **Note**: The `fieldExtraction` structure is still used by older config versions (v2.1/v2.2) and their associated builders in `config-builder.js`. This fix only affects the v2.3 config-based scrapers.
+
+---
+
+### Infinite Scroll Scraper & Terminal Summary Fix (December 7)
+**Change**: Fixed infinite scroll loop behavior, added dynamic content wait, fixed output directory, and added comprehensive terminal summary.
+
+**Problems Fixed**:
+1. Scroll loop exiting too early (no retry logic)
+2. No wait for dynamic content after scrolling
+3. Output files written to wrong directory (configs/ instead of output/)
+4. No terminal summary showing extraction results
+
+**Files Modified**:
+
+1. **`src/scrapers/config-scrapers/infinite-scroll-scraper.js`**
+   - Added `contentWaitTimeout` option (5000ms default)
+   - Enhanced scroll loop with comprehensive logging
+   - Added retry logic: continues scrolling up to 3 times even with no new cards
+   - Added `waitForNewContent()` method for dynamic content wait
+   - Added exit reason logging
+   - Tracks `requestedLimit` for summary
+
+2. **`src/scrapers/config-scrapers/base-config-scraper.js`**
+   - Added `requestedLimit` tracking
+   - Added `fieldStats` object for tracking field success rates
+   - Added `outputDir` default to `output/`
+   - Added `ensureOutputPath()` method
+   - Added `printTerminalSummary()` method with:
+     - Requested vs extracted contacts
+     - Duration
+     - Field success rates with warnings
+     - First 5 contact names preview
+     - Output file path
+     - Low success rate warnings
+
+3. **`src/scrapers/config-scrapers/single-page-scraper.js`**
+   - Added `requestedLimit` tracking
+   - Calls `ensureOutputPath()` at start
+
+4. **`src/scrapers/config-scrapers/pagination-scraper.js`**
+   - Added `requestedLimit` tracking
+   - Calls `ensureOutputPath()` at start
+
+**Terminal Summary Format**:
+```
+════════════════════════════════════════════════════════════════
+                      SCRAPING COMPLETE
+════════════════════════════════════════════════════════════════
+
+  Requested: 40 contacts
+  Extracted: 40 contacts (100%)
+  Duration:  45s
+
+  Field Success Rates:
+    - name        : 40/40 (100%)
+    - email       : 35/40 (88%)
+    - phone       : 38/40 (95%)
+    - profileUrl  : 40/40 (100%)
+    - title       : 0/40 (0%) ⚠️
+    - location    : 0/40 (0%) ⚠️
+
+  First contacts:
+    1. John Smith
+    2. Jane Doe
+    3. Bob Johnson
+    4. Alice Williams
+    5. Charlie Brown
+
+  Output: output/scrape-sullcrom-com-1733612345678.json
+
+════════════════════════════════════════════════════════════════
+```
+
+**Scroll Loop Logging**:
+```
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Starting scroll loop
+[InfiniteScrollScraper] Target: 40 contacts
+[InfiniteScrollScraper] Max scrolls: 100
+[InfiniteScrollScraper] Retry threshold: 3
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Scroll 1/100: Cards 0 → 10 (+10 new)
+[InfiniteScrollScraper] ✓ Extracted 10 contacts this scroll (total: 10)
+[InfiniteScrollScraper] Scroll 2/100: Cards 10 → 20 (+10 new)
+[InfiniteScrollScraper] ✓ Extracted 10 contacts this scroll (total: 20)
+...
+[InfiniteScrollScraper] ⚠ No new cards found (retry 1/3), scrolling again...
+[InfiniteScrollScraper] ⚠ No new cards found (retry 2/3), scrolling again...
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Exit reason: Contact limit reached (40/40)
+[InfiniteScrollScraper] ═══════════════════════════════════════
+```
+
+**Dynamic Content Wait**:
+- After each scroll, waits `scrollDelay` (2000ms default)
+- Then waits for card selector with `contentWaitTimeout` (5000ms)
+- Adds extra 500ms for card content (links, images) to render

@@ -39,6 +39,10 @@ class PaginationScraper extends BaseConfigScraper {
     this.logger.info(`[PaginationScraper] Starting scrape: ${url}`);
     this.logger.info(`[PaginationScraper] Limit: ${limit || 'unlimited'}, Max pages: ${this.maxPages}`);
     this.startTime = Date.now();
+    this.requestedLimit = limit;
+
+    // Ensure output path is set
+    this.ensureOutputPath();
 
     // Get browser page
     const page = await this.browserManager.getPage();

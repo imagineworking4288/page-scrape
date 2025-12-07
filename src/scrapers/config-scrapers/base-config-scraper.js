@@ -45,10 +45,24 @@ class BaseConfigScraper extends BaseScraper {
     this.outputPath = null;
     this.contactCount = 0;
     this.startTime = null;
+    this.requestedLimit = 0;
 
     // Card detection cache
     this.cardSelector = null;
     this.cardFallbacks = [];
+
+    // Field success tracking for summary
+    this.fieldStats = {
+      name: { extracted: 0, total: 0 },
+      email: { extracted: 0, total: 0 },
+      phone: { extracted: 0, total: 0 },
+      title: { extracted: 0, total: 0 },
+      location: { extracted: 0, total: 0 },
+      profileUrl: { extracted: 0, total: 0 }
+    };
+
+    // Default output directory
+    this.outputDir = path.resolve('output');
   }
 
   /**
@@ -300,6 +314,17 @@ class BaseConfigScraper extends BaseScraper {
       }
     }
 
+    // Track field statistics for summary
+    const trackedFields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+    for (const fieldName of trackedFields) {
+      if (this.fieldStats[fieldName]) {
+        this.fieldStats[fieldName].total++;
+        if (contact[fieldName]) {
+          this.fieldStats[fieldName].extracted++;
+        }
+      }
+    }
+
     // Return contact even if partial (at least one field extracted)
     if (successCount > 0) {
       // Add metadata
@@ -448,17 +473,30 @@ class BaseConfigScraper extends BaseScraper {
 
   /**
    * Set output path for results
-   * @param {string} outputDir - Output directory
+   * @param {string} outputDir - Output directory (defaults to 'output/')
    * @param {string} filename - Output filename (optional)
    */
-  setOutputPath(outputDir, filename = null) {
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
+  setOutputPath(outputDir = null, filename = null) {
+    // Use provided dir or default to 'output/'
+    const dir = outputDir || this.outputDir;
+
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
 
     const name = filename || `scrape-${this.config?.name || 'results'}-${Date.now()}.json`;
-    this.outputPath = path.join(outputDir, name);
+    this.outputPath = path.join(dir, name);
     this.logger.info(`[BaseConfigScraper] Output path: ${this.outputPath}`);
+  }
+
+  /**
+   * Ensure output path is set before scraping
+   * Called automatically if output path wasn't set manually
+   */
+  ensureOutputPath() {
+    if (!this.outputPath) {
+      this.setOutputPath();
+    }
   }
 
   /**
@@ -506,8 +544,14 @@ class BaseConfigScraper extends BaseScraper {
    * @returns {Object} - Results object
    */
   getResults() {
+    // Ensure output path is set
+    this.ensureOutputPath();
+
     // Flush any remaining contacts
     this.flushContactBuffer();
+
+    // Print terminal summary
+    this.printTerminalSummary();
 
     return {
       success: true,
@@ -519,8 +563,102 @@ class BaseConfigScraper extends BaseScraper {
         configName: this.config?.name,
         configVersion: this.config?.version,
         scrapeDate: new Date().toISOString()
-      }
+      },
+      fieldStats: this.fieldStats
     };
+  }
+
+  /**
+   * Print terminal summary after scraping completes
+   */
+  printTerminalSummary() {
+    const duration = this.startTime ? Math.round((Date.now() - this.startTime) / 1000) : 0;
+    const percentage = this.requestedLimit > 0
+      ? Math.round((this.contactCount / this.requestedLimit) * 100)
+      : 100;
+
+    // Build summary
+    const lines = [];
+    lines.push('');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('                      SCRAPING COMPLETE                          ');
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+
+    // Request vs actual
+    if (this.requestedLimit > 0) {
+      lines.push(`  Requested: ${this.requestedLimit} contacts`);
+      lines.push(`  Extracted: ${this.contactCount} contacts (${percentage}%)`);
+    } else {
+      lines.push(`  Extracted: ${this.contactCount} contacts (unlimited mode)`);
+    }
+    lines.push(`  Duration:  ${duration}s`);
+    lines.push('');
+
+    // Field success rates
+    lines.push('  Field Success Rates:');
+    const fieldOrder = ['name', 'email', 'phone', 'profileUrl', 'title', 'location'];
+    for (const fieldName of fieldOrder) {
+      const stats = this.fieldStats[fieldName];
+      if (stats && stats.total > 0) {
+        const rate = Math.round((stats.extracted / stats.total) * 100);
+        const warning = rate < 50 ? ' ⚠️' : '';
+        lines.push(`    - ${fieldName.padEnd(12)}: ${stats.extracted}/${stats.total} (${rate}%)${warning}`);
+      } else if (stats) {
+        lines.push(`    - ${fieldName.padEnd(12)}: 0/0 (no cards processed)`);
+      }
+    }
+    lines.push('');
+
+    // First contacts preview
+    if (this.contacts.length > 0) {
+      lines.push('  First contacts:');
+      const previewCount = Math.min(5, this.contacts.length);
+      for (let i = 0; i < previewCount; i++) {
+        const contact = this.contacts[i];
+        const name = contact.name || '[No name]';
+        lines.push(`    ${i + 1}. ${name}`);
+      }
+      lines.push('');
+    }
+
+    // Output file
+    lines.push(`  Output: ${this.outputPath}`);
+    lines.push('');
+
+    // Warnings
+    const warnings = [];
+    if (this.requestedLimit > 0 && percentage < 50) {
+      warnings.push(`Only ${percentage}% of requested contacts collected`);
+      warnings.push('Possible reasons: insufficient scrolling or max content reached');
+    }
+
+    // Check for low field success rates
+    for (const fieldName of fieldOrder) {
+      const stats = this.fieldStats[fieldName];
+      if (stats && stats.total > 0) {
+        const rate = (stats.extracted / stats.total) * 100;
+        if (rate < 50 && fieldName === 'profileUrl') {
+          warnings.push('Low profileUrl success rate - links may not have loaded');
+        }
+      }
+    }
+
+    if (warnings.length > 0) {
+      lines.push('  ⚠️  WARNINGS:');
+      for (const warning of warnings) {
+        lines.push(`      ${warning}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('════════════════════════════════════════════════════════════════');
+    lines.push('');
+
+    // Log all lines
+    for (const line of lines) {
+      this.logger.info(line);
+    }
   }
 
   /**
