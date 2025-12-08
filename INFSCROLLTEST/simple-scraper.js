@@ -1,137 +1,140 @@
 /**
  * Simple Infinite Scroll Scraper
- * Uses puppeteer-autoscroll-down for reliable scrolling
- *
- * This is a simpler alternative to the complex src/ implementation.
- * It just scrolls to the bottom and extracts the HTML.
+ * Scrolls to bottom without external dependencies
  */
 
 const puppeteer = require('puppeteer');
-const scrollPageToBottom = require('puppeteer-autoscroll-down');
 const fs = require('fs');
 
 /**
- * Simple scraper that scrolls page to bottom and returns HTML
- * @param {string} url - URL to scrape
- * @param {object} options - Configuration options
- * @returns {object} { success, html, stats, error }
+ * Scroll page to bottom using native Puppeteer
+ * @param {Page} page - Puppeteer page object
+ * @param {object} options - Scroll options
  */
-async function scrapeInfiniteScroll(url, options = {}) {
-  const config = {
-    headless: options.headless !== false,
-    timeout: options.timeout || 300000,       // 5 minutes max
-    scrollDelay: options.scrollDelay || 500,  // Delay between scrolls (ms)
-    scrollStep: options.scrollStep || 500,    // Pixels per scroll step
-    outputFile: options.outputFile || null,   // Save HTML to file
-    viewport: options.viewport || { width: 1920, height: 1080 },
-    ...options
-  };
+async function scrollToBottom(page, options = {}) {
+  const {
+    scrollSize = 500,
+    scrollDelay = 300,
+    maxScrolls = 500
+  } = options;
 
-  let browser = null;
-  const startTime = Date.now();
+  let lastHeight = await page.evaluate('document.body.scrollHeight');
+  let scrollCount = 0;
+  let noChangeCount = 0;
 
-  try {
-    console.log(`[START] Launching browser (headless: ${config.headless})`);
+  console.log('[SCROLL] Starting scroll to bottom...');
+  console.log(`[SCROLL] Settings: ${scrollSize}px per scroll, ${scrollDelay}ms delay, max ${maxScrolls} scrolls`);
 
-    browser = await puppeteer.launch({
-      headless: config.headless ? 'new' : false,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        `--window-size=${config.viewport.width},${config.viewport.height}`
-      ]
-    });
+  while (scrollCount < maxScrolls) {
+    // Scroll down by scrollSize pixels
+    await page.evaluate((distance) => {
+      window.scrollBy(0, distance);
+    }, scrollSize);
 
-    const page = await browser.newPage();
-    await page.setViewport(config.viewport);
+    // Wait for content to load
+    await page.waitForTimeout(scrollDelay);
 
-    console.log(`[NAVIGATE] Going to: ${url}`);
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 60000
-    });
+    // Check new height
+    const newHeight = await page.evaluate('document.body.scrollHeight');
+    scrollCount++;
 
-    // Wait for initial content
-    await page.waitForTimeout(2000);
-
-    // Get initial page height
-    const initialHeight = await page.evaluate(() => document.body.scrollHeight);
-    console.log(`[SCROLL] Initial page height: ${initialHeight}px`);
-    console.log(`[SCROLL] Starting auto-scroll to bottom...`);
-
-    // Use puppeteer-autoscroll-down to scroll to bottom
-    const lastPosition = await scrollPageToBottom(page, {
-      size: config.scrollStep,
-      delay: config.scrollDelay,
-      stepsLimit: 1000  // Max 1000 scroll steps
-    });
-
-    console.log(`[SCROLL] Finished scrolling. Final position: ${lastPosition}px`);
-
-    // Wait for any final content to load
-    await page.waitForTimeout(3000);
-
-    // Get final page height
-    const finalHeight = await page.evaluate(() => document.body.scrollHeight);
-    console.log(`[SCROLL] Final page height: ${finalHeight}px`);
-
-    // Get the HTML
-    const html = await page.content();
-    const duration = (Date.now() - startTime) / 1000;
-
-    console.log(`[DONE] Scraped ${html.length} bytes in ${duration.toFixed(1)}s`);
-
-    // Save to file if requested
-    if (config.outputFile) {
-      fs.writeFileSync(config.outputFile, html);
-      console.log(`[SAVE] HTML saved to: ${config.outputFile}`);
-    }
-
-    return {
-      success: true,
-      html,
-      stats: {
-        initialHeight,
-        finalHeight,
-        htmlSize: html.length,
-        durationSeconds: duration,
-        lastScrollPosition: lastPosition
-      },
-      error: null
-    };
-
-  } catch (error) {
-    console.error(`[ERROR] ${error.message}`);
-    return {
-      success: false,
-      html: null,
-      stats: {
-        durationSeconds: (Date.now() - startTime) / 1000
-      },
-      error: error.message
-    };
-
-  } finally {
-    if (browser) {
-      await browser.close();
-      console.log(`[CLOSE] Browser closed`);
+    if (newHeight > lastHeight) {
+      // Height increased - new content loaded
+      console.log(`[SCROLL] Scroll ${scrollCount}: Height ${lastHeight}px → ${newHeight}px (+${newHeight - lastHeight}px)`);
+      lastHeight = newHeight;
+      noChangeCount = 0;
+    } else {
+      // No height change
+      noChangeCount++;
+      if (noChangeCount >= 3) {
+        // Stopped growing for 3 consecutive checks - we're done
+        console.log(`[SCROLL] No height change for ${noChangeCount} scrolls - reached bottom`);
+        break;
+      }
     }
   }
+
+  if (scrollCount >= maxScrolls) {
+    console.log(`[SCROLL] Reached max scroll limit (${maxScrolls})`);
+  }
+
+  console.log(`[SCROLL] Complete: ${scrollCount} scrolls, final height ${lastHeight}px`);
+  return { scrollCount, finalHeight: lastHeight };
 }
 
 /**
- * Count elements matching a selector in HTML
- * @param {string} html - HTML content
- * @param {RegExp|string} pattern - Pattern to match
- * @returns {number} Count of matches
+ * Scrape a page by scrolling to bottom
  */
-function countMatches(html, pattern) {
-  if (typeof pattern === 'string') {
-    pattern = new RegExp(pattern, 'g');
+async function scrapeWithScroll(url, options = {}) {
+  const {
+    headless = false,
+    scrollSize = 500,
+    scrollDelay = 300,
+    maxScrolls = 500,
+    viewport = { width: 1920, height: 1080 },
+    outputFile = null
+  } = options;
+
+  console.log('[START] Launching browser (headless:', headless + ')');
+
+  const startTime = Date.now();
+
+  // Launch browser
+  const browser = await puppeteer.launch({
+    headless: headless ? 'new' : false,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      `--window-size=${viewport.width},${viewport.height}`
+    ]
+  });
+
+  const page = await browser.newPage();
+  await page.setViewport(viewport);
+
+  // Navigate
+  console.log('[NAVIGATE] Going to:', url);
+  await page.goto(url, {
+    waitUntil: 'networkidle2',
+    timeout: 60000
+  });
+  console.log('[NAVIGATE] Page loaded');
+
+  // Get initial height
+  const initialHeight = await page.evaluate('document.body.scrollHeight');
+  console.log('[SCROLL] Initial page height:', initialHeight + 'px');
+
+  // Scroll to bottom
+  const scrollResult = await scrollToBottom(page, {
+    scrollSize,
+    scrollDelay,
+    maxScrolls
+  });
+
+  // Get HTML
+  const html = await page.content();
+  await browser.close();
+  console.log('[CLOSE] Browser closed');
+
+  const duration = (Date.now() - startTime) / 1000;
+
+  // Save to file if requested
+  if (outputFile) {
+    fs.writeFileSync(outputFile, html);
+    console.log('[SAVE] HTML saved to:', outputFile);
   }
-  const matches = html.match(pattern);
-  return matches ? matches.length : 0;
+
+  return {
+    success: true,
+    html,
+    stats: {
+      initialHeight,
+      finalHeight: scrollResult.finalHeight,
+      scrollCount: scrollResult.scrollCount,
+      htmlSize: html.length,
+      durationSeconds: duration
+    }
+  };
 }
 
 /**
@@ -150,8 +153,4 @@ function extractLinks(html, hrefPattern) {
   return [...new Set(links)]; // Remove duplicates
 }
 
-module.exports = {
-  scrapeInfiniteScroll,
-  countMatches,
-  extractLinks
-};
+module.exports = { scrapeWithScroll, extractLinks };

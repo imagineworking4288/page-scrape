@@ -21,11 +21,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "puppeteer": "^21.0.0",
-    "puppeteer-autoscroll-down": "^1.0.4",
-    "winston": "^3.11.0",
     "commander": "^11.1.0",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "puppeteer": "^21.0.0",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "eslint": "^8.55.0"
