@@ -1893,43 +1893,36 @@ class InteractiveSession {
         }
       );
 
-      // Set config directly on scraper and initialize
+      // Set config directly on scraper
       scraper.config = config;
       scraper.initializeCardSelector();
       this.logger.info('[Scraping] Scraper created and configured');
 
-      // Set output path
+      // Set output path (real scraper will use this)
       scraper.setOutputPath(this.options.outputDir || 'output');
 
-      // Initialize extractors
-      await scraper.initializeExtractors(this.page);
+      // Note: The real scraper.scrape() will:
+      // 1. Navigate to the URL (page is already there, but this ensures proper state)
+      // 2. Initialize extractors
+      // 3. Handle scrolling/pagination with proper waits and retries
+      // 4. Extract contacts with field statistics
+      // 5. Generate terminal summary
+      // 6. Write output file
 
-      // Progress callback
-      const updateProgress = async (progress) => {
-        try {
-          await this.page.evaluate((prog) => {
-            if (window.handleScrapingProgress) {
-              window.handleScrapingProgress(prog);
-            }
-          }, progress);
-        } catch (e) {
-          // Page might be navigating, ignore
-        }
-      };
-
-      // Start scraping based on type
+      // Start scraping - delegate to real scraper which handles:
+      // - Scroll logic with retries
+      // - Dynamic content wait
+      // - Progress reporting
+      // - Field extraction with proper coordinates
+      // - Output file generation
       const url = this.page.url();
-      let result;
+      this.logger.info(`[Scraping] Delegating to ${scrapingConfig.paginationType} scraper...`);
+      this.logger.info(`[Scraping] URL: ${url}`);
+      this.logger.info(`[Scraping] Limit: ${scrapingConfig.limit || 'unlimited'}`);
 
-      if (scrapingConfig.paginationType === 'single-page') {
-        result = await this.scrapeSinglePage(scraper, scrapingConfig.limit, updateProgress);
-      } else if (scrapingConfig.paginationType === 'infinite-scroll') {
-        result = await this.scrapeInfiniteScroll(scraper, scrapingConfig.limit, updateProgress);
-      } else if (scrapingConfig.paginationType === 'pagination') {
-        result = await this.scrapePagination(scraper, url, scrapingConfig.limit, scrapingConfig.diagnosisResults, updateProgress);
-      } else {
-        result = await this.scrapeSinglePage(scraper, scrapingConfig.limit, updateProgress);
-      }
+      // The real scrapers (infinite-scroll-scraper, single-page-scraper, pagination-scraper)
+      // already have comprehensive logic for scrolling, waiting, retry, and extraction
+      const result = await scraper.scrape(url, scrapingConfig.limit || 0);
 
       this.logger.info(`[Scraping] Completed. Total contacts: ${result.totalContacts}`);
       this.logger.info(`[Scraping] Output: ${result.outputPath}`);
@@ -1975,98 +1968,13 @@ class InteractiveSession {
     }
   }
 
-  /**
-   * Scrape single page
-   */
-  async scrapeSinglePage(scraper, limit, updateProgress) {
-    this.logger.info('[Scraping] Single page mode');
-
-    const cardElements = await scraper.findCardElements(this.page);
-    this.logger.info(`[Scraping] Found ${cardElements.length} cards`);
-
-    const cardsToProcess = limit > 0 ? cardElements.slice(0, limit) : cardElements;
-
-    for (let i = 0; i < cardsToProcess.length; i++) {
-      const contact = await scraper.extractContactFromCard(cardsToProcess[i], i);
-      if (contact) {
-        scraper.addContact(contact);
-      }
-
-      if ((i + 1) % 10 === 0) {
-        await updateProgress({ contactCount: scraper.contactCount, cards: `${i + 1}/${cardsToProcess.length}` });
-      }
-
-      if (limit > 0 && scraper.contactCount >= limit) break;
-    }
-
-    return scraper.getResults();
-  }
-
-  /**
-   * Scrape infinite scroll
-   */
-  async scrapeInfiniteScroll(scraper, limit, updateProgress) {
-    this.logger.info('[Scraping] Infinite scroll mode');
-
-    let scrollCount = 0;
-    let noNewContentCount = 0;
-    let processedCardCount = 0;
-    const processedCardIds = new Set();
-    const maxScrolls = 100;
-
-    while (scrollCount < maxScrolls && noNewContentCount < 3) {
-      if (limit > 0 && scraper.contactCount >= limit) break;
-
-      const cardElements = await scraper.findCardElements(this.page);
-      let newCardsThisScroll = 0;
-
-      for (let i = processedCardCount; i < cardElements.length; i++) {
-        const cardId = `card-${i}-${Date.now()}`;
-        if (processedCardIds.has(cardId)) continue;
-        processedCardIds.add(cardId);
-
-        const contact = await scraper.extractContactFromCard(cardElements[i], i);
-        if (contact) {
-          scraper.addContact(contact);
-          newCardsThisScroll++;
-        }
-
-        if (limit > 0 && scraper.contactCount >= limit) break;
-      }
-
-      processedCardCount = cardElements.length;
-
-      if (newCardsThisScroll === 0) {
-        noNewContentCount++;
-      } else {
-        noNewContentCount = 0;
-      }
-
-      await updateProgress({
-        contactCount: scraper.contactCount,
-        scroll: `${scrollCount + 1}/${maxScrolls}`,
-        cards: processedCardCount
-      });
-
-      // Scroll down
-      await this.page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
-      scrollCount++;
-      await this.sleep(2000);
-    }
-
-    return scraper.getResults();
-  }
-
-  /**
-   * Scrape pagination
-   */
-  async scrapePagination(scraper, url, limit, diagnosisResults, updateProgress) {
-    this.logger.info('[Scraping] Pagination mode');
-
-    // For now, just scrape current page
-    // TODO: Implement full pagination with URL generation
-    return await this.scrapeSinglePage(scraper, limit, updateProgress);
-  }
+  // NOTE: Stub methods scrapeSinglePage(), scrapeInfiniteScroll(), and scrapePagination()
+  // have been removed. Scraping is now delegated to the real scrapers in
+  // src/scrapers/config-scrapers/ which have comprehensive logic for:
+  // - Infinite scroll: retry logic, dynamic content wait, proper card identification
+  // - Single page: full card extraction with field tracking
+  // - Pagination: multi-page navigation with URL generation
+  // See handleStartScraping() which calls scraper.scrape(url, limit) directly.
 }
 
 module.exports = InteractiveSession;

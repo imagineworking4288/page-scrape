@@ -1822,3 +1822,50 @@ const fields = this.config.fields;
 - After each scroll, waits `scrollDelay` (2000ms default)
 - Then waits for card selector with `contentWaitTimeout` (5000ms)
 - Adds extra 500ms for card content (links, images) to render
+
+---
+
+### Scraper Delegation Fix (December 7)
+**Change**: Removed stub scraping methods from `interactive-session.js` and delegated to the real scrapers which have comprehensive scroll logic, retry handling, and progress reporting.
+
+**Problem**: The `handleStartScraping()` function contained three stub methods (`scrapeSinglePage()`, `scrapeInfiniteScroll()`, `scrapePagination()`) that bypassed the real scrapers. These stubs:
+- Lacked retry logic when no new cards found
+- Had no dynamic content wait after scrolling
+- Used incorrect card identification (timestamp-based instead of content-based)
+- Didn't track field statistics for the terminal summary
+- Called extractors directly without proper coordinate handling
+
+**Solution**: Replace stub method calls with direct delegation to `scraper.scrape(url, limit)`:
+
+**Before** (lines 1924-1932):
+```javascript
+if (scrapingConfig.paginationType === 'single-page') {
+  result = await this.scrapeSinglePage(scraper, scrapingConfig.limit, updateProgress);
+} else if (scrapingConfig.paginationType === 'infinite-scroll') {
+  result = await this.scrapeInfiniteScroll(scraper, scrapingConfig.limit, updateProgress);
+} else if (scrapingConfig.paginationType === 'pagination') {
+  result = await this.scrapePagination(scraper, url, scrapingConfig.limit, ...);
+}
+```
+
+**After**:
+```javascript
+// Delegate to real scraper which handles scrolling, waiting, retry, and extraction
+const result = await scraper.scrape(url, scrapingConfig.limit || 0);
+```
+
+**Files Modified**:
+- `src/tools/lib/interactive-session.js`
+  - Removed `scrapeSinglePage()` method (~23 lines)
+  - Removed `scrapeInfiniteScroll()` method (~50 lines)
+  - Removed `scrapePagination()` method (~8 lines)
+  - Replaced conditional dispatch with single `scraper.scrape()` call
+  - Added comments explaining the delegation
+
+**Benefits of Real Scrapers**:
+- Retry logic: Continues scrolling up to 3 times when no new cards found
+- Dynamic content wait: Waits for cards to render after each scroll
+- Proper card identification: Uses content-based IDs (email, profile links) not timestamps
+- Field statistics: Tracks extraction success rates for terminal summary
+- Comprehensive logging: Shows scroll progress with `Cards X → Y (+Z new)` format
+- Exit reason logging: Explains why scrolling stopped
