@@ -344,19 +344,22 @@ async function main() {
                           (options.scroll && loadedConfig.pagination?.type === 'infinite-scroll');
 
         if (useSelenium) {
-          // Initialize Selenium for PAGE_DOWN scrolling
+          // Initialize Selenium for PAGE_DOWN scrolling (Phase 1)
           logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
+          logger.info('[Orchestrator] Architecture: Selenium loads → Puppeteer extracts');
 
           seleniumManager = new SeleniumManager(logger);
           seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
           await seleniumManager.launch(headless);
 
-          // Create Selenium-based scraper
+          // Create Selenium-based scraper with browserManager for Phase 2 extraction
           scraper = new SeleniumInfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
             scrollDelay: options.scrollDelay || 400,
             maxRetries: options.maxRetries || 25,
             maxScrolls: options.maxScrolls || 1000
           });
+          // Set browserManager for Puppeteer-based Phase 2 extraction
+          scraper.setBrowserManager(browserManager);
           scraper.config = loadedConfig;
           scraper.initializeCardSelector();
 
