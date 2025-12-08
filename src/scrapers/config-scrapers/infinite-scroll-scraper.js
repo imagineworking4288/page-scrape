@@ -4,17 +4,20 @@
  * Handles scraping from infinite scroll pages.
  * Workflow:
  * 1. Extract all currently loaded cards
- * 2. Scroll down
- * 3. Check for new cards
- * 4. Repeat until:
+ * 2. Scroll to absolute page bottom (document.body.scrollHeight)
+ * 3. Wait for page height to increase (AJAX content loaded)
+ * 4. Extract new cards
+ * 5. Repeat until:
  *    A) No new cards appear after consecutive retries
  *    B) Max scrolls reached
  *    C) Contact limit reached
  *
  * Features:
+ * - Absolute bottom scroll: scrolls to document.body.scrollHeight to trigger infinite scroll
+ * - Height-based content detection: waits for page height to increase after each scroll
  * - Retry logic: continues scrolling up to 3 times even with no new cards
- * - Dynamic content wait: waits for cards to render after each scroll
- * - Comprehensive logging for debugging
+ * - Dynamic content wait: waits for cards to render after height increase
+ * - Comprehensive logging: shows page height changes and card counts
  */
 
 const BaseConfigScraper = require('./base-config-scraper');
@@ -159,12 +162,12 @@ class InfiniteScrollScraper extends BaseConfigScraper {
           cards: processedCardCount
         });
 
-        // Scroll down
-        await this.scrollDown(page);
+        // Scroll to absolute bottom and get height before scroll
+        const { beforeHeight } = await this.scrollDown(page);
         scrollCount++;
 
-        // Wait for new content to load with dynamic wait
-        await this.waitForNewContent(page, currentCardCount);
+        // Wait for new content to load (detects via page height increase)
+        await this.waitForNewContent(page, beforeHeight);
       }
 
       // Log exit reason
@@ -194,44 +197,78 @@ class InfiniteScrollScraper extends BaseConfigScraper {
   }
 
   /**
-   * Scroll down the page
+   * Scroll to absolute bottom of page
+   * Uses document.body.scrollHeight to reach the infinite scroll trigger zone
    * @param {Object} page - Puppeteer page
+   * @returns {Promise<Object>} - { beforeHeight, afterHeight, heightIncrease }
    */
   async scrollDown(page) {
-    await page.evaluate((scrollAmount) => {
-      window.scrollBy(0, window.innerHeight * scrollAmount);
-    }, this.scrollAmount);
+    // Get page height BEFORE scrolling
+    const beforeHeight = await page.evaluate(() => document.body.scrollHeight);
+
+    // Scroll to ABSOLUTE BOTTOM of page (not relative viewport scroll)
+    // This ensures we reach the infinite scroll trigger zone
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    return { beforeHeight };
   }
 
   /**
    * Wait for new content to load after scrolling
-   * Uses a combination of fixed delay and dynamic card detection
+   * Detects content loading by monitoring page height increase
    * @param {Object} page - Puppeteer page
-   * @param {number} previousCardCount - Number of cards before scroll
+   * @param {number} beforeHeight - Page height before scrolling
+   * @returns {Promise<Object>} - { newContentLoaded, afterHeight, heightIncrease }
    */
-  async waitForNewContent(page, previousCardCount) {
-    // First, wait the base delay for network requests to start
+  async waitForNewContent(page, beforeHeight) {
+    // First, wait the base delay for scroll animation and AJAX to start
     await this.sleep(this.scrollDelay);
 
-    // Then try to detect if new cards appeared
+    // Wait for new content to load by detecting page height increase
+    let newContentLoaded = false;
+    let afterHeight = beforeHeight;
+
     try {
-      // Wait for card selector with timeout
+      // Wait for page height to increase (indicates new content loaded)
+      await page.waitForFunction(
+        (oldHeight) => document.body.scrollHeight > oldHeight,
+        { timeout: this.contentWaitTimeout },
+        beforeHeight
+      );
+      newContentLoaded = true;
+    } catch (err) {
+      // Timeout - page height didn't increase (might be end of content)
+      newContentLoaded = false;
+    }
+
+    // Get page height AFTER waiting for content
+    afterHeight = await page.evaluate(() => document.body.scrollHeight);
+    const heightIncrease = afterHeight - beforeHeight;
+
+    // Log height change
+    if (newContentLoaded && heightIncrease > 0) {
+      this.logger.info(`[InfiniteScrollScraper] ✓ Page height increased: ${beforeHeight}px → ${afterHeight}px (+${heightIncrease}px)`);
+    } else {
+      this.logger.info(`[InfiniteScrollScraper] ⚠ Page height unchanged at ${beforeHeight}px`);
+    }
+
+    // Extra wait for card elements to fully render (images, links, etc.)
+    await this.sleep(500);
+
+    // Wait for card selector to be present
+    try {
       if (this.cardSelector) {
         await page.waitForSelector(this.cardSelector, {
           timeout: this.contentWaitTimeout
         });
-
-        // Check if card count increased
-        const currentCards = await this.findCardElements(page);
-        if (currentCards.length > previousCardCount) {
-          // Give extra time for all cards to fully render (links, images, etc.)
-          await this.sleep(500);
-        }
       }
     } catch (e) {
-      // Timeout waiting for cards is not fatal, just continue
-      this.logger.debug(`[InfiniteScrollScraper] Content wait timeout (cards may not have loaded)`);
+      this.logger.debug(`[InfiniteScrollScraper] Card selector wait timeout`);
     }
+
+    return { newContentLoaded, afterHeight, heightIncrease };
   }
 
   /**
@@ -284,9 +321,14 @@ class InfiniteScrollScraper extends BaseConfigScraper {
     const initialCards = await this.findCardElements(page);
     const initialCount = initialCards.length;
 
-    // Scroll down once
-    await this.scrollDown(page);
-    await this.sleep(this.scrollDelay);
+    // Get initial page height
+    const initialHeight = await page.evaluate(() => document.body.scrollHeight);
+
+    // Scroll to bottom
+    const { beforeHeight } = await this.scrollDown(page);
+
+    // Wait for content to load
+    const { afterHeight, heightIncrease } = await this.waitForNewContent(page, beforeHeight);
 
     // Count cards after scroll
     const afterScrollCards = await this.findCardElements(page);
@@ -300,8 +342,11 @@ class InfiniteScrollScraper extends BaseConfigScraper {
       initialCards: initialCount,
       afterScrollCards: afterScrollCount,
       newCardsPerScroll: newCards,
-      isInfiniteScroll: newCards > 0,
-      confidence: newCards > 0 ? 'high' : 'low'
+      initialHeight: initialHeight,
+      afterHeight: afterHeight,
+      heightIncrease: heightIncrease,
+      isInfiniteScroll: newCards > 0 || heightIncrease > 0,
+      confidence: (newCards > 0 || heightIncrease > 0) ? 'high' : 'low'
     };
 
     this.logger.info(`[InfiniteScrollScraper] Diagnosis: ${JSON.stringify(diagnosis)}`);

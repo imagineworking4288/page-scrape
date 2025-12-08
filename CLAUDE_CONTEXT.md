@@ -1869,3 +1869,124 @@ const result = await scraper.scrape(url, scrapingConfig.limit || 0);
 - Field statistics: Tracks extraction success rates for terminal summary
 - Comprehensive logging: Shows scroll progress with `Cards X → Y (+Z new)` format
 - Exit reason logging: Explains why scrolling stopped
+
+---
+
+### Absolute Bottom Scroll with Height Detection (December 7)
+**Change**: Fixed infinite scroll scraper to scroll to absolute page bottom and detect content loading via page height increase instead of using relative viewport scrolling.
+
+**Problem**: The infinite scroll scraper was using `window.scrollBy(0, window.innerHeight * 0.8)` which scrolls relative to the current viewport position. This approach:
+- Never actually reaches the page bottom where infinite scroll triggers live
+- Doesn't properly detect when new content has loaded
+- Can get stuck in a loop of small scrolls that never trigger content loading
+
+**Solution**: Changed to absolute bottom scrolling with height-based content detection:
+
+**Files Modified**:
+
+1. **`src/scrapers/config-scrapers/infinite-scroll-scraper.js`**
+
+   Updated `scrollDown()` method to scroll to absolute bottom:
+   ```javascript
+   async scrollDown(page) {
+     // Get page height BEFORE scrolling
+     const beforeHeight = await page.evaluate(() => document.body.scrollHeight);
+
+     // Scroll to ABSOLUTE BOTTOM of page (not relative viewport scroll)
+     // This ensures we reach the infinite scroll trigger zone
+     await page.evaluate(() => {
+       window.scrollTo(0, document.body.scrollHeight);
+     });
+
+     return { beforeHeight };
+   }
+   ```
+
+   Updated `waitForNewContent()` method to detect height increase:
+   ```javascript
+   async waitForNewContent(page, beforeHeight) {
+     // First, wait the base delay for scroll animation and AJAX to start
+     await this.sleep(this.scrollDelay);
+
+     // Wait for new content to load by detecting page height increase
+     let newContentLoaded = false;
+     let afterHeight = beforeHeight;
+
+     try {
+       // Wait for page height to increase (indicates new content loaded)
+       await page.waitForFunction(
+         (oldHeight) => document.body.scrollHeight > oldHeight,
+         { timeout: this.contentWaitTimeout },
+         beforeHeight
+       );
+       newContentLoaded = true;
+     } catch (err) {
+       // Timeout - page height didn't increase (might be end of content)
+       newContentLoaded = false;
+     }
+
+     // Get page height AFTER waiting for content
+     afterHeight = await page.evaluate(() => document.body.scrollHeight);
+     const heightIncrease = afterHeight - beforeHeight;
+
+     // Log height change
+     if (newContentLoaded && heightIncrease > 0) {
+       this.logger.info(`[InfiniteScrollScraper] ✓ Page height increased: ${beforeHeight}px → ${afterHeight}px (+${heightIncrease}px)`);
+     } else {
+       this.logger.info(`[InfiniteScrollScraper] ⚠ Page height unchanged at ${beforeHeight}px`);
+     }
+
+     // Extra wait for card elements to fully render
+     await this.sleep(500);
+
+     // Wait for card selector to be present
+     try {
+       if (this.cardSelector) {
+         await page.waitForSelector(this.cardSelector, {
+           timeout: this.contentWaitTimeout
+         });
+       }
+     } catch (e) {
+       this.logger.debug(`[InfiniteScrollScraper] Card selector wait timeout`);
+     }
+
+     return { newContentLoaded, afterHeight, heightIncrease };
+   }
+   ```
+
+   Updated scroll loop to pass height between methods:
+   ```javascript
+   // Scroll to absolute bottom and get height before scroll
+   const { beforeHeight } = await this.scrollDown(page);
+   scrollCount++;
+
+   // Wait for new content to load (detects via page height increase)
+   await this.waitForNewContent(page, beforeHeight);
+   ```
+
+**Key Behavior Changes**:
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Scroll target | Relative: `scrollBy(0, innerHeight * 0.8)` | Absolute: `scrollTo(0, scrollHeight)` |
+| Content detection | Fixed timeout wait | Height increase detection via `waitForFunction` |
+| Returns | Nothing | `{ beforeHeight }` for height comparison |
+| Height logging | None | Shows `beforeHeight → afterHeight (+increase)` |
+
+**Scroll Loop Logging** (Updated):
+```
+[InfiniteScrollScraper] Scroll 1/100: Cards 0 → 10 (+10 new)
+[InfiniteScrollScraper] ✓ Page height increased: 2000px → 4500px (+2500px)
+[InfiniteScrollScraper] ✓ Extracted 10 contacts this scroll (total: 10)
+[InfiniteScrollScraper] Scroll 2/100: Cards 10 → 20 (+10 new)
+[InfiniteScrollScraper] ✓ Page height increased: 4500px → 7000px (+2500px)
+...
+[InfiniteScrollScraper] ⚠ Page height unchanged at 15000px
+[InfiniteScrollScraper] ⚠ No new cards found (retry 1/3), scrolling again...
+```
+
+**Why Absolute Bottom Works**:
+1. Infinite scroll triggers are typically at the page bottom (in footer or sentinel elements)
+2. `document.body.scrollHeight` always gives the true page bottom position
+3. Height increase is a reliable indicator that AJAX content has been inserted
+4. Avoids the problem of viewport-relative scrolls never reaching the trigger zone
