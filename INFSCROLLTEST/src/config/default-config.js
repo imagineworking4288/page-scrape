@@ -7,12 +7,12 @@ module.exports = {
   scrollContainer: 'window',             // 'window' or CSS selector
 
   // Scroll Behavior
-  maxScrollAttempts: 100,                // Maximum scroll iterations
+  maxScrollAttempts: 200,                // Maximum scroll iterations
   maxDurationSeconds: 300,               // 5 minutes timeout
-  scrollAmount: { min: 300, max: 800 },  // Random scroll distance (px)
+  scrollAmount: { min: 1000, max: 1500 },  // Random scroll distance (px) - large to reach trigger zone
 
   // Progress Detection
-  progressTimeout: 3,                    // Seconds without progress before stopping
+  progressTimeout: 5,                    // Consecutive attempts without progress before stopping
   detectionMethod: 'itemCount',          // 'itemCount', 'scrollHeight', 'sentinel'
   sentinelSelector: null,                // Selector for "end of content" element
 
@@ -22,8 +22,8 @@ module.exports = {
   maxLoadMoreClicks: 50,
 
   // Wait Times (ms)
-  waitAfterScroll: { min: 500, max: 1500 },
-  waitForContent: 2000,                  // Wait for content after scroll
+  waitAfterScroll: { min: 1000, max: 2000 },
+  waitForContent: 2500,                  // Wait for content after scroll
 
   // Browser Config
   headless: true,

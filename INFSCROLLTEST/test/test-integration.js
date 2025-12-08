@@ -46,9 +46,9 @@ async function runTests() {
     const result = await orchestrator.loadWithOptions('https://httpbin.org/html', {
       itemSelector: 'p',
       detectionMethod: 'itemCount',
-      maxScrollAttempts: 3,
+      maxScrollAttempts: 5,
       maxDurationSeconds: 30,
-      progressTimeout: 2,
+      progressTimeout: 3,
       headless: true
     });
 
@@ -92,7 +92,7 @@ async function runTests() {
     }
   }
 
-  // Test 4: Timeout handling
+  // Test 4: Timeout handling (attempt-based)
   console.log('\nTest 4: Timeout handling');
   try {
     const orchestrator = new InfiniteScrollOrchestrator();
@@ -101,9 +101,9 @@ async function runTests() {
     const result = await orchestrator.loadWithOptions('https://example.com', {
       itemSelector: '.nonexistent-item',
       detectionMethod: 'itemCount',
-      maxScrollAttempts: 100,
-      maxDurationSeconds: 10, // Short timeout
-      progressTimeout: 2,
+      maxScrollAttempts: 10,
+      maxDurationSeconds: 60,
+      progressTimeout: 2,  // Stop after 2 consecutive attempts without new items
       headless: true
     });
 

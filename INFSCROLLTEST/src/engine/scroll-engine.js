@@ -103,20 +103,48 @@ class ScrollEngine {
   }
 
   /**
+   * Scroll to the trigger zone near the bottom of the page
+   * Infinite scroll typically triggers when user is within ~500-1000px of bottom
+   * @returns {object} { scrolled: boolean, reachedBottom: boolean }
+   */
+  async _scrollToTriggerZone() {
+    const viewportHeight = this.config.viewport?.height || 1080;
+    const currentHeight = await this.adapter.getScrollHeight(this.config.scrollContainer);
+    const currentPosition = await this.adapter.getScrollPosition(this.config.scrollContainer);
+
+    // Target position: 500px above the bottom (trigger zone)
+    const targetPosition = currentHeight - viewportHeight - 500;
+    const scrollAmount = Math.max(0, targetPosition - currentPosition);
+
+    if (scrollAmount > 100) {
+      this.logger.debug(`Scrolling ${scrollAmount}px to trigger zone (${viewportHeight}px from bottom)`);
+      await this.adapter.scrollBy(scrollAmount, this.config.scrollContainer);
+      return { scrolled: true, reachedBottom: false };
+    } else {
+      this.logger.debug('At trigger zone, scrolling to bottom');
+      await this.adapter.scrollToBottom(this.config.scrollContainer);
+      return { scrolled: true, reachedBottom: true };
+    }
+  }
+
+  /**
    * Perform a single scroll iteration
    * @returns {object} { shouldStop: boolean, reason: string|null }
    */
   async _performScrollIteration() {
     const iterationStart = Date.now();
 
-    // Get random scroll amount
-    const scrollAmount = humanBehavior.getScrollAmount(this.config);
+    // Log progress at start of iteration
+    const progressStats = this.progressDetector.getStats();
+    this.logger.info(
+      `Scroll ${this.scrollAttempts + 1}: ` +
+      `Items=${progressStats.itemCount} ` +
+      `Height=${progressStats.scrollHeight}px ` +
+      `NoProgress=${progressStats.noProgressCount}/${this.config.progressTimeout}`
+    );
 
-    // Log iteration start
-    this.logger.debug(`Scroll iteration ${this.scrollAttempts + 1}: scrolling ${scrollAmount}px`);
-
-    // Perform the scroll
-    await this.adapter.scrollBy(scrollAmount, this.config.scrollContainer);
+    // Scroll to trigger zone (near bottom where infinite scroll triggers)
+    await this._scrollToTriggerZone();
 
     // Wait after scroll (human-like behavior)
     const waitTime = humanBehavior.getWaitTime(this.config, 'scroll');

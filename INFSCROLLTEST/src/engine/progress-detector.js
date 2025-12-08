@@ -192,27 +192,18 @@ class ProgressDetector {
   }
 
   /**
-   * Check if progress timeout has been exceeded
+   * Check if progress timeout has been exceeded (now attempt-based, not time-based)
+   * Note: Time-based check disabled - we use attempt-based checking in _checkItemCount
    * @returns {object} Progress result
    */
   _checkTimeout() {
-    const secondsSinceProgress = (Date.now() - this.lastProgressTime) / 1000;
-    const timeoutSeconds = this.config.progressTimeout;
-
-    if (secondsSinceProgress >= timeoutSeconds) {
-      return {
-        hasProgress: false,
-        shouldStop: true,
-        reason: `No progress for ${secondsSinceProgress.toFixed(1)} seconds`,
-        stats: { secondsSinceProgress, timeoutSeconds }
-      };
-    }
-
+    // Disabled time-based timeout - using attempt-based in _checkItemCount instead
+    // This prevents premature stopping on slow-loading pages
     return {
       hasProgress: false,
       shouldStop: false,
       reason: null,
-      stats: { secondsSinceProgress, timeoutSeconds }
+      stats: { noProgressCount: this.noProgressCount, progressTimeout: this.config.progressTimeout }
     };
   }
 

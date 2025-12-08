@@ -15,16 +15,20 @@ async function test() {
 
   try {
     const result = await orchestrator.loadWithOptions(URL, {
-      // Try common selectors for lawyer listings
-      itemSelector: '.lawyer-result, .attorney-card, .result-item, .listing-item, [class*="lawyer"], [class*="attorney"]',
-      detectionMethod: 'scrollHeight',
-      maxScrollAttempts: 100,
-      maxDurationSeconds: 180,
-      progressTimeout: 10,        // Wait longer for content to load
-      headless: false,            // Set to true for headless
-      waitForContent: 4000,       // Wait 4 seconds for content after scroll
+      detectionMethod: 'itemCount',
+      itemSelector: 'a[href*="/lawyers/"], .lawyer-card, .attorney-card, .result-item, [class*="lawyer"]',
+
+      maxScrollAttempts: 200,
+      scrollAmount: { min: 1500, max: 2000 },
+
+      progressTimeout: 5,
+      maxDurationSeconds: 300,
+
+      waitForContent: 3000,
       waitAfterScroll: { min: 1000, max: 2000 },
-      scrollAmount: { min: 600, max: 1000 }  // Larger scrolls
+
+      headless: false,
+      viewport: { width: 1920, height: 1080 },
     });
 
     console.log('\n=== RESULTS ===');
@@ -34,6 +38,11 @@ async function test() {
     if (result.html) {
       console.log('HTML length:', result.html.length, 'bytes');
 
+      // Count lawyer links in HTML
+      const matches = result.html.match(/href="[^"]*\/lawyers\/[^"]*"/g);
+      const linksFound = matches ? matches.length : 0;
+      console.log('  - Lawyer links in HTML:', linksFound);
+
       // Save to file
       const fs = require('fs');
       fs.writeFileSync('sullcrom-output.html', result.html);
@@ -42,6 +51,17 @@ async function test() {
 
     if (result.errors.length > 0) {
       console.log('Errors:', result.errors);
+    }
+
+    // Success criteria check
+    console.log('\n=== SUCCESS CRITERIA ===');
+    const itemsFound = result.stats.finalItemCount;
+    if (itemsFound >= 500) {
+      console.log('✅ PASS: Found', itemsFound, 'items (expected 500+)');
+    } else if (itemsFound >= 400) {
+      console.log('⚠️  PARTIAL: Found', itemsFound, 'items (expected 500+, but close)');
+    } else {
+      console.log('❌ FAIL: Only found', itemsFound, 'items (expected 500+)');
     }
 
   } catch (error) {
