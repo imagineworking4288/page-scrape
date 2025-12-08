@@ -2090,3 +2090,123 @@ for (let i = 0; i < cardsToExtract; i++) {
 | Exit reason | "No new cards (3 retries)" | "Contact limit reached" |
 | profileUrl success | ~23% | 90%+ |
 | Total cards found | 30 | 400+ |
+
+---
+
+### Scrollbar Monitor Architecture (December 7)
+**Change**: Replaced height-based infinite scroll detection with scrollbar position monitoring for more reliable page load detection.
+
+**Problem**: Height-based detection was failing because:
+- Page height measurements are timing-dependent (captured too early)
+- Height never changes from initial value despite scrolling
+- Only 10/400+ contacts extracted (2.5% success rate)
+- Height tracking variable bugs (lastHeight = 0 instead of actual height)
+
+**Solution**: New ScrollbarMonitor module that:
+- Tracks scrollbar position as percentage (0-100%)
+- Uses smooth auto-scroll with `behavior: 'smooth'`
+- Waits for scrollbar to reach 99%+ AND stay stable for 5 seconds
+- Auto-scrolls again if page height increases (new content detected)
+- More reliable than height measurements
+
+**Files Created**:
+- `src/scrapers/config-scrapers/scrollbar-monitor.js` - New module for scrollbar position monitoring
+
+**Files Modified**:
+- `src/scrapers/config-scrapers/infinite-scroll-scraper.js` - Integrated ScrollbarMonitor
+- `src/scrapers/config-scrapers/index.js` - Added ScrollbarMonitor to exports
+
+**ScrollbarMonitor Class**:
+```javascript
+class ScrollbarMonitor {
+  constructor(page, logger) { ... }
+
+  // Get current scrollbar position as percentage (0-100%)
+  async getScrollbarPosition() {
+    return await this.page.evaluate(() => {
+      const scrollTop = window.scrollY;
+      const scrollHeight = document.body.scrollHeight;
+      const viewportHeight = window.innerHeight;
+      const maxScroll = scrollHeight - viewportHeight;
+      const percentage = (scrollTop / maxScroll) * 100;
+      return { scrollTop, scrollHeight, viewportHeight, maxScroll, percentage };
+    });
+  }
+
+  // Wait for scrollbar to stabilize at bottom
+  async waitForScrollbarStability(options = {}) {
+    const {
+      stabilityChecks = 10,        // 10 checks at 500ms = 5 seconds stable
+      checkInterval = 500,
+      scrollbarThreshold = 99,     // Percentage to consider "at bottom"
+      movementTolerance = 0.5,     // Max percentage change for "stable"
+      maxWaitTime = 180000         // Max 3 minutes
+    } = options;
+
+    // Monitors scrollbar position
+    // Auto-scrolls if page grows
+    // Returns when stable at bottom for stabilityChecks
+  }
+
+  async hasScrollbar() { ... }
+  async scrollToBottom() { ... }
+  async getPageDimensions() { ... }
+}
+```
+
+**Updated InfiniteScrollScraper**:
+```javascript
+async scrape(url, limit = 0) {
+  // Phase 1: Auto-scroll with scrollbar monitoring
+  const scrollbarMonitor = new ScrollbarMonitor(page, this.logger);
+
+  if (await scrollbarMonitor.hasScrollbar()) {
+    await scrollbarMonitor.scrollToBottom();
+    const result = await scrollbarMonitor.waitForScrollbarStability({
+      stabilityChecks: 10,
+      onProgress: async (progress) => {
+        // Count cards every 10 checks
+        const cards = await this.findCardElements(page);
+        this.logger.info(`Progress: ${progress.percentage}% | Cards: ${cards.length}`);
+      }
+    });
+  }
+
+  // Phase 2: Extract all cards
+  return await this.extractAllCards(page, limit);
+}
+```
+
+**Key Advantages**:
+| Aspect | Height-Based | Scrollbar-Based |
+|--------|--------------|-----------------|
+| Detection method | `document.body.scrollHeight` changes | Scrollbar position percentage |
+| Scroll type | Instant `scrollTo()` | Smooth `behavior: 'smooth'` |
+| Page growth detection | `waitForFunction` with timeout | Automatic in stability loop |
+| Stability check | Fixed retry count (5) | Position stable for N checks |
+| Reliability | Timing-dependent | Position-based (more reliable) |
+
+**Terminal Output Format**:
+```
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] PHASE 1: Auto-scrolling to load all content
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Initial page: 3454px, viewport: 900px
+[InfiniteScrollScraper] Initiating smooth scroll to bottom...
+[ScrollbarMonitor] Starting stability monitoring
+[ScrollbarMonitor] Target: 10 consecutive checks at 99%+
+[ScrollbarMonitor] Page grew: 3454 → 6000px
+[InfiniteScrollScraper] Progress: 85.5% | Height: 6000px | Cards: 20
+[ScrollbarMonitor] Page grew: 6000 → 12000px
+[InfiniteScrollScraper] Progress: 92.3% | Height: 12000px | Cards: 40
+...
+[ScrollbarMonitor] ✓ Stable at bottom (10/10)
+[ScrollbarMonitor] ✓ Scrollbar stable at bottom after 45s (90 checks)
+[InfiniteScrollScraper] ✓ Page fully loaded - scrollbar stable at bottom
+[InfiniteScrollScraper] Final page: 45000px (grew 41546px)
+
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] PHASE 2: Extracting all contacts from loaded page
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Found 420 total cards on page
+```

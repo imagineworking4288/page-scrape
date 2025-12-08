@@ -13,6 +13,7 @@ const BaseConfigScraper = require('./base-config-scraper');
 const InfiniteScrollScraper = require('./infinite-scroll-scraper');
 const PaginationScraper = require('./pagination-scraper');
 const SinglePageScraper = require('./single-page-scraper');
+const ScrollbarMonitor = require('./scrollbar-monitor');
 
 /**
  * Create appropriate scraper based on pagination type
@@ -241,6 +242,7 @@ module.exports = {
   InfiniteScrollScraper,
   PaginationScraper,
   SinglePageScraper,
+  ScrollbarMonitor,
   createScraper,
   diagnosePagination
 };

@@ -1,12 +1,14 @@
 /**
- * Infinite Scroll Scraper - Two-Phase Architecture
+ * Infinite Scroll Scraper - Scrollbar Monitor Architecture
  *
- * Handles scraping from infinite scroll pages using a simplified two-phase approach:
+ * Handles scraping from infinite scroll pages using scrollbar position monitoring.
+ * More reliable than height-based detection which suffers from timing issues.
  *
  * PHASE 1 - LOAD ALL CONTENT:
- * - Scroll to absolute page bottom repeatedly
- * - Wait for page height to increase after each scroll
- * - Continue until height stops increasing (5 consecutive failures)
+ * - Initiate smooth scroll to bottom
+ * - Monitor scrollbar position percentage (0-100%)
+ * - Wait for scrollbar to reach 99%+ AND stay stable
+ * - Auto-scrolls again if page grows (new content loaded)
  * - NO extraction during this phase - just loading content
  *
  * PHASE 2 - EXTRACT ALL CARDS:
@@ -16,19 +18,14 @@
  * - No scrolling, no duplicate detection needed
  *
  * Benefits:
- * - Simpler logic: scroll until done, then extract
- * - More reliable: doesn't exit prematurely on slow lazy-loading
- * - No incremental complexity: each card processed exactly once
- * - Better link rendering: all content loads during Phase 1
- *
- * Features:
- * - Absolute bottom scroll: scrolls to document.body.scrollHeight
- * - Height-based content detection: waits for page height to increase
- * - 5 retry threshold: more forgiving for slow lazy-loading
- * - Comprehensive logging: shows page height changes
+ * - Scrollbar position is more reliable than height measurements
+ * - Automatically handles page growth during loading
+ * - Smooth scrolling triggers lazy-load better than instant jumps
+ * - Clear stability detection (scrollbar stable at bottom)
  */
 
 const BaseConfigScraper = require('./base-config-scraper');
+const ScrollbarMonitor = require('./scrollbar-monitor');
 
 class InfiniteScrollScraper extends BaseConfigScraper {
   constructor(browserManager, rateLimiter, logger, options = {}) {
@@ -37,14 +34,18 @@ class InfiniteScrollScraper extends BaseConfigScraper {
     this.scraperType = 'infinite-scroll';
     this.maxScrolls = options.maxScrolls || 100;
     this.scrollDelay = options.scrollDelay || 2000;
-    // Increased from 3 to 5 retries for more forgiving lazy-load handling
     this.noNewContentThreshold = options.noNewContentThreshold || 5;
     this.contentWaitTimeout = options.contentWaitTimeout || 5000;
+
+    // Scrollbar monitoring options
+    this.stabilityChecks = options.stabilityChecks || 10;  // 10 checks at 500ms = 5 seconds stable
+    this.checkInterval = options.checkInterval || 500;
+    this.scrollbarThreshold = options.scrollbarThreshold || 99;
   }
 
   /**
-   * Scrape contacts using two-phase architecture
-   * Phase 1: Scroll until page fully loaded (no extraction)
+   * Scrape contacts using scrollbar-monitor architecture
+   * Phase 1: Scroll and monitor scrollbar until stable at bottom
    * Phase 2: Extract all cards in single pass
    * @param {string} url - URL to scrape
    * @param {number} limit - Max contacts to extract (0 = unlimited)
@@ -56,7 +57,7 @@ class InfiniteScrollScraper extends BaseConfigScraper {
 
     try {
       this.logger.info(`[InfiniteScrollScraper] Starting scrape: ${url}`);
-      this.logger.info(`[InfiniteScrollScraper] Limit: ${limit > 0 ? limit : 'unlimited'}, Max scrolls: ${this.maxScrolls}`);
+      this.logger.info(`[InfiniteScrollScraper] Limit: ${limit > 0 ? limit : 'unlimited'}, Method: scrollbar-monitor`);
 
       // Ensure output path is set
       this.ensureOutputPath();
@@ -66,6 +67,7 @@ class InfiniteScrollScraper extends BaseConfigScraper {
       if (!page) {
         throw new Error('Failed to get browser page');
       }
+      this.page = page;
 
       // Navigate to page
       this.logger.info(`[InfiniteScrollScraper] Navigating to page...`);
@@ -74,149 +76,174 @@ class InfiniteScrollScraper extends BaseConfigScraper {
         timeout: 30000
       });
 
-      // Wait for initial page render
-      await page.waitForTimeout(2000);
+      // ═══════════════════════════════════════════════════════════
+      // CRITICAL: Wait for initial page content to fully load
+      // ═══════════════════════════════════════════════════════════
 
-      // Initialize extractors based on config
+      this.logger.info(`[InfiniteScrollScraper] Waiting for initial page load...`);
+
+      // Wait for card selector
+      try {
+        await page.waitForSelector(this.cardSelector, { timeout: 10000 });
+        this.logger.info(`[InfiniteScrollScraper] ✓ Card selector found: ${this.cardSelector}`);
+      } catch (err) {
+        this.logger.warn(`[InfiniteScrollScraper] ⚠ Card selector not found: ${this.cardSelector}`);
+      }
+
+      // Wait for initial render (5 seconds for lazy content)
+      await page.waitForTimeout(5000);
+
+      // Count initial cards
+      const initialCards = await this.findCardElements(page);
+      const initialCardCount = initialCards.length;
+      this.logger.info(`[InfiniteScrollScraper] Initial cards loaded: ${initialCardCount}`);
+
+      // Initialize extractors
       await this.initializeExtractors(page);
 
-      // ═══════════════════════════════════════════════════════════
-      // PHASE 1: SCROLL UNTIL PAGE FULLY LOADED (NO EXTRACTION)
-      // ═══════════════════════════════════════════════════════════
+      // Initialize scrollbar monitor
+      const scrollbarMonitor = new ScrollbarMonitor(page, this.logger);
 
-      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
-      this.logger.info(`[InfiniteScrollScraper] PHASE 1: Loading all content via scrolling`);
-      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+      // Check if page has scrollbar
+      const hasScrollbar = await scrollbarMonitor.hasScrollbar();
 
-      let scrollCount = 0;
-      let noHeightChangeCount = 0;
-      const maxScrolls = this.maxScrolls;
-      const maxNoChangeRetries = this.noNewContentThreshold; // 5 retries
-      let lastHeight = 0;
+      if (!hasScrollbar) {
+        this.logger.info(`[InfiniteScrollScraper] No scrollbar detected - page fits in viewport`);
+        this.logger.info(`[InfiniteScrollScraper] Proceeding directly to extraction`);
 
-      while (scrollCount < maxScrolls && noHeightChangeCount < maxNoChangeRetries) {
-        scrollCount++;
-
-        // Get current page height BEFORE scrolling
-        const beforeHeight = await page.evaluate(() => document.body.scrollHeight);
-
-        this.logger.info(`[InfiniteScrollScraper] Scroll ${scrollCount}/${maxScrolls}: Height = ${beforeHeight}px`);
-
-        // Scroll to ABSOLUTE BOTTOM of page (not relative viewport scroll)
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-
-        // Wait for scroll animation to complete
-        await page.waitForTimeout(this.scrollDelay);
-
-        // Wait for potential new content to load by detecting page height increase
-        let newContentLoaded = false;
-        try {
-          await page.waitForFunction(
-            (oldHeight) => document.body.scrollHeight > oldHeight,
-            { timeout: this.contentWaitTimeout },
-            beforeHeight
-          );
-          newContentLoaded = true;
-        } catch (err) {
-          // Timeout - page height didn't increase (might be end of content)
-          newContentLoaded = false;
-        }
-
-        // Get page height AFTER waiting for content
-        const afterHeight = await page.evaluate(() => document.body.scrollHeight);
-        const heightIncrease = afterHeight - beforeHeight;
-
-        // Log height change
-        if (newContentLoaded && heightIncrease > 0) {
-          this.logger.info(`[InfiniteScrollScraper] ✓ Height increased by ${heightIncrease}px (${beforeHeight} → ${afterHeight})`);
-          // Reset retry counter - we got new content
-          noHeightChangeCount = 0;
-          lastHeight = afterHeight;
-        } else {
-          noHeightChangeCount++;
-          this.logger.info(`[InfiniteScrollScraper] ⚠ No height change (retry ${noHeightChangeCount}/${maxNoChangeRetries})`);
-        }
-
-        // Extra wait for content rendering (cards, links, images)
-        await page.waitForTimeout(500);
-
-        // Report progress during loading phase
-        this.reportProgress('Loading', { scroll: `${scrollCount}/${maxScrolls}` });
+        // Skip Phase 1, go straight to Phase 2
+        return await this.extractAllCards(page, limit);
       }
 
-      // Log why we stopped scrolling
-      if (noHeightChangeCount >= maxNoChangeRetries) {
-        this.logger.info(`[InfiniteScrollScraper] ✓ Page fully loaded (height stable after ${maxNoChangeRetries} retries)`);
+      // ═══════════════════════════════════════════════════════════
+      // PHASE 1: AUTO-SCROLL TO BOTTOM AND WAIT FOR STABILITY
+      // ═══════════════════════════════════════════════════════════
+
+      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+      this.logger.info(`[InfiniteScrollScraper] PHASE 1: Auto-scrolling to load all content`);
+      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+
+      // Get initial page dimensions
+      const initialDimensions = await scrollbarMonitor.getPageDimensions();
+      this.logger.info(`[InfiniteScrollScraper] Initial page: ${initialDimensions.scrollHeight}px, viewport: ${initialDimensions.viewportHeight}px`);
+
+      // Initiate smooth scroll to bottom
+      this.logger.info(`[InfiniteScrollScraper] Initiating smooth scroll to bottom...`);
+      await scrollbarMonitor.scrollToBottom();
+
+      // Monitor scrollbar position with periodic card counting
+      let checkCounter = 0;
+      const monitorResult = await scrollbarMonitor.waitForScrollbarStability({
+        stabilityChecks: this.stabilityChecks,
+        checkInterval: this.checkInterval,
+        scrollbarThreshold: this.scrollbarThreshold,
+        movementTolerance: 0.5,
+        maxWaitTime: 180000,
+        onProgress: async (progress) => {
+          checkCounter++;
+          // Count cards every 10 checks (5 seconds)
+          if (checkCounter % 10 === 0) {
+            try {
+              const cards = await this.findCardElements(page);
+              this.logger.info(`[InfiniteScrollScraper] Progress: ${progress.percentage.toFixed(1)}% | Height: ${progress.scrollHeight}px | Cards: ${cards.length}`);
+            } catch (e) {
+              // Ignore card counting errors during scroll
+            }
+          }
+        }
+      });
+
+      if (!monitorResult.success) {
+        this.logger.warn(`[InfiniteScrollScraper] Scrollbar monitoring ${monitorResult.reason}`);
+        if (monitorResult.finalPosition) {
+          this.logger.warn(`[InfiniteScrollScraper] Final position: ${monitorResult.finalPosition.toFixed(1)}%`);
+        }
+        this.logger.warn(`[InfiniteScrollScraper] Proceeding with extraction of loaded content`);
       } else {
-        this.logger.info(`[InfiniteScrollScraper] ⚠ Max scrolls reached (${maxScrolls}), proceeding with extraction`);
+        this.logger.info(`[InfiniteScrollScraper] ✓ Page fully loaded - scrollbar stable at bottom`);
+        this.logger.info(`[InfiniteScrollScraper] Stability achieved after ${monitorResult.elapsed}s`);
       }
 
-      this.logger.info(`[InfiniteScrollScraper] Final page height: ${lastHeight}px after ${scrollCount} scrolls`);
+      // Wait additional 2 seconds for final lazy-load stragglers
+      this.logger.info(`[InfiniteScrollScraper] Waiting 2s for final content to render...`);
+      await page.waitForTimeout(2000);
+
+      // Get final page dimensions
+      const finalDimensions = await scrollbarMonitor.getPageDimensions();
+      this.logger.info(`[InfiniteScrollScraper] Final page: ${finalDimensions.scrollHeight}px (grew ${finalDimensions.scrollHeight - initialDimensions.scrollHeight}px)`);
 
       // ═══════════════════════════════════════════════════════════
       // PHASE 2: EXTRACT ALL CARDS FROM FULLY-LOADED PAGE
       // ═══════════════════════════════════════════════════════════
 
-      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
-      this.logger.info(`[InfiniteScrollScraper] PHASE 2: Extracting all contacts from loaded page`);
-      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
-
-      // Wait for card selector to ensure cards are rendered
-      try {
-        await page.waitForSelector(this.cardSelector, { timeout: 5000 });
-      } catch (err) {
-        this.logger.warn(`[InfiniteScrollScraper] Warning: Card selector not found: ${this.cardSelector}`);
-      }
-
-      // Find ALL cards on the fully-loaded page
-      const allCardElements = await this.findCardElements(page);
-      const totalCards = allCardElements.length;
-
-      this.logger.info(`[InfiniteScrollScraper] Found ${totalCards} total cards on page`);
-
-      // Determine how many to extract based on limit
-      const cardsToExtract = limit > 0 ? Math.min(totalCards, limit) : totalCards;
-      this.logger.info(`[InfiniteScrollScraper] Extracting ${cardsToExtract} contacts (limit: ${limit > 0 ? limit : 'unlimited'})`);
-
-      // Extract contacts from all cards in single pass
-      for (let i = 0; i < cardsToExtract; i++) {
-        const card = allCardElements[i];
-
-        try {
-          const contact = await this.extractContactFromCard(card, i);
-
-          if (contact) {
-            this.addContact(contact);
-
-            // Progress update every 10 contacts
-            if ((i + 1) % 10 === 0 || (i + 1) === cardsToExtract) {
-              this.logger.info(`[InfiniteScrollScraper] Extracted ${i + 1}/${cardsToExtract} contacts`);
-
-              // Report progress to frontend
-              this.reportProgress('Extracting', {
-                cards: `${i + 1}/${cardsToExtract}`
-              });
-            }
-          }
-        } catch (err) {
-          this.logger.warn(`[InfiniteScrollScraper] Error extracting card ${i}: ${err.message}`);
-        }
-      }
-
-      this.logger.info(`[InfiniteScrollScraper] ✓ Extraction complete: ${this.contactCount} contacts`);
-
-      // Flush remaining contacts
-      this.flushContactBuffer();
-
-      return this.getResults();
+      return await this.extractAllCards(page, limit);
 
     } catch (error) {
       this.logger.error(`[InfiniteScrollScraper] Scraping failed: ${error.message}`);
       this.logger.error(error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Extract all cards from the fully-loaded page (Phase 2)
+   * @param {Object} page - Puppeteer page
+   * @param {number} limit - Max contacts to extract (0 = unlimited)
+   * @returns {Promise<Object>} - Results object
+   */
+  async extractAllCards(page, limit) {
+    this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+    this.logger.info(`[InfiniteScrollScraper] PHASE 2: Extracting all contacts from loaded page`);
+    this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+
+    // Wait for card selector to ensure cards are rendered
+    try {
+      await page.waitForSelector(this.cardSelector, { timeout: 5000 });
+    } catch (err) {
+      this.logger.warn(`[InfiniteScrollScraper] Warning: Card selector not found: ${this.cardSelector}`);
+    }
+
+    // Find ALL cards on the fully-loaded page
+    const allCardElements = await this.findCardElements(page);
+    const totalCards = allCardElements.length;
+
+    this.logger.info(`[InfiniteScrollScraper] Found ${totalCards} total cards on page`);
+
+    // Determine how many to extract based on limit
+    const cardsToExtract = limit > 0 ? Math.min(totalCards, limit) : totalCards;
+    this.logger.info(`[InfiniteScrollScraper] Extracting ${cardsToExtract} contacts (limit: ${limit > 0 ? limit : 'unlimited'})`);
+
+    // Extract contacts from all cards in single pass
+    for (let i = 0; i < cardsToExtract; i++) {
+      const card = allCardElements[i];
+
+      try {
+        const contact = await this.extractContactFromCard(card, i);
+
+        if (contact) {
+          this.addContact(contact);
+
+          // Progress update every 10 contacts
+          if ((i + 1) % 10 === 0 || (i + 1) === cardsToExtract) {
+            this.logger.info(`[InfiniteScrollScraper] Extracted ${i + 1}/${cardsToExtract} contacts`);
+
+            // Report progress to frontend
+            this.reportProgress('Extracting', {
+              cards: `${i + 1}/${cardsToExtract}`
+            });
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`[InfiniteScrollScraper] Error extracting card ${i}: ${err.message}`);
+      }
+    }
+
+    this.logger.info(`[InfiniteScrollScraper] ✓ Extraction complete: ${this.contactCount} contacts`);
+
+    // Flush remaining contacts
+    this.flushContactBuffer();
+
+    return this.getResults();
   }
 
   /**
@@ -269,39 +296,45 @@ class InfiniteScrollScraper extends BaseConfigScraper {
   async diagnose(page) {
     this.logger.info('[InfiniteScrollScraper] Running diagnosis...');
 
-    // Count initial cards
+    // Initialize scrollbar monitor for diagnosis
+    const scrollbarMonitor = new ScrollbarMonitor(page, this.logger);
+
+    // Get initial state
+    const initialDimensions = await scrollbarMonitor.getPageDimensions();
     const initialCards = await this.findCardElements(page);
     const initialCount = initialCards.length;
-
-    // Get initial page height
-    const initialHeight = await page.evaluate(() => document.body.scrollHeight);
+    const initialPosition = await scrollbarMonitor.getScrollbarPosition();
 
     // Scroll to bottom
-    const { beforeHeight } = await this.scrollDown(page);
+    await scrollbarMonitor.scrollToBottom();
+    await this.sleep(this.scrollDelay);
 
-    // Wait for content to load
-    const { afterHeight, heightIncrease } = await this.waitForNewContent(page, beforeHeight);
-
-    // Count cards after scroll
+    // Get post-scroll state
+    const afterDimensions = await scrollbarMonitor.getPageDimensions();
     const afterScrollCards = await this.findCardElements(page);
     const afterScrollCount = afterScrollCards.length;
+    const afterPosition = await scrollbarMonitor.getScrollbarPosition();
 
-    // Calculate new cards
     const newCards = afterScrollCount - initialCount;
+    const heightIncrease = afterDimensions.scrollHeight - initialDimensions.scrollHeight;
 
     const diagnosis = {
       type: 'infinite-scroll',
+      method: 'scrollbar-monitor',
       initialCards: initialCount,
       afterScrollCards: afterScrollCount,
       newCardsPerScroll: newCards,
-      initialHeight: initialHeight,
-      afterHeight: afterHeight,
+      initialHeight: initialDimensions.scrollHeight,
+      afterHeight: afterDimensions.scrollHeight,
       heightIncrease: heightIncrease,
+      scrollbarBefore: initialPosition.percentage.toFixed(1) + '%',
+      scrollbarAfter: afterPosition.percentage.toFixed(1) + '%',
+      hasScrollbar: initialDimensions.hasScrollbar,
       isInfiniteScroll: newCards > 0 || heightIncrease > 0,
       confidence: (newCards > 0 || heightIncrease > 0) ? 'high' : 'low'
     };
 
-    this.logger.info(`[InfiniteScrollScraper] Diagnosis: ${JSON.stringify(diagnosis)}`);
+    this.logger.info(`[InfiniteScrollScraper] Diagnosis: ${JSON.stringify(diagnosis, null, 2)}`);
 
     return diagnosis;
   }
