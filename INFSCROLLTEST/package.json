@@ -1,32 +1,23 @@
 {
-  "name": "infinite-scroll-loader",
-  "version": "1.0.0",
-  "description": "Standalone infinite scroll loader using Puppeteer for dynamic content loading",
-  "main": "src/index.js",
-  "bin": {
-    "infinite-scroll-loader": "./src/cli.js"
-  },
+  "name": "infinite-scroll-selenium",
+  "version": "2.0.0",
+  "description": "Infinite scroll scraper using Selenium with PAGE_DOWN key simulation",
+  "main": "selenium-scraper.js",
   "scripts": {
-    "start": "node src/cli.js",
-    "test": "node test/test-integration.js",
-    "test:unit": "node test/test-scroll-engine.js && node test/test-progress-detector.js && node test/test-load-more-handler.js",
-    "lint": "eslint src/"
+    "test": "node test-retry-logic.js",
+    "test:python": "node test-python-equivalent.js",
+    "compare": "node test-compare-methods.js"
   },
   "keywords": [
-    "puppeteer",
+    "selenium",
     "infinite-scroll",
     "scraper",
-    "web-automation"
+    "web-automation",
+    "page-down"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "commander": "^11.1.0",
-    "js-yaml": "^4.1.0",
-    "puppeteer": "^21.0.0",
-    "winston": "^3.11.0"
-  },
-  "devDependencies": {
-    "eslint": "^8.55.0"
+    "selenium-webdriver": "^4.15.0"
   }
 }

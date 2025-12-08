@@ -1,6 +1,42 @@
-# Infinite Scroll Loader
+# Selenium PAGE_DOWN Infinite Scroll Scraper
 
-A Node.js module for loading infinite scroll websites using Puppeteer.
+A reliable infinite scroll scraper using Selenium WebDriver with PAGE_DOWN key simulation.
+
+## Why PAGE_DOWN Instead of scrollBy()?
+
+Traditional infinite scroll scrapers use `window.scrollBy()` which:
+- Can be detected as bot behavior
+- Doesn't always trigger lazy loading mechanisms
+- May not fire scroll event handlers properly
+
+This scraper uses **keyboard simulation** (`Key.PAGE_DOWN`) which:
+- Mimics real user behavior
+- Properly triggers all scroll event handlers
+- Works reliably with lazy-loading content
+
+## The Retry Logic (Key Innovation)
+
+The core insight is simple: **page height only stops changing at the absolute bottom**.
+
+```javascript
+while (retries < maxRetries) {
+  // Press PAGE_DOWN
+  await body.sendKeys(Key.PAGE_DOWN);
+  await driver.sleep(scrollDelay);
+
+  // Check height
+  const newHeight = await driver.executeScript('return document.body.scrollHeight');
+
+  if (newHeight > lastHeight) {
+    retries = 0;  // RESET - more content available!
+    lastHeight = newHeight;
+  } else {
+    retries++;    // No change - might be at bottom
+  }
+}
+```
+
+By resetting the retry counter on ANY height change, we ensure we keep scrolling until we truly reach the bottom, even if there are temporary pauses in content loading.
 
 ## Installation
 
@@ -9,97 +45,120 @@ cd INFSCROLLTEST
 npm install
 ```
 
-## Quick Start - Simple Approach (Recommended)
+This will install `selenium-webdriver`. You also need Chrome installed on your system.
 
-The simplest way to scrape infinite scroll pages:
+## Usage
 
-```bash
-node test-simple.js
-```
-
-### Simple Scraper Usage
+### As a Module
 
 ```javascript
-const { scrapeInfiniteScroll, extractLinks } = require('./simple-scraper');
+const { scrapeWithScroll, extractLinks } = require('./selenium-scraper');
 
-const result = await scrapeInfiniteScroll('https://example.com', {
-  headless: false,       // Watch the browser
-  scrollDelay: 300,      // ms between scrolls
-  scrollStep: 500,       // pixels per scroll
+const result = await scrapeWithScroll('https://example.com/infinite-list', {
+  headless: false,    // Watch the browser
+  scrollDelay: 300,   // ms between PAGE_DOWN presses
+  maxRetries: 15,     // Stop after 15 consecutive no-height-change
+  maxScrolls: 1000,   // Safety limit
   outputFile: 'output.html'
 });
 
-// Extract links from result
-const links = extractLinks(result.html, '/lawyers/');
-console.log(`Found ${links.length} lawyer links`);
+if (result.success) {
+  const links = extractLinks(result.html, '/items/');
+  console.log(`Found ${links.length} items`);
+}
 ```
 
-### Simple Scraper Options
+### Run Tests
+
+```bash
+# Main test - scrapes Sullivan & Cromwell lawyer listing
+npm test
+
+# Verify Python-equivalent behavior
+npm run test:python
+
+# Compare different configurations
+npm run compare
+```
+
+## Configuration Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `headless` | true | Run browser without window |
-| `scrollDelay` | 500 | Milliseconds between scroll steps |
-| `scrollStep` | 500 | Pixels to scroll each step |
-| `outputFile` | null | Save HTML to file |
-| `viewport` | {width: 1920, height: 1080} | Browser viewport |
-| `timeout` | 300000 | Max runtime (5 minutes) |
+| `scrollDelay` | 300 | Milliseconds between PAGE_DOWN presses |
+| `maxRetries` | 15 | Stop after N consecutive no-height-change attempts |
+| `maxScrolls` | 1000 | Maximum total scroll attempts (safety limit) |
+| `headless` | false | Run browser in headless mode |
+| `outputFile` | null | Save final HTML to file |
+| `verbose` | true | Log progress to console |
 
-## Advanced Approach
+## API Reference
 
-For more control, use the full orchestrator in `src/`:
+### scrapeWithScroll(url, options)
 
+Main entry point. Navigates to URL, scrolls to load all content, returns HTML.
+
+**Returns:**
 ```javascript
-const { InfiniteScrollOrchestrator } = require('./src/index');
-
-const orchestrator = new InfiniteScrollOrchestrator();
-const result = await orchestrator.loadWithOptions('https://example.com', {
-  itemSelector: '.item',
-  detectionMethod: 'itemCount',
-  maxScrollAttempts: 100
-});
+{
+  success: boolean,
+  html: string,        // Full page HTML after scrolling
+  stats: {
+    scrollCount: number,
+    heightChanges: number,
+    finalHeight: number,
+    stopReason: string,
+    retriesAtEnd: number
+  }
+}
 ```
 
-See `test-sullcrom.js` for a full example.
+### extractLinks(html, pattern)
+
+Extract unique links matching a pattern from HTML.
+
+```javascript
+const lawyerLinks = extractLinks(html, '/lawyers/');
+// Returns: ['/lawyers/john-doe', '/lawyers/jane-smith', ...]
+```
+
+### countElements(html, tagOrClass)
+
+Count elements by tag name or class in HTML.
+
+```javascript
+const count = countElements(html, 'lawyer-card');
+```
 
 ## Test Files
 
-| File | Description |
-|------|-------------|
-| `test-simple.js` | Simple scraper test (recommended) |
-| `test-sullcrom.js` | Advanced orchestrator test |
-| `test-sullcrom-debug.js` | Debug test (20 scrolls only) |
+| File | Purpose |
+|------|---------|
+| `test-retry-logic.js` | Main test against Sullivan & Cromwell (expects 500+ lawyers) |
+| `test-python-equivalent.js` | Verifies behavior matches Python reference implementation |
+| `test-compare-methods.js` | Compares different scroll configurations |
 
 ## Project Structure
 
 ```
 INFSCROLLTEST/
-├── simple-scraper.js     # Simple approach (recommended)
-├── test-simple.js        # Test simple scraper
-├── test-sullcrom.js      # Test advanced scraper
-├── src/                  # Advanced implementation
-│   ├── index.js
-│   ├── cli.js
-│   ├── config/
-│   ├── adapters/
-│   ├── engine/
-│   ├── orchestrator/
-│   └── utils/
-├── test/
-└── examples/
+├── selenium-scraper.js      # Core scraper module
+├── test-retry-logic.js      # Main test
+├── test-python-equivalent.js # Behavior verification
+├── test-compare-methods.js  # Configuration comparison
+├── package.json
+└── README.md
 ```
 
 ## Troubleshooting
 
-### Browser doesn't launch
-```bash
-npm install puppeteer
-```
+### Chrome not found
+Make sure Chrome is installed on your system. Selenium uses your installed Chrome browser.
 
 ### Scroll stops too early
-- Increase `scrollDelay` to wait longer for content
-- Check if page uses a custom scroll container
+- Increase `maxRetries` (e.g., 20 or 25)
+- Increase `scrollDelay` (e.g., 500ms) if content loads slowly
 
-### Not finding all items
-- Some sites load content via AJAX after scroll
-- Try increasing wait times
+### Taking too long
+- Decrease `scrollDelay` (e.g., 200ms)
+- Use `headless: true` for faster execution
