@@ -1,0 +1,43 @@
+# Infinite Scroll Configuration Example
+# For websites that load content as you scroll
+
+# Required: CSS selector for items to count
+itemSelector: ".item, .card, .result"
+
+# Scroll container (use 'window' for most sites, or a CSS selector for specific elements)
+scrollContainer: window
+
+# Maximum number of scroll attempts before stopping
+maxScrollAttempts: 100
+
+# Maximum time to run in seconds (5 minutes)
+maxDurationSeconds: 300
+
+# How to detect new content
+# Options: 'itemCount', 'scrollHeight', 'sentinel'
+detectionMethod: itemCount
+
+# Seconds without new content before stopping
+progressTimeout: 5
+
+# Random scroll distance range (pixels)
+scrollAmount:
+  min: 400
+  max: 900
+
+# Wait time after each scroll (milliseconds)
+waitAfterScroll:
+  min: 800
+  max: 2000
+
+# Time to wait for content to load after scrolling
+waitForContent: 2000
+
+# Browser settings
+headless: true
+viewport:
+  width: 1920
+  height: 1080
+
+# Logging
+logLevel: info

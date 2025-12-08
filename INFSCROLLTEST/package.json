@@ -1,0 +1,32 @@
+{
+  "name": "infinite-scroll-loader",
+  "version": "1.0.0",
+  "description": "Standalone infinite scroll loader using Puppeteer for dynamic content loading",
+  "main": "src/index.js",
+  "bin": {
+    "infinite-scroll-loader": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node test/test-integration.js",
+    "test:unit": "node test/test-scroll-engine.js && node test/test-progress-detector.js && node test/test-load-more-handler.js",
+    "lint": "eslint src/"
+  },
+  "keywords": [
+    "puppeteer",
+    "infinite-scroll",
+    "scraper",
+    "web-automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^21.0.0",
+    "winston": "^3.11.0",
+    "commander": "^11.1.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.55.0"
+  }
+}
