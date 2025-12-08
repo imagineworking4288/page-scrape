@@ -14,7 +14,7 @@ This document provides comprehensive context for Claude when editing this projec
 - **Multi-method extraction**: DOM-based, text selection, and PDF rendering
 - **v2.3 Visual Config Generator**: Interactive tool with 4-layer detection and multi-method extraction testing
 - **Automatic pagination**: Detects and handles URL-based and offset-based pagination
-- **Infinite scroll**: Mouse wheel simulation for sites with lazy-loading
+- **Infinite scroll**: Selenium PAGE_DOWN simulation for sites with lazy-loading
 - **Anti-detection**: Stealth browser configuration with random user agents
 - **Domain classification**: Identifies business vs personal email domains
 - **OCR extraction**: Tesseract.js-based screenshot text extraction
@@ -92,8 +92,7 @@ page-scrape/
 │   │       ├── index.js        # Factory and exports
 │   │       ├── base-config-scraper.js     # Base class for v2.3 configs
 │   │       ├── single-page-scraper.js     # Single page extraction
-│   │       ├── infinite-scroll-scraper.js # Mouse wheel simulation (Puppeteer)
-│   │       ├── selenium-infinite-scroll-scraper.js # PAGE_DOWN simulation (Selenium)
+│   │       ├── infinite-scroll-scraper.js # Selenium PAGE_DOWN simulation
 │   │       └── pagination-scraper.js      # Traditional pagination
 │   │
 │   ├── features/
@@ -480,72 +479,41 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 
 #### src/scrapers/config-scrapers/infinite-scroll-scraper.js
 
-**Purpose**: Handles infinite scroll pages using mouse wheel simulation (Puppeteer).
+**Purpose**: Handles infinite scroll pages using Selenium PAGE_DOWN key simulation.
+
+**NOTE**: This is the ONLY infinite scroll implementation. Puppeteer wheel events were found to be unreliable and have been removed.
 
 **Extends**: BaseConfigScraper
 
-**Architecture**: Two-phase approach
-1. **Phase 1**: Rapid scroll to fully load page (no extraction)
-2. **Phase 2**: Extract all cards in single pass (no scrolling)
+**Architecture**: Two-phase Selenium-only approach
+1. **Phase 1**: Load with Selenium (PAGE_DOWN key presses, height monitoring)
+2. **Phase 2**: Extract with Selenium (JavaScript execution in browser)
 
 **Key Methods**:
 - `scrape(url, limit)` - Main entry point
-- `scrollToFullyLoad(page)` - Mouse wheel simulation loop
-- `extractAllCards(page, limit)` - Extract contacts from loaded page
-- `scrollDown(page)` - Scroll to absolute bottom (for diagnose)
-- `waitForNewContent(page, beforeHeight)` - Wait for content load (for diagnose)
-- `diagnose(page)` - Test infinite scroll behavior
+- `extractAllCardsFromSelenium(limit)` - Extract contacts using JavaScript in Selenium
+- `diagnose(url)` - Test infinite scroll behavior with Selenium
+
+**Why Selenium PAGE_DOWN**:
+- Puppeteer wheel events don't trigger some sites' infinite scroll JavaScript
+- Sullivan & Cromwell test: Selenium found 584 lawyers, Puppeteer only 10
+- PAGE_DOWN keyboard events properly fire scroll handlers
 
 **Configuration Options**:
 ```javascript
-this.maxScrolls = 1000;      // Safety limit
-this.scrollDelay = 50;       // 50ms between scrolls = 20/second
-this.scrollAmount = 300;     // Pixels per scroll event
-this.stabilityChecks = 5;    // Height stable for 5 checks = done
+this.scrollConfig = {
+  scrollDelay: 400,       // 400ms between scrolls
+  maxRetries: 25,         // Retries before giving up
+  maxScrolls: 1000,       // Safety limit
+  initialWait: 5000       // Wait for initial content
+};
 ```
 
-**Mouse Wheel Simulation** (key code):
-```javascript
-await page.evaluate((amount) => {
-  // Fire wheel event (triggers infinite scroll JS listeners)
-  const wheelEvent = new WheelEvent('wheel', {
-    deltaY: amount,
-    bubbles: true,
-    cancelable: true
-  });
-  document.dispatchEvent(wheelEvent);
-
-  // Also do actual scroll (ensures position changes)
-  window.scrollBy(0, amount);
-}, this.scrollAmount);
-```
-
-#### src/scrapers/config-scrapers/selenium-infinite-scroll-scraper.js
-
-**Purpose**: Handles infinite scroll pages using PAGE_DOWN key simulation (Selenium).
-
-**Extends**: BaseConfigScraper
-
-**Architecture**: Two-phase approach
-1. **Phase 1**: Load with Selenium (PAGE_DOWN key presses, height monitoring)
-2. **Phase 2**: Extract with Config (parse HTML with Cheerio, extract using config)
-
-**Key Methods**:
-- `scrape(url, limit, keepPdf, sourcePage, sourceUrl)` - Main entry point
-- `extractContactFromCheerio($, element, index)` - Extract contact from Cheerio element
-- `diagnose(url)` - Test infinite scroll behavior with Selenium
-
-**When to Use**:
-- Sites that don't respond to Puppeteer's wheel events
-- Config specifies `pagination.scrollMethod: 'selenium-pagedown'`
-- Use `--force-selenium` CLI flag
-
-**Config Requirements**:
+**Config Example**:
 ```json
 {
   "pagination": {
     "paginationType": "infinite-scroll",
-    "scrollMethod": "selenium-pagedown",
     "scrollConfig": {
       "maxRetries": 25,
       "scrollDelay": 400,

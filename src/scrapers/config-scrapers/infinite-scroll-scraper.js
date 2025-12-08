@@ -1,125 +1,118 @@
 /**
- * Infinite Scroll Scraper - Mouse Wheel Simulation Architecture
+ * Infinite Scroll Scraper - Selenium PAGE_DOWN Architecture
  *
- * Handles scraping from infinite scroll pages using rapid mouse wheel events.
- * This approach is much more reliable than passive scrollbar monitoring because
- * it actively triggers the site's infinite scroll JavaScript.
+ * Handles scraping from infinite scroll pages using Selenium WebDriver with
+ * PAGE_DOWN key simulation. This is the ONLY infinite scroll implementation
+ * as it's proven to be more reliable than Puppeteer wheel events.
  *
- * PHASE 1 - LOAD ALL CONTENT:
- * - Fire rapid wheel events + scrollBy commands (20 per second)
- * - Monitor page height for new content detection
- * - Stop when height stable for 5 consecutive checks AND at bottom
- * - NO extraction during this phase - just loading content
+ * TWO-PHASE ARCHITECTURE:
  *
- * PHASE 2 - EXTRACT ALL CARDS:
- * - Page is now fully loaded with all content
- * - Find ALL card elements in one query
- * - Extract contacts from cards in single pass
+ * PHASE 1 - LOAD WITH SELENIUM:
+ *   - Launch Selenium WebDriver (Chrome)
+ *   - Navigate to URL
+ *   - Use PAGE_DOWN key simulation to trigger infinite scroll
+ *   - Monitor height changes with retry logic
+ *   - Reset retry counter on ANY height change (key insight from INFSCROLLTEST)
+ *   - Scroll up/down cycle every 5 failed retries
  *
- * Why This Works:
- * - Wheel events trigger site's infinite scroll JavaScript listeners
- * - scrollBy ensures actual scroll position changes
- * - Rapid firing (50ms intervals) loads pages in 10-30 seconds
- * - Height monitoring detects when new content has loaded
- * - Dual mechanism (wheel + scrollBy) maximizes compatibility
+ * PHASE 2 - EXTRACT WITH SELENIUM:
+ *   - Execute JavaScript in Selenium to extract all card data
+ *   - Process and normalize contacts
+ *   - Close Selenium when done
+ *
+ * WHY SELENIUM PAGE_DOWN:
+ *   - More reliable than Puppeteer wheel events for triggering lazy loaders
+ *   - Keyboard events properly fire scroll event handlers
+ *   - Proven in INFSCROLLTEST: Found 584 lawyers on Sullivan & Cromwell
+ *   - Puppeteer wheel events only found 10 contacts on the same page
  */
 
 const BaseConfigScraper = require('./base-config-scraper');
 
 class InfiniteScrollScraper extends BaseConfigScraper {
-  constructor(browserManager, rateLimiter, logger, options = {}) {
-    super(browserManager, rateLimiter, logger, options);
+  constructor(seleniumManager, rateLimiter, logger, options = {}) {
+    // Pass null as browserManager - we use Selenium only
+    super(null, rateLimiter, logger, options);
 
     this.scraperType = 'infinite-scroll';
-    this.maxScrolls = options.maxScrolls || 1000;  // Safety limit
-    this.scrollDelay = options.scrollDelay || 50;  // 50ms between scrolls = 20/second
-    this.scrollAmount = options.scrollAmount || 300;  // Pixels per scroll
-    this.stabilityChecks = options.stabilityChecks || 5;  // Height stable for 5 checks
-    this.contentWaitTimeout = options.contentWaitTimeout || 5000;
+    this.seleniumManager = seleniumManager;
+
+    // Scroll configuration (can be overridden by config.pagination.scrollConfig)
+    this.scrollConfig = {
+      scrollDelay: options.scrollDelay || 400,
+      maxRetries: options.maxRetries || 25,
+      maxScrolls: options.maxScrolls || 1000,
+      initialWait: options.initialWait || 5000,
+      scrollContainer: options.scrollContainer || null,
+      verbose: options.verbose !== false
+    };
   }
 
   /**
-   * Scrape contacts using mouse-wheel simulation
-   * Phase 1: Rapid scroll to fully load page
-   * Phase 2: Extract all cards in single pass
+   * Scrape contacts using Selenium for both loading and extraction
+   *
    * @param {string} url - URL to scrape
    * @param {number} limit - Max contacts to extract (0 = unlimited)
+   * @param {boolean} keepPdf - Whether to keep PDF output (unused for this scraper)
+   * @param {string} sourcePage - Source page identifier (optional)
+   * @param {string} sourceUrl - Original source URL (optional)
    * @returns {Promise<Object>} - Scraping results
    */
-  async scrape(url, limit = 0) {
+  async scrape(url, limit = 0, keepPdf = false, sourcePage = null, sourceUrl = null) {
     this.startTime = Date.now();
     this.requestedLimit = limit;
 
     try {
       this.logger.info(`[InfiniteScrollScraper] Starting scrape: ${url}`);
-      this.logger.info(`[InfiniteScrollScraper] Limit: ${limit > 0 ? limit : 'unlimited'}, Method: mouse-wheel-simulation`);
+      this.logger.info(`[InfiniteScrollScraper] Limit: ${limit > 0 ? limit : 'unlimited'}, Method: selenium-pagedown`);
 
       // Ensure output path is set
       this.ensureOutputPath();
 
-      // Get browser page
-      const page = await this.browserManager.getPage();
-      if (!page) {
-        throw new Error('Failed to get browser page');
+      // Get scroll config from loaded config if available
+      if (this.config?.pagination?.scrollConfig) {
+        this.scrollConfig = { ...this.scrollConfig, ...this.config.pagination.scrollConfig };
+        this.logger.info(`[InfiniteScrollScraper] Using config scroll settings`);
       }
-      this.page = page;
-
-      // Navigate to page
-      this.logger.info(`[InfiniteScrollScraper] Navigating to page...`);
-      await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
-
-      // Wait for initial page load
-      this.logger.info(`[InfiniteScrollScraper] Waiting for initial page load...`);
-
-      // Wait for card selector
-      try {
-        await page.waitForSelector(this.cardSelector, { timeout: 10000 });
-        this.logger.info(`[InfiniteScrollScraper] ✓ Card selector found: ${this.cardSelector}`);
-      } catch (err) {
-        this.logger.warn(`[InfiniteScrollScraper] ⚠ Card selector not found: ${this.cardSelector}`);
-      }
-
-      // Wait for initial render
-      await page.waitForTimeout(3000);
-
-      // Count initial cards
-      const initialCards = await this.findCardElements(page);
-      const initialCardCount = initialCards.length;
-      this.logger.info(`[InfiniteScrollScraper] Initial cards loaded: ${initialCardCount}`);
-
-      // Get initial page dimensions
-      const initialHeight = await page.evaluate(() => document.body.scrollHeight);
-      this.logger.info(`[InfiniteScrollScraper] Initial page height: ${initialHeight}px`);
-
-      // Initialize extractors
-      await this.initializeExtractors(page);
 
       // ═══════════════════════════════════════════════════════════
-      // PHASE 1: RAPID SCROLL TO FULLY LOAD PAGE
+      // PHASE 1: LOAD WITH SELENIUM
       // ═══════════════════════════════════════════════════════════
 
       this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
-      this.logger.info(`[InfiniteScrollScraper] PHASE 1: Rapid scrolling to load all content`);
+      this.logger.info(`[InfiniteScrollScraper] PHASE 1: Loading page with Selenium`);
       this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
 
-      await this.scrollToFullyLoad(page);
+      // Navigate to URL
+      this.logger.info(`[InfiniteScrollScraper] Navigating to: ${url}`);
+      await this.seleniumManager.navigate(url);
 
-      // Get final page dimensions
-      const finalHeight = await page.evaluate(() => document.body.scrollHeight);
-      this.logger.info(`[InfiniteScrollScraper] Final page height: ${finalHeight}px (grew ${finalHeight - initialHeight}px)`);
+      // Scroll to fully load page
+      this.logger.info(`[InfiniteScrollScraper] Starting infinite scroll...`);
+      const scrollStats = await this.seleniumManager.scrollToFullyLoad(this.scrollConfig);
 
-      // Wait for any final lazy-loaded content
-      this.logger.info(`[InfiniteScrollScraper] Waiting 2s for final content to render...`);
-      await page.waitForTimeout(2000);
+      // Log scroll statistics
+      this.logger.info(`[InfiniteScrollScraper] Scroll complete:`);
+      this.logger.info(`[InfiniteScrollScraper]   - Scrolls: ${scrollStats.scrollCount}`);
+      this.logger.info(`[InfiniteScrollScraper]   - Height changes: ${scrollStats.heightChanges}`);
+      this.logger.info(`[InfiniteScrollScraper]   - Final height: ${scrollStats.finalHeight}px`);
+      this.logger.info(`[InfiniteScrollScraper]   - Stop reason: ${scrollStats.stopReason}`);
 
       // ═══════════════════════════════════════════════════════════
-      // PHASE 2: EXTRACT ALL CARDS FROM FULLY-LOADED PAGE
+      // PHASE 2: EXTRACT WITH SELENIUM (using JavaScript)
       // ═══════════════════════════════════════════════════════════
 
-      return await this.extractAllCards(page, limit);
+      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+      this.logger.info(`[InfiniteScrollScraper] PHASE 2: Extracting with Selenium JS`);
+      this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+
+      // Extract directly from Selenium's fully-loaded page using JavaScript
+      const results = await this.extractAllCardsFromSelenium(limit);
+
+      // Add scroll stats to results
+      results.scrollStats = scrollStats;
+
+      return results;
 
     } catch (error) {
       this.logger.error(`[InfiniteScrollScraper] Scraping failed: ${error.message}`);
@@ -129,133 +122,162 @@ class InfiniteScrollScraper extends BaseConfigScraper {
   }
 
   /**
-   * Rapidly scroll page using wheel events + scrollBy until fully loaded
-   * @param {Object} page - Puppeteer page
-   */
-  async scrollToFullyLoad(page) {
-    let scrollCount = 0;
-    let lastHeight = await page.evaluate(() => document.body.scrollHeight);
-    let stableCount = 0;
-    let lastLogTime = Date.now();
-
-    this.logger.info(`[InfiniteScrollScraper] Starting rapid scroll (${this.scrollAmount}px every ${this.scrollDelay}ms)`);
-
-    while (scrollCount < this.maxScrolls && stableCount < this.stabilityChecks) {
-      scrollCount++;
-
-      // Fire BOTH wheel event AND scrollBy for maximum compatibility
-      await page.evaluate((amount) => {
-        // Fire wheel event (triggers infinite scroll JS listeners)
-        const wheelEvent = new WheelEvent('wheel', {
-          deltaY: amount,
-          bubbles: true,
-          cancelable: true
-        });
-        document.dispatchEvent(wheelEvent);
-
-        // Also do actual scroll (ensures position changes)
-        window.scrollBy(0, amount);
-      }, this.scrollAmount);
-
-      // Wait between scrolls
-      await page.waitForTimeout(this.scrollDelay);
-
-      // Check height every 20 scrolls (once per second at 50ms intervals)
-      if (scrollCount % 20 === 0) {
-        const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-        const scrollY = await page.evaluate(() => window.scrollY);
-        const viewportHeight = await page.evaluate(() => window.innerHeight);
-        const maxScroll = currentHeight - viewportHeight;
-        const atBottom = scrollY >= maxScroll - 100;  // Within 100px of bottom
-
-        // Count cards periodically
-        const cards = await this.findCardElements(page);
-        const cardCount = cards.length;
-
-        // Log progress
-        const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
-        this.logger.info(`[InfiniteScrollScraper] Scroll ${scrollCount}: Position ${scrollY}px/${maxScroll}px | Height: ${currentHeight}px | Cards: ${cardCount} | ${elapsed}s`);
-
-        // Check if height is stable
-        if (currentHeight === lastHeight) {
-          stableCount++;
-          this.logger.info(`[InfiniteScrollScraper] ⚠ Height stable (${stableCount}/${this.stabilityChecks})`);
-
-          // If at bottom AND height stable, we're done
-          if (atBottom && stableCount >= this.stabilityChecks) {
-            this.logger.info(`[InfiniteScrollScraper] ✓ Page fully loaded: at bottom AND height stable`);
-            break;
-          }
-        } else {
-          // Height changed - new content loaded
-          if (stableCount > 0) {
-            this.logger.info(`[InfiniteScrollScraper] ✓ New content detected, resetting stable count`);
-          }
-          stableCount = 0;
-          lastHeight = currentHeight;
-        }
-      }
-    }
-
-    // Log why we stopped
-    const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
-    if (scrollCount >= this.maxScrolls) {
-      this.logger.warn(`[InfiniteScrollScraper] ⚠ Max scrolls reached (${this.maxScrolls})`);
-    } else {
-      this.logger.info(`[InfiniteScrollScraper] ✓ Scrolling complete after ${scrollCount} scrolls (${elapsed}s)`);
-    }
-  }
-
-  /**
-   * Extract all cards from the fully-loaded page (Phase 2)
-   * @param {Object} page - Puppeteer page
+   * Extract all cards from Selenium's fully-loaded page using JavaScript
+   * This is the core extraction method
+   *
    * @param {number} limit - Max contacts to extract (0 = unlimited)
    * @returns {Promise<Object>} - Results object
    */
-  async extractAllCards(page, limit) {
-    this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
-    this.logger.info(`[InfiniteScrollScraper] PHASE 2: Extracting all contacts from loaded page`);
-    this.logger.info(`[InfiniteScrollScraper] ═══════════════════════════════════════`);
+  async extractAllCardsFromSelenium(limit) {
+    this.logger.info(`[InfiniteScrollScraper] Extracting contacts using Selenium JavaScript...`);
 
-    // Wait for card selector to ensure cards are rendered
-    try {
-      await page.waitForSelector(this.cardSelector, { timeout: 5000 });
-    } catch (err) {
-      this.logger.warn(`[InfiniteScrollScraper] Warning: Card selector not found: ${this.cardSelector}`);
-    }
+    const driver = this.seleniumManager.getDriver();
 
-    // Find ALL cards on the fully-loaded page
-    const allCardElements = await this.findCardElements(page);
-    const totalCards = allCardElements.length;
+    // Get all card data via JavaScript execution
+    const extractionScript = `
+      const cards = document.querySelectorAll('${this.cardSelector.replace(/'/g, "\\'")}');
+      const results = [];
 
-    this.logger.info(`[InfiniteScrollScraper] Found ${totalCards} total cards on page`);
+      cards.forEach((card, index) => {
+        const contact = { _cardIndex: index };
 
-    // Determine how many to extract based on limit
-    const cardsToExtract = limit > 0 ? Math.min(totalCards, limit) : totalCards;
-    this.logger.info(`[InfiniteScrollScraper] Extracting ${cardsToExtract} contacts (limit: ${limit > 0 ? limit : 'unlimited'})`);
+        // Extract name - try multiple selectors
+        const nameEl = card.querySelector('h1, h2, h3, h4, h5, .name, [class*="name"]');
+        if (nameEl) {
+          contact.name = nameEl.textContent.trim();
+        }
 
-    // Extract contacts from all cards in single pass
-    for (let i = 0; i < cardsToExtract; i++) {
-      const card = allCardElements[i];
-
-      try {
-        const contact = await this.extractContactFromCard(card, i);
-
-        if (contact) {
-          this.addContact(contact);
-
-          // Progress update every 10 contacts
-          if ((i + 1) % 10 === 0 || (i + 1) === cardsToExtract) {
-            this.logger.info(`[InfiniteScrollScraper] Extracted ${i + 1}/${cardsToExtract} contacts`);
-
-            // Report progress to frontend
-            this.reportProgress('Extracting', {
-              cards: `${i + 1}/${cardsToExtract}`
-            });
+        // Extract profile URL - find the main link
+        const links = card.querySelectorAll('a[href]');
+        for (const link of links) {
+          const href = link.getAttribute('href');
+          if (href && !href.startsWith('mailto:') && !href.startsWith('tel:') &&
+              !href.startsWith('#') && !href.endsWith('.vcf')) {
+            // Make absolute URL if relative
+            if (href.startsWith('/')) {
+              contact.profileUrl = window.location.origin + href;
+            } else if (href.startsWith('http')) {
+              contact.profileUrl = href;
+            }
+            break;
           }
         }
+
+        // Extract email - mailto link or regex
+        const mailtoLink = card.querySelector('a[href^="mailto:"]');
+        if (mailtoLink) {
+          contact.email = mailtoLink.getAttribute('href').replace('mailto:', '').split('?')[0];
+        } else {
+          // Try regex in card text
+          const cardText = card.textContent;
+          const emailMatch = cardText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);
+          if (emailMatch) {
+            contact.email = emailMatch[0];
+          }
+        }
+
+        // Extract phone - tel link or regex
+        const telLink = card.querySelector('a[href^="tel:"]');
+        if (telLink) {
+          contact.phone = telLink.getAttribute('href').replace('tel:', '');
+        } else {
+          // Try regex in card text
+          const cardText = card.textContent;
+          const phoneMatch = cardText.match(/[\\+]?[(]?[0-9]{1,3}[)]?[-\\s\\.]?[(]?[0-9]{1,3}[)]?[-\\s\\.][0-9]{3,6}[-\\s\\.][0-9]{3,6}/);
+          if (phoneMatch) {
+            contact.phone = phoneMatch[0];
+          }
+        }
+
+        // Extract title
+        const titleEl = card.querySelector('.title, [class*="title"], .position, [class*="position"]');
+        if (titleEl) {
+          contact.title = titleEl.textContent.trim();
+        }
+
+        // Extract location
+        const locEl = card.querySelector('.location, [class*="location"], .office, [class*="office"]');
+        if (locEl) {
+          contact.location = locEl.textContent.trim();
+        }
+
+        results.push(contact);
+      });
+
+      return results;
+    `;
+
+    // Execute extraction script
+    const rawContacts = await driver.executeScript(extractionScript);
+    const totalCards = rawContacts.length;
+
+    this.logger.info(`[InfiniteScrollScraper] Found ${totalCards} cards in Selenium DOM`);
+
+    // Determine how many to extract
+    const cardsToExtract = limit > 0 ? Math.min(totalCards, limit) : totalCards;
+    this.logger.info(`[InfiniteScrollScraper] Processing ${cardsToExtract} contacts (limit: ${limit > 0 ? limit : 'unlimited'})`);
+
+    // Process each contact
+    for (let i = 0; i < cardsToExtract; i++) {
+      const raw = rawContacts[i];
+
+      try {
+        // Normalize and validate contact
+        const contact = {
+          _cardIndex: raw._cardIndex,
+          _extractionMethods: {}
+        };
+
+        // Copy fields with normalization
+        if (raw.name) {
+          contact.name = this.normalizeFieldValue('name', raw.name);
+          contact._extractionMethods.name = { method: 'selenium-js', confidence: 90 };
+        }
+        if (raw.email) {
+          contact.email = this.normalizeFieldValue('email', raw.email);
+          contact._extractionMethods.email = { method: 'selenium-js', confidence: 90 };
+        }
+        if (raw.phone) {
+          contact.phone = this.normalizeFieldValue('phone', raw.phone);
+          contact._extractionMethods.phone = { method: 'selenium-js', confidence: 90 };
+        }
+        if (raw.title) {
+          contact.title = this.normalizeFieldValue('title', raw.title);
+          contact._extractionMethods.title = { method: 'selenium-js', confidence: 90 };
+        }
+        if (raw.location) {
+          contact.location = this.normalizeFieldValue('location', raw.location);
+          contact._extractionMethods.location = { method: 'selenium-js', confidence: 90 };
+        }
+        if (raw.profileUrl) {
+          contact.profileUrl = raw.profileUrl;
+          contact._extractionMethods.profileUrl = { method: 'selenium-js', confidence: 90 };
+        }
+
+        // Calculate confidence and add domain info
+        contact.confidence = this.calculateConfidence(contact.name, contact.email, contact.phone);
+        this.addDomainInfo(contact);
+
+        // Track field statistics
+        const trackedFields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+        for (const fieldName of trackedFields) {
+          if (this.fieldStats[fieldName]) {
+            this.fieldStats[fieldName].total++;
+            if (contact[fieldName]) {
+              this.fieldStats[fieldName].extracted++;
+            }
+          }
+        }
+
+        // Add contact
+        this.addContact(contact);
+
+        // Progress update every 50 contacts
+        if ((i + 1) % 50 === 0 || (i + 1) === cardsToExtract) {
+          this.logger.info(`[InfiniteScrollScraper] Processed ${i + 1}/${cardsToExtract} contacts`);
+        }
       } catch (err) {
-        this.logger.warn(`[InfiniteScrollScraper] Error extracting card ${i}: ${err.message}`);
+        this.logger.warn(`[InfiniteScrollScraper] Error processing card ${i}: ${err.message}`);
       }
     }
 
@@ -264,105 +286,82 @@ class InfiniteScrollScraper extends BaseConfigScraper {
     // Flush remaining contacts
     this.flushContactBuffer();
 
+    // Close Selenium now that we're done
+    this.logger.info(`[InfiniteScrollScraper] Closing Selenium driver...`);
+    await this.seleniumManager.close();
+
     return this.getResults();
   }
 
   /**
-   * Scroll to absolute bottom of page (used by diagnose)
-   * @param {Object} page - Puppeteer page
-   * @returns {Promise<Object>} - { beforeHeight }
-   */
-  async scrollDown(page) {
-    const beforeHeight = await page.evaluate(() => document.body.scrollHeight);
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-    return { beforeHeight };
-  }
-
-  /**
-   * Wait for new content and return height info (used by diagnose)
-   * @param {Object} page - Puppeteer page
-   * @param {number} beforeHeight - Height before scrolling
-   * @returns {Promise<Object>} - { newContentLoaded, afterHeight, heightIncrease }
-   */
-  async waitForNewContent(page, beforeHeight) {
-    await this.sleep(2000);
-
-    let newContentLoaded = false;
-    try {
-      await page.waitForFunction(
-        (oldHeight) => document.body.scrollHeight > oldHeight,
-        { timeout: this.contentWaitTimeout },
-        beforeHeight
-      );
-      newContentLoaded = true;
-    } catch (err) {
-      newContentLoaded = false;
-    }
-
-    const afterHeight = await page.evaluate(() => document.body.scrollHeight);
-    const heightIncrease = afterHeight - beforeHeight;
-
-    await this.sleep(500);
-
-    return { newContentLoaded, afterHeight, heightIncrease };
-  }
-
-  /**
-   * Perform initial diagnosis of infinite scroll behavior
-   * @param {Object} page - Puppeteer page
+   * Diagnose infinite scroll behavior using Selenium
+   *
+   * @param {string} url - URL to diagnose
    * @returns {Promise<Object>} - Diagnosis results
    */
-  async diagnose(page) {
-    this.logger.info('[InfiniteScrollScraper] Running diagnosis...');
+  async diagnose(url) {
+    this.logger.info('[InfiniteScrollScraper] Running Selenium diagnosis...');
 
-    // Get initial state
-    const initialHeight = await page.evaluate(() => document.body.scrollHeight);
-    const initialCards = await this.findCardElements(page);
-    const initialCount = initialCards.length;
+    try {
+      // Navigate
+      await this.seleniumManager.navigate(url);
 
-    // Scroll using wheel event
-    await page.evaluate(() => {
-      for (let i = 0; i < 10; i++) {
-        const wheelEvent = new WheelEvent('wheel', {
-          deltaY: 300,
-          bubbles: true,
-          cancelable: true
-        });
-        document.dispatchEvent(wheelEvent);
-        window.scrollBy(0, 300);
+      // Get initial state
+      const driver = this.seleniumManager.getDriver();
+      const { By } = require('selenium-webdriver');
+
+      const initialHeight = await driver.executeScript('return document.body.scrollHeight');
+
+      // Count initial cards
+      let initialCardCount = 0;
+      if (this.cardSelector) {
+        const cards = await driver.findElements(By.css(this.cardSelector));
+        initialCardCount = cards.length;
       }
-    });
 
-    await this.sleep(3000);
+      // Perform limited scroll (50 scrolls)
+      const scrollStats = await this.seleniumManager.scrollToFullyLoad({
+        maxScrolls: 50,
+        maxRetries: 10,
+        scrollDelay: 300,
+        verbose: false
+      });
 
-    // Get post-scroll state
-    const afterHeight = await page.evaluate(() => document.body.scrollHeight);
-    const afterScrollCards = await this.findCardElements(page);
-    const afterScrollCount = afterScrollCards.length;
-    const scrollY = await page.evaluate(() => window.scrollY);
+      // Get final state
+      const finalHeight = await driver.executeScript('return document.body.scrollHeight');
+      let finalCardCount = 0;
+      if (this.cardSelector) {
+        const cards = await driver.findElements(By.css(this.cardSelector));
+        finalCardCount = cards.length;
+      }
 
-    const newCards = afterScrollCount - initialCount;
-    const heightIncrease = afterHeight - initialHeight;
+      const diagnosis = {
+        type: 'infinite-scroll',
+        method: 'selenium-pagedown',
+        initialHeight,
+        finalHeight,
+        heightIncrease: finalHeight - initialHeight,
+        initialCards: initialCardCount,
+        finalCards: finalCardCount,
+        newCards: finalCardCount - initialCardCount,
+        scrollStats,
+        isInfiniteScroll: scrollStats.heightChanges > 2,
+        confidence: scrollStats.heightChanges > 5 ? 'high' : (scrollStats.heightChanges > 2 ? 'medium' : 'low'),
+        recommendedConfig: {
+          scrollDelay: 400,
+          maxRetries: 25,
+          maxScrolls: 1000
+        }
+      };
 
-    const diagnosis = {
-      type: 'infinite-scroll',
-      method: 'mouse-wheel-simulation',
-      initialCards: initialCount,
-      afterScrollCards: afterScrollCount,
-      newCardsPerScroll: newCards,
-      initialHeight: initialHeight,
-      afterHeight: afterHeight,
-      heightIncrease: heightIncrease,
-      scrollPosition: scrollY,
-      isInfiniteScroll: newCards > 0 || heightIncrease > 0,
-      confidence: (newCards > 0 || heightIncrease > 0) ? 'high' : 'low'
-    };
+      this.logger.info(`[InfiniteScrollScraper] Diagnosis: ${JSON.stringify(diagnosis, null, 2)}`);
 
-    this.logger.info(`[InfiniteScrollScraper] Diagnosis: ${JSON.stringify(diagnosis, null, 2)}`);
+      return diagnosis;
 
-    return diagnosis;
+    } catch (error) {
+      this.logger.error(`[InfiniteScrollScraper] Diagnosis failed: ${error.message}`);
+      throw error;
+    }
   }
 }
 

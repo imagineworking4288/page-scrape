@@ -2,39 +2,34 @@
  * Config Scrapers Module
  *
  * Provides specialized config-based scrapers for different pagination types:
- * - InfiniteScrollScraper: For pages that load content on scroll (Puppeteer)
- * - SeleniumInfiniteScrollScraper: For pages that load content on scroll (Selenium PAGE_DOWN)
+ * - InfiniteScrollScraper: For pages that load content on scroll (Selenium PAGE_DOWN)
  * - PaginationScraper: For traditional paginated pages
  * - SinglePageScraper: For single-page results
  *
  * Includes factory method for automatic scraper selection based on diagnosis.
  *
- * Selenium vs Puppeteer for Infinite Scroll:
- * - Use Selenium (scrollMethod: 'selenium-pagedown') when:
- *   - Site doesn't respond well to scrollBy()
- *   - Lazy loading requires keyboard events
- *   - Config specifies pagination.scrollMethod = 'selenium-pagedown'
- * - Use Puppeteer (default) when:
- *   - Site responds to wheel events
- *   - No specific Selenium requirement
+ * INFINITE SCROLL ARCHITECTURE:
+ * All infinite scroll scraping uses Selenium with PAGE_DOWN key simulation.
+ * This is proven more reliable than Puppeteer wheel events:
+ * - Selenium PAGE_DOWN: Found 584 contacts on Sullivan & Cromwell
+ * - Puppeteer wheel: Found only 10 contacts on the same page
  */
 
 const BaseConfigScraper = require('./base-config-scraper');
 const InfiniteScrollScraper = require('./infinite-scroll-scraper');
-const SeleniumInfiniteScrollScraper = require('./selenium-infinite-scroll-scraper');
 const PaginationScraper = require('./pagination-scraper');
 const SinglePageScraper = require('./single-page-scraper');
 
 /**
  * Create appropriate scraper based on pagination type
  * @param {string} paginationType - 'infinite-scroll', 'pagination', or 'single-page'
- * @param {Object} browserManager - Browser manager instance (Puppeteer)
+ * @param {Object} browserManager - Browser manager instance (Puppeteer) - used for pagination/single-page
  * @param {Object} rateLimiter - Rate limiter instance
  * @param {Object} logger - Logger instance
  * @param {Object} configLoader - Config loader instance (optional, required for pagination)
  * @param {Object} options - Additional options
- * @param {Object} seleniumManager - Selenium manager instance (optional, for selenium-pagedown)
- * @param {Object} config - Loaded config object (optional, to check scrollMethod)
+ * @param {Object} seleniumManager - Selenium manager instance (REQUIRED for infinite-scroll)
+ * @param {Object} config - Loaded config object (optional)
  * @returns {BaseConfigScraper} - Appropriate scraper instance
  */
 function createScraper(paginationType, browserManager, rateLimiter, logger, configLoader = null, options = {}, seleniumManager = null, config = null) {
@@ -42,22 +37,15 @@ function createScraper(paginationType, browserManager, rateLimiter, logger, conf
 
   logger.info(`[createScraper] Creating scraper for type: ${paginationType} (normalized: ${normalizedType})`);
 
-  // Check if config specifies selenium-pagedown scroll method
-  const scrollMethod = config?.pagination?.scrollMethod || options.scrollMethod;
-  const useSelenium = scrollMethod === 'selenium-pagedown' && seleniumManager;
-
   let scraper;
   switch (normalizedType) {
     case 'infinite-scroll':
-      if (useSelenium) {
-        // Use Selenium-based scraper for PAGE_DOWN simulation
-        logger.info('[createScraper] Creating SeleniumInfiniteScrollScraper (scrollMethod: selenium-pagedown)');
-        scraper = new SeleniumInfiniteScrollScraper(seleniumManager, rateLimiter, logger, options);
-      } else {
-        // Use default Puppeteer-based scraper
-        logger.info('[createScraper] Creating InfiniteScrollScraper (scrollMethod: mouse-wheel)');
-        scraper = new InfiniteScrollScraper(browserManager, rateLimiter, logger, options);
+      // Infinite scroll ALWAYS requires Selenium
+      if (!seleniumManager) {
+        throw new Error('SeleniumManager is required for infinite-scroll scraping. Initialize SeleniumManager before creating scraper.');
       }
+      logger.info('[createScraper] Creating InfiniteScrollScraper (Selenium PAGE_DOWN)');
+      scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, options);
       break;
 
     case 'pagination':
@@ -263,7 +251,6 @@ async function diagnosePagination(page, browserManager, rateLimiter, logger, con
 module.exports = {
   BaseConfigScraper,
   InfiniteScrollScraper,
-  SeleniumInfiniteScrollScraper,
   PaginationScraper,
   SinglePageScraper,
   createScraper,

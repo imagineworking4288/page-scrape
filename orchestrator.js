@@ -323,7 +323,7 @@ async function main() {
       case 'config':
         logger.info('Using config method (v2.0 config-based extraction)...');
         const ConfigScraper = require('./src/scrapers/config-scraper');
-        const { createScraper, SeleniumInfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
+        const { createScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
 
         // Load config file
         if (!options.config) {
@@ -338,40 +338,33 @@ async function main() {
         const loadedConfig = configScraperInstance.loadConfig(options.config);
         logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
 
-        // Determine if Selenium is needed for infinite scroll
-        const useSelenium = options.forceSelenium ||
-                          (loadedConfig.pagination?.scrollMethod === 'selenium-pagedown') ||
-                          (options.scroll && loadedConfig.pagination?.type === 'infinite-scroll');
+        // Determine if this is an infinite scroll page
+        const isInfiniteScroll = options.forceSelenium ||
+                          options.scroll ||
+                          loadedConfig.pagination?.paginationType === 'infinite-scroll' ||
+                          loadedConfig.pagination?.type === 'infinite-scroll';
 
-        if (useSelenium) {
-          // Initialize Selenium for PAGE_DOWN scrolling (Phase 1)
+        if (isInfiniteScroll) {
+          // Initialize Selenium for infinite scroll (PAGE_DOWN is the only method)
           logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
-          logger.info('[Orchestrator] Architecture: Selenium loads → Puppeteer extracts');
 
           seleniumManager = new SeleniumManager(logger);
           seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
           await seleniumManager.launch(headless);
 
-          // Create Selenium-based scraper with browserManager for Phase 2 extraction
-          scraper = new SeleniumInfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
+          // Create Selenium-based InfiniteScrollScraper
+          scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
             scrollDelay: options.scrollDelay || 400,
             maxRetries: options.maxRetries || 25,
             maxScrolls: options.maxScrolls || 1000
           });
-          // Set browserManager for Puppeteer-based Phase 2 extraction
-          scraper.setBrowserManager(browserManager);
           scraper.config = loadedConfig;
           scraper.initializeCardSelector();
 
           logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
         } else {
-          // Use standard Puppeteer-based scraper
+          // Use standard Puppeteer-based scraper for non-infinite-scroll pages
           scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
-
-          // Handle infinite scroll mode
-          if (options.scroll || loadedConfig.pagination?.type === 'infinite-scroll') {
-            logger.info('Infinite scroll mode enabled (mouse-wheel simulation)');
-          }
         }
         break;
 

@@ -1,12 +1,12 @@
 /**
- * Selenium Infinite Scroll Test
+ * Infinite Scroll Scraper Test
  *
  * Tests the Selenium-based infinite scroll functionality against
  * Sullivan & Cromwell's lawyer listing page.
  *
  * Architecture tested:
  * - Phase 1: Selenium with PAGE_DOWN scrolls to load all content
- * - Phase 2: Puppeteer navigates and extracts using config extractors
+ * - Phase 2: Selenium extracts via JavaScript execution
  *
  * Run: node tests/selenium-infinite-scroll.test.js
  */
@@ -16,8 +16,8 @@ const path = require('path');
 // Add src to path for imports
 process.chdir(path.join(__dirname, '..'));
 
-const { SeleniumManager, BrowserManager } = require('../src/core');
-const { SeleniumInfiniteScrollScraper } = require('../src/scrapers/config-scrapers');
+const { SeleniumManager } = require('../src/core');
+const { InfiniteScrollScraper } = require('../src/scrapers/config-scrapers');
 const logger = require('../src/utils/logger');
 
 // Test URL - Sullivan & Cromwell lawyer listing (all lawyers)
@@ -108,15 +108,15 @@ async function testSeleniumScrollDirect() {
   }
 }
 
-async function testSeleniumScraper() {
+async function testInfiniteScrollScraper() {
   console.log('');
   console.log('═'.repeat(70));
-  console.log('TEST 2: SeleniumInfiniteScrollScraper (Selenium + Puppeteer) Test');
+  console.log('TEST 2: InfiniteScrollScraper (Selenium) Test');
   console.log('═'.repeat(70));
   console.log('');
-  console.log('Testing hybrid architecture:');
+  console.log('Testing architecture:');
   console.log('  Phase 1: Selenium loads page with PAGE_DOWN scroll');
-  console.log('  Phase 2: Puppeteer extracts using config-based extractors');
+  console.log('  Phase 2: Selenium extracts via JavaScript execution');
   console.log('');
 
   // Create a minimal config
@@ -129,60 +129,37 @@ async function testSeleniumScraper() {
     fields: {
       name: {
         userValidatedMethod: 'coordinate-text',
-        coordinates: {
-          x: 231.5,
-          y: 13.46875,
-          width: 178,
-          height: 41
-        },
+        coordinates: { x: 231.5, y: 13.46875, width: 178, height: 41 },
         selector: 'h1, h2, h3, h4, .name, [class*="name"]'
       },
       phone: {
         userValidatedMethod: 'regex-phone',
-        coordinates: {
-          x: 530.5,
-          y: 42.46875,
-          width: 157,
-          height: 32
-        }
+        coordinates: { x: 530.5, y: 42.46875, width: 157, height: 32 }
       },
       profileUrl: {
         userValidatedMethod: 'href-link',
-        coordinates: {
-          x: 196.5,
-          y: 19.46875,
-          width: 1008,
-          height: 184
-        },
+        coordinates: { x: 196.5, y: 19.46875, width: 1008, height: 184 },
         selector: 'a[href*="/Lawyer"]'
       }
     },
     pagination: {
-      paginationType: 'infinite-scroll',
-      scrollMethod: 'selenium-pagedown'
+      paginationType: 'infinite-scroll'
     }
   };
 
   const seleniumManager = new SeleniumManager(logger);
-  const browserManager = new BrowserManager(logger);
 
   try {
-    // Launch Selenium for Phase 1
-    console.log('Launching Selenium (Phase 1)...');
+    // Launch Selenium
+    console.log('Launching Selenium...');
     await seleniumManager.launch(TEST_CONFIG.headless);
 
-    // Note: Puppeteer will be launched by the scraper during Phase 2
-    // This avoids timing issues with pre-launching Puppeteer
-
-    // Create scraper with both managers
-    const scraper = new SeleniumInfiniteScrollScraper(seleniumManager, mockRateLimiter, logger, {
+    // Create InfiniteScrollScraper
+    const scraper = new InfiniteScrollScraper(seleniumManager, mockRateLimiter, logger, {
       scrollDelay: TEST_CONFIG.scrollDelay,
       maxRetries: TEST_CONFIG.maxRetries,
       maxScrolls: TEST_CONFIG.maxScrolls
     });
-
-    // Set browser manager for Phase 2 extraction (required!)
-    scraper.setBrowserManager(browserManager);
 
     // Set config
     scraper.config = testConfig;
@@ -225,16 +202,15 @@ async function testSeleniumScraper() {
     console.error(error.stack);
     return { pass: false, error: error.message };
   } finally {
-    await seleniumManager.close();
-    await browserManager.close();
+    // Note: Scraper closes Selenium automatically
   }
 }
 
 async function runAllTests() {
   console.log('');
   console.log('╔═══════════════════════════════════════════════════════════════════╗');
-  console.log('║      SELENIUM INFINITE SCROLL TEST SUITE                          ║');
-  console.log('║      Architecture: Selenium (load) + Puppeteer (extract)          ║');
+  console.log('║      INFINITE SCROLL SCRAPER TEST SUITE                           ║');
+  console.log('║      Architecture: Selenium (scroll + extract via JS)             ║');
   console.log('╚═══════════════════════════════════════════════════════════════════╝');
   console.log('');
 
@@ -243,8 +219,8 @@ async function runAllTests() {
   // Test 1: Direct Selenium scroll
   results.directScroll = await testSeleniumScrollDirect();
 
-  // Test 2: Scraper integration (Selenium + Puppeteer)
-  results.scraper = await testSeleniumScraper();
+  // Test 2: Scraper integration
+  results.scraper = await testInfiniteScrollScraper();
 
   // Summary
   console.log('');
