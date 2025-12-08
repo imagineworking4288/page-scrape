@@ -39,6 +39,9 @@ const ElementCapture = require('./element-capture');
 // v2.3 modules
 const ExtractionTester = require('./extraction-tester');
 
+// Selenium for infinite scroll
+const SeleniumManager = require('../../core/selenium-manager');
+
 class InteractiveSession {
   constructor(browserManager, rateLimiter, logger, configLoader, options = {}) {
     this.browserManager = browserManager;
@@ -72,6 +75,9 @@ class InteractiveSession {
     // v2.3 state
     this.extractionTester = null;
     this.v23Selections = {};  // Stores user-validated extraction methods
+
+    // Selenium manager for infinite scroll scraping
+    this.seleniumManager = null;
 
     // Helper modules
     this.configBuilder = new ConfigBuilder(logger, { outputDir: options.outputDir || 'configs' });
@@ -1658,6 +1664,13 @@ class InteractiveSession {
         this.extractionTester = null;
       }
 
+      // Cleanup Selenium manager if present
+      if (this.seleniumManager) {
+        this.logger.info('[v2.3] Cleaning up Selenium browser...');
+        await this.seleniumManager.close();
+        this.seleniumManager = null;
+      }
+
       // Resolve session to close browser
       if (this.resolveSession) {
         this.logger.info('[v2.3] Resolving session promise - browser will close');
@@ -1877,20 +1890,36 @@ class InteractiveSession {
       // Step 2: Import config scrapers and create scraper with config
       const { createScraper } = require('../../scrapers/config-scrapers');
 
+      // Step 2a: Initialize SeleniumManager for infinite-scroll pages
+      const paginationType = scrapingConfig.paginationType;
+      if (paginationType === 'infinite-scroll') {
+        this.logger.info('[Scraping] Infinite scroll detected - initializing SeleniumManager');
+
+        if (!this.seleniumManager) {
+          this.seleniumManager = new SeleniumManager(this.logger);
+          await this.seleniumManager.launch(false); // headless = false to match config generator
+          this.logger.info('[Scraping] SeleniumManager initialized successfully');
+        }
+        // Note: Selenium navigation happens inside InfiniteScrollScraper.scrape()
+      }
+
       // Create appropriate scraper - pass config directly
       this.logger.info('[Scraping] Creating scraper...');
       const scraper = createScraper(
-        scrapingConfig.paginationType,
+        paginationType,
         this.browserManager,
         this.rateLimiter,
         this.logger,
         this.configLoader,
         {
-          maxScrolls: 100,
+          maxScrolls: 1000,
           maxPages: 200,
-          scrollDelay: 2000,
+          scrollDelay: 400,
+          maxRetries: 25,
           pageDelay: 2000
-        }
+        },
+        this.seleniumManager,  // Pass seleniumManager for infinite-scroll
+        config
       );
 
       // Set config directly on scraper
@@ -1993,12 +2022,25 @@ InteractiveSession.clearActiveSession = function() {
 
 // Cleanup function
 async function cleanupResources() {
-  if (activeSession && activeSession.extractionTester) {
-    try {
-      console.log('[InteractiveSession] Cleaning up extraction tester...');
-      await activeSession.extractionTester.terminate();
-    } catch (error) {
-      console.error('[InteractiveSession] Error during cleanup:', error.message);
+  if (activeSession) {
+    // Cleanup extraction tester
+    if (activeSession.extractionTester) {
+      try {
+        console.log('[InteractiveSession] Cleaning up extraction tester...');
+        await activeSession.extractionTester.terminate();
+      } catch (error) {
+        console.error('[InteractiveSession] Error cleaning up extraction tester:', error.message);
+      }
+    }
+
+    // Cleanup Selenium manager
+    if (activeSession.seleniumManager) {
+      try {
+        console.log('[InteractiveSession] Cleaning up Selenium browser...');
+        await activeSession.seleniumManager.close();
+      } catch (error) {
+        console.error('[InteractiveSession] Error cleaning up Selenium:', error.message);
+      }
     }
   }
 }
