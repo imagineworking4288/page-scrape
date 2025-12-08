@@ -59,6 +59,7 @@ page-scrape/
 │   ├── core/                   # Core infrastructure
 │   │   ├── index.js            # Core exports
 │   │   ├── browser-manager.js  # Puppeteer browser handling
+│   │   ├── selenium-manager.js # Selenium WebDriver handling (for infinite scroll)
 │   │   ├── logger.js           # Winston logging setup
 │   │   └── rate-limiter.js     # Request throttling
 │   │
@@ -91,7 +92,8 @@ page-scrape/
 │   │       ├── index.js        # Factory and exports
 │   │       ├── base-config-scraper.js     # Base class for v2.3 configs
 │   │       ├── single-page-scraper.js     # Single page extraction
-│   │       ├── infinite-scroll-scraper.js # Mouse wheel simulation
+│   │       ├── infinite-scroll-scraper.js # Mouse wheel simulation (Puppeteer)
+│   │       ├── selenium-infinite-scroll-scraper.js # PAGE_DOWN simulation (Selenium)
 │   │       └── pagination-scraper.js      # Traditional pagination
 │   │
 │   ├── features/
@@ -263,6 +265,40 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 - `logger.logMemory()` - Log current memory usage
 - `logger.logProgress(current, total, context)` - Progress bar
 - `logger.logStats(stats)` - Statistics table
+
+#### src/core/selenium-manager.js
+
+**Purpose**: Selenium WebDriver manager for reliable infinite scroll with PAGE_DOWN key simulation.
+
+**Key Features**:
+- PAGE_DOWN key simulation (more reliable than scrollBy)
+- Retry counter reset logic (resets on ANY height change)
+- Scroll up/down cycle every 5 failed retries
+- Cookie banner auto-dismissal
+- Memory monitoring and driver recycling
+- Random user agent rotation
+
+**Key Methods**:
+- `launch(headless)` - Start Chrome WebDriver with stealth config
+- `navigate(url, timeout)` - Navigate with timeout
+- `scrollToFullyLoad(options)` - Main scroll method with retry logic
+- `dismissCookieBanners(verbose)` - Auto-dismiss common cookie banners
+- `getPageSource()` - Get HTML after scrolling
+- `close()` - Cleanup driver
+
+**Scroll Configuration**:
+```javascript
+{
+  scrollDelay: 400,           // ms between PAGE_DOWN presses
+  maxRetries: 25,             // consecutive no-change attempts before stopping
+  maxScrolls: 1000,           // safety limit
+  initialWait: 5000,          // wait for initial content
+  scrollContainer: null,      // CSS selector for scroll container
+  verbose: true               // log progress
+}
+```
+
+**When to Use**: Sites that don't respond to Puppeteer's scrollBy() or wheel events. Sullivan & Cromwell lawyer listing is a known example.
 
 #### src/core/rate-limiter.js
 
@@ -444,7 +480,7 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 
 #### src/scrapers/config-scrapers/infinite-scroll-scraper.js
 
-**Purpose**: Handles infinite scroll pages using mouse wheel simulation.
+**Purpose**: Handles infinite scroll pages using mouse wheel simulation (Puppeteer).
 
 **Extends**: BaseConfigScraper
 
@@ -482,6 +518,41 @@ await page.evaluate((amount) => {
   // Also do actual scroll (ensures position changes)
   window.scrollBy(0, amount);
 }, this.scrollAmount);
+```
+
+#### src/scrapers/config-scrapers/selenium-infinite-scroll-scraper.js
+
+**Purpose**: Handles infinite scroll pages using PAGE_DOWN key simulation (Selenium).
+
+**Extends**: BaseConfigScraper
+
+**Architecture**: Two-phase approach
+1. **Phase 1**: Load with Selenium (PAGE_DOWN key presses, height monitoring)
+2. **Phase 2**: Extract with Config (parse HTML with Cheerio, extract using config)
+
+**Key Methods**:
+- `scrape(url, limit, keepPdf, sourcePage, sourceUrl)` - Main entry point
+- `extractContactFromCheerio($, element, index)` - Extract contact from Cheerio element
+- `diagnose(url)` - Test infinite scroll behavior with Selenium
+
+**When to Use**:
+- Sites that don't respond to Puppeteer's wheel events
+- Config specifies `pagination.scrollMethod: 'selenium-pagedown'`
+- Use `--force-selenium` CLI flag
+
+**Config Requirements**:
+```json
+{
+  "pagination": {
+    "paginationType": "infinite-scroll",
+    "scrollMethod": "selenium-pagedown",
+    "scrollConfig": {
+      "maxRetries": 25,
+      "scrollDelay": 400,
+      "maxScrolls": 1000
+    }
+  }
+}
 ```
 
 #### src/scrapers/config-scrapers/single-page-scraper.js
@@ -886,9 +957,10 @@ Named by domain with dots replaced by dashes: `sullcrom.com` → `sullcrom-com.j
 ## Dependencies
 
 ### Production
-- `puppeteer` - Browser automation
+- `puppeteer` - Browser automation (main browser)
 - `puppeteer-extra` - Plugin system
 - `puppeteer-extra-plugin-stealth` - Anti-detection
+- `selenium-webdriver` - Browser automation (for PAGE_DOWN infinite scroll)
 - `pdf-parse` - PDF text extraction
 - `tesseract.js` - OCR text extraction
 - `winston` - Logging
@@ -897,6 +969,8 @@ Named by domain with dots replaced by dashes: `sullcrom.com` → `sullcrom-com.j
 - `googleapis` - Google Sheets export
 - `cheerio` - HTML parsing
 - `cli-table3` - CLI table output
+
+**Note**: Selenium requires Chrome browser installed. It uses the system Chrome, not a bundled version.
 
 ---
 
@@ -955,6 +1029,35 @@ node orchestrator.js --url "URL" --method config --config example-com
 node orchestrator.js --url "URL" --paginate --max-pages 50
 ```
 
+### Scraping Infinite Scroll with Selenium
+```bash
+# Use Selenium for sites that don't respond to mouse wheel
+node orchestrator.js --url "URL" --method config --config example-com --force-selenium
+
+# Customize scroll parameters
+node orchestrator.js --url "URL" --method config --config example-com --force-selenium --scroll-delay 500 --max-retries 30
+
+# Test Selenium infinite scroll directly
+node tests/selenium-infinite-scroll.test.js
+```
+
+### Creating Selenium Config for Infinite Scroll
+Add pagination section to your config:
+```json
+{
+  "pagination": {
+    "paginationType": "infinite-scroll",
+    "scrollMethod": "selenium-pagedown",
+    "scrollConfig": {
+      "maxRetries": 25,
+      "scrollDelay": 400,
+      "maxScrolls": 1000,
+      "initialWait": 5000
+    }
+  }
+}
+```
+
 ---
 
 ## Editing Guidelines for Claude
@@ -1001,6 +1104,47 @@ The infinite scroll scraper uses active mouse wheel simulation instead of passiv
 - scrollBy() guarantees scroll position actually changes
 - Rapid firing (20/second) loads pages in 10-30 seconds
 - Dual mechanism maximizes compatibility
+
+### Selenium PAGE_DOWN Scrolling
+
+For sites where mouse wheel simulation doesn't trigger infinite scroll, use Selenium with PAGE_DOWN key simulation:
+
+**When to Use Selenium**:
+- Site doesn't respond to scrollBy() or wheel events
+- Lazy loading requires actual keyboard interaction
+- Config specifies `pagination.scrollMethod: 'selenium-pagedown'`
+- Use `--force-selenium` CLI flag
+
+**Key Insight**: PAGE_DOWN key simulation fires proper keyboard events that trigger scroll event handlers more reliably than programmatic scrollBy().
+
+**Retry Counter Reset Logic**:
+```javascript
+while (retries < maxRetries) {
+  await scrollElement.sendKeys(Key.PAGE_DOWN);
+  await driver.sleep(scrollDelay);
+
+  const newHeight = await driver.executeScript('return document.body.scrollHeight');
+
+  if (newHeight > lastHeight) {
+    retries = 0;  // RESET - more content loaded
+    lastHeight = newHeight;
+  } else {
+    retries++;
+    // Every 5 failed attempts, try scroll up/down cycle
+  }
+}
+```
+
+**Files**:
+- `src/core/selenium-manager.js` - Selenium browser manager
+- `src/scrapers/config-scrapers/selenium-infinite-scroll-scraper.js` - Selenium-based scraper
+
+**CLI Flags**:
+```bash
+--force-selenium         # Use Selenium for infinite scroll
+--scroll-delay <ms>      # Delay between PAGE_DOWN presses (default: 400)
+--max-retries <n>        # Max no-change attempts (default: 25)
+```
 
 ### Two-Phase Extraction
 

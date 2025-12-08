@@ -5,11 +5,13 @@
  */
 
 const BrowserManager = require('./browser-manager');
+const SeleniumManager = require('./selenium-manager');
 const RateLimiter = require('./rate-limiter');
 const logger = require('./logger');
 
 module.exports = {
   BrowserManager,
+  SeleniumManager,
   RateLimiter,
   logger,
   // Alias for backwards compatibility

@@ -10,6 +10,7 @@ const path = require('path');
 // Import utilities from src/
 const logger = require('./src/utils/logger');
 const BrowserManager = require('./src/utils/browser-manager');
+const { SeleniumManager } = require('./src/core');
 const RateLimiter = require('./src/utils/rate-limiter');
 const DomainExtractor = require('./src/utils/domain-extractor');
 const Paginator = require('./src/features/pagination/paginator');
@@ -44,6 +45,9 @@ program
   .option('--no-export', 'Skip Google Sheets export (only output JSON)')
   .option('--scroll', 'Enable infinite scroll handling for --method config')
   .option('--max-scrolls <number>', 'Maximum scroll attempts for infinite scroll', parseInt, 50)
+  .option('--force-selenium', 'Force Selenium browser for infinite scroll (PAGE_DOWN simulation)')
+  .option('--scroll-delay <ms>', 'Selenium scroll delay in ms', parseInt, 400)
+  .option('--max-retries <number>', 'Max consecutive no-change attempts for Selenium scroll', parseInt, 25)
   .parse(process.argv);
 
 const options = program.opts();
@@ -122,7 +126,8 @@ function runPythonScraper(options) {
 // Main execution
 async function main() {
   let browserManager = null;
-  
+  let seleniumManager = null;
+
   try {
     logger.info('═══════════════════════════════════════');
     logger.info('  UNIVERSAL PROFESSIONAL SCRAPER v1.0');
@@ -172,7 +177,7 @@ async function main() {
     // Initialize components
     logger.info('Initializing components...');
     browserManager = new BrowserManager(logger);
-    browserManagerGlobal = browserManager; // FIXED: Assign to global for signal handlers
+    browserManagerGlobal = browserManager; // Assign to global for signal handlers
     const domainExtractor = new DomainExtractor(logger);
     const configLoader = new ConfigLoader(logger);
 
@@ -318,6 +323,7 @@ async function main() {
       case 'config':
         logger.info('Using config method (v2.0 config-based extraction)...');
         const ConfigScraper = require('./src/scrapers/config-scraper');
+        const { createScraper, SeleniumInfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
 
         // Load config file
         if (!options.config) {
@@ -330,13 +336,39 @@ async function main() {
 
         const configScraperInstance = new ConfigScraper(browserManager, rateLimiter, logger);
         const loadedConfig = configScraperInstance.loadConfig(options.config);
-
-        scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
         logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
 
-        // Handle infinite scroll mode
-        if (options.scroll || loadedConfig.pagination?.type === 'infinite-scroll') {
-          logger.info('Infinite scroll mode enabled');
+        // Determine if Selenium is needed for infinite scroll
+        const useSelenium = options.forceSelenium ||
+                          (loadedConfig.pagination?.scrollMethod === 'selenium-pagedown') ||
+                          (options.scroll && loadedConfig.pagination?.type === 'infinite-scroll');
+
+        if (useSelenium) {
+          // Initialize Selenium for PAGE_DOWN scrolling
+          logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
+
+          seleniumManager = new SeleniumManager(logger);
+          seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
+          await seleniumManager.launch(headless);
+
+          // Create Selenium-based scraper
+          scraper = new SeleniumInfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
+            scrollDelay: options.scrollDelay || 400,
+            maxRetries: options.maxRetries || 25,
+            maxScrolls: options.maxScrolls || 1000
+          });
+          scraper.config = loadedConfig;
+          scraper.initializeCardSelector();
+
+          logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
+        } else {
+          // Use standard Puppeteer-based scraper
+          scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
+
+          // Handle infinite scroll mode
+          if (options.scroll || loadedConfig.pagination?.type === 'infinite-scroll') {
+            logger.info('Infinite scroll mode enabled (mouse-wheel simulation)');
+          }
         }
         break;
 
@@ -612,12 +644,17 @@ async function main() {
       }
     }
 
-    // Close browser
-    await browserManager.close();
+    // Close browsers
+    if (browserManager) {
+      await browserManager.close();
+    }
+    if (seleniumManager) {
+      await seleniumManager.close();
+    }
 
     logger.info('Scraping completed successfully');
     process.exit(0);
-    
+
   } catch (error) {
     if (error.message === 'CAPTCHA_DETECTED') {
       logger.error('CAPTCHA detected! The site is blocking automated access.');
@@ -629,17 +666,21 @@ async function main() {
     } else {
       logger.error('Fatal error:', error);
     }
-    
+
     if (browserManager) {
       await browserManager.close();
     }
-    
+    if (seleniumManager) {
+      await seleniumManager.close();
+    }
+
     process.exit(1);
   }
 }
 
-// FIXED: Handle graceful shutdown with proper browser cleanup
+// Handle graceful shutdown with proper browser cleanup
 let browserManagerGlobal = null;
+let seleniumManagerGlobal = null;
 
 process.on('SIGINT', async () => {
   logger.warn('Received SIGINT, shutting down gracefully...');
@@ -648,6 +689,13 @@ process.on('SIGINT', async () => {
       await browserManagerGlobal.close();
     } catch (error) {
       logger.error(`Error closing browser during SIGINT: ${error.message}`);
+    }
+  }
+  if (seleniumManagerGlobal) {
+    try {
+      await seleniumManagerGlobal.close();
+    } catch (error) {
+      logger.error(`Error closing Selenium during SIGINT: ${error.message}`);
     }
   }
   process.exit(0);
@@ -660,6 +708,13 @@ process.on('SIGTERM', async () => {
       await browserManagerGlobal.close();
     } catch (error) {
       logger.error(`Error closing browser during SIGTERM: ${error.message}`);
+    }
+  }
+  if (seleniumManagerGlobal) {
+    try {
+      await seleniumManagerGlobal.close();
+    } catch (error) {
+      logger.error(`Error closing Selenium during SIGTERM: ${error.message}`);
     }
   }
   process.exit(0);

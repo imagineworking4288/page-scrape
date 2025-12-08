@@ -249,7 +249,7 @@ echo   FULL SCRAPE:
 echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
 echo.
 echo   # Debug mode (visible browser, keep files)
-echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_s_lastname=%2F%5BaA%5D.*%2F&custom_is_office=27567" --verbose
+echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
 echo.
 color 0A
 echo ================================================================================
