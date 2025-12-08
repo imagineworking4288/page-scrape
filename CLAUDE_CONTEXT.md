@@ -1990,3 +1990,103 @@ const result = await scraper.scrape(url, scrapingConfig.limit || 0);
 2. `document.body.scrollHeight` always gives the true page bottom position
 3. Height increase is a reliable indicator that AJAX content has been inserted
 4. Avoids the problem of viewport-relative scrolls never reaching the trigger zone
+
+---
+
+### Two-Phase Infinite Scroll Architecture (December 7)
+**Change**: Redesigned infinite scroll scraper to use two-phase architecture: fully load page first, then extract all cards in a single pass.
+
+**Problem**: The incremental extraction approach (extract → scroll → extract → scroll) was exiting prematurely:
+- Lazy-loading has unpredictable delays (sometimes loads after 1 scroll, sometimes after 3-4)
+- "3 consecutive failures = done" logic exits when content is still available but slow
+- Result: Only 30/400+ contacts extracted from Sullivan & Cromwell
+
+**Solution**: Two-phase architecture separates loading from extraction:
+
+**Phase 1 - Load All Content** (NO extraction):
+```javascript
+while (scrollCount < maxScrolls && noHeightChangeCount < maxNoChangeRetries) {
+  // Scroll to absolute bottom
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  // Wait for height to increase
+  await page.waitForFunction(
+    (oldHeight) => document.body.scrollHeight > oldHeight,
+    { timeout: contentWaitTimeout },
+    beforeHeight
+  );
+
+  // Reset retry counter on success, increment on failure
+  // Exit only after 5 consecutive failures (more forgiving than 3)
+}
+```
+
+**Phase 2 - Extract All Cards** (NO scrolling):
+```javascript
+// Find ALL cards on fully-loaded page
+const allCardElements = await this.findCardElements(page);
+const totalCards = allCardElements.length;
+
+// Extract in single pass
+for (let i = 0; i < cardsToExtract; i++) {
+  const contact = await this.extractContactFromCard(allCardElements[i], i);
+  if (contact) this.addContact(contact);
+}
+```
+
+**Files Modified**:
+- `src/scrapers/config-scrapers/infinite-scroll-scraper.js`
+  - Complete rewrite of `scrape()` method with two-phase architecture
+  - Increased retry threshold from 3 to 5 for more forgiving lazy-load handling
+  - Removed incremental extraction logic and card tracking
+  - Simplified `scrollDown()` and `waitForNewContent()` (kept for `diagnose()`)
+  - Removed `getCardIdentifier()` (no longer needed)
+
+**Architectural Benefits**:
+
+| Aspect | Before (Incremental) | After (Two-Phase) |
+|--------|---------------------|-------------------|
+| Logic | Extract → Scroll → Check → Extract | Scroll until done → Extract ALL |
+| Retry threshold | 3 consecutive failures | 5 consecutive failures |
+| Card tracking | Set of processed card IDs | None (each card processed once) |
+| Duplicate detection | During extraction | None needed |
+| Link rendering | Often incomplete | Complete (all content loaded) |
+| Exit condition | No new cards OR limit | Height stable OR limit |
+
+**Terminal Output Format**:
+```
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] PHASE 1: Loading all content via scrolling
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Scroll 1/100: Height = 3454px
+[InfiniteScrollScraper] ✓ Height increased by 2400px (3454 → 5854)
+[InfiniteScrollScraper] Scroll 2/100: Height = 5854px
+[InfiniteScrollScraper] ✓ Height increased by 2400px (5854 → 8254)
+...
+[InfiniteScrollScraper] ⚠ No height change (retry 1/5)
+[InfiniteScrollScraper] ⚠ No height change (retry 2/5)
+[InfiniteScrollScraper] ⚠ No height change (retry 3/5)
+[InfiniteScrollScraper] ⚠ No height change (retry 4/5)
+[InfiniteScrollScraper] ⚠ No height change (retry 5/5)
+[InfiniteScrollScraper] ✓ Page fully loaded (height stable after 5 retries)
+[InfiniteScrollScraper] Final page height: 45000px after 32 scrolls
+
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] PHASE 2: Extracting all contacts from loaded page
+[InfiniteScrollScraper] ═══════════════════════════════════════
+[InfiniteScrollScraper] Found 420 total cards on page
+[InfiniteScrollScraper] Extracting 80 contacts (limit: 80)
+[InfiniteScrollScraper] Extracted 10/80 contacts
+[InfiniteScrollScraper] Extracted 20/80 contacts
+...
+[InfiniteScrollScraper] Extracted 80/80 contacts
+[InfiniteScrollScraper] ✓ Extraction complete: 80 contacts
+```
+
+**Expected Improvements**:
+| Metric | Before | After |
+|--------|--------|-------|
+| Contacts extracted | 30/80 (38%) | 80/80 (100%) |
+| Exit reason | "No new cards (3 retries)" | "Contact limit reached" |
+| profileUrl success | ~23% | 90%+ |
+| Total cards found | 30 | 400+ |

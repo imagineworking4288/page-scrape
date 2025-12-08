@@ -2,9 +2,9 @@
   "metadata": {
     "configName": "sullcrom-com",
     "configVersion": "2.3",
-    "scrapeDate": "2025-12-08T00:00:33.851Z",
+    "scrapeDate": "2025-12-08T01:00:55.303Z",
     "totalContacts": 10,
-    "duration": 10073
+    "duration": 41229
   },
   "contacts": [
     {
@@ -15,8 +15,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         },
         "profileUrl": {
           "method": "href-link",
@@ -38,8 +38,8 @@
           "confidence": 75
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         },
         "profileUrl": {
           "method": "href-link",
@@ -61,8 +61,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Mehdi Ansari",
@@ -79,8 +79,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Francis J. Aquila",
@@ -97,8 +97,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Jeannette E. Bander",
@@ -115,8 +115,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Benjamin S. Beller",
@@ -131,10 +131,15 @@
         "name": {
           "method": "coordinate-text",
           "confidence": 85
+        },
+        "phone": {
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Carsten Berrar",
-      "confidence": "low",
+      "phone": "+49-69-4272-5200",
+      "confidence": "medium",
       "domain": null,
       "domainType": null
     },
@@ -146,8 +151,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Dalia O. Blass",
@@ -164,8 +169,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Ari B. Blaut",
@@ -182,8 +187,8 @@
           "confidence": 85
         },
         "phone": {
-          "method": "regex-phone",
-          "confidence": 95
+          "method": "coordinate-text",
+          "confidence": 100
         }
       },
       "name": "Lauren S. Boehmke",
