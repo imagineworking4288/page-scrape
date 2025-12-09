@@ -1515,12 +1515,28 @@ node src/tools/export-to-sheets.js --input output/scrape.json \
 node src/tools/enrich-contacts.js --input output/scrape.json --export-sheets "Sheet Name"
 ```
 
-**Environment Setup** (`.env`):
-```
-GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+**Environment Setup**:
+
+See `.env.example` for detailed setup instructions. Quick reference:
+
+1. Go to https://console.cloud.google.com/
+2. Create/select a project and enable Google Sheets API
+3. Create a Service Account and download the JSON key
+4. Copy `client_email` and `private_key` from JSON to `.env`
+5. **CRITICAL**: Share your target spreadsheet with the service account email as Editor
+
+```bash
+# .env configuration
+GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project-id.iam.gserviceaccount.com
 GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
+GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id-from-url
 ```
+
+**Credential Validation**: SheetManager validates credentials on authentication and provides helpful error messages for common issues:
+- Missing/invalid service account email
+- Missing/malformed private key
+- Placeholder spreadsheet IDs
+- Permission errors (spreadsheet not shared with service account)
 
 **Import Paths**:
 ```javascript

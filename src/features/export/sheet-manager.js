@@ -46,15 +46,63 @@ class SheetManager {
   }
 
   /**
+   * Validate credentials format and provide helpful error messages
+   * @returns {{valid: boolean, errors: string[]}}
+   */
+  validateCredentials() {
+    const errors = [];
+
+    // Check client email
+    if (!this.clientEmail || this.clientEmail.trim() === '') {
+      errors.push('GOOGLE_SHEETS_CLIENT_EMAIL is missing');
+    } else if (!this.clientEmail.includes('@') || !this.clientEmail.includes('.iam.gserviceaccount.com')) {
+      errors.push('GOOGLE_SHEETS_CLIENT_EMAIL should be a service account email (ends with .iam.gserviceaccount.com)');
+    }
+
+    // Check private key
+    if (!this.privateKey || this.privateKey.trim() === '') {
+      errors.push('GOOGLE_SHEETS_PRIVATE_KEY is missing');
+    } else if (!this.privateKey.includes('BEGIN PRIVATE KEY') || !this.privateKey.includes('END PRIVATE KEY')) {
+      errors.push('GOOGLE_SHEETS_PRIVATE_KEY format is invalid (should contain BEGIN/END PRIVATE KEY markers)');
+    }
+
+    // Check spreadsheet ID
+    if (!this.spreadsheetId || this.spreadsheetId.trim() === '') {
+      errors.push('GOOGLE_SHEETS_SPREADSHEET_ID is missing');
+    } else if (this.spreadsheetId.includes('your-spreadsheet-id') || this.spreadsheetId.length < 20) {
+      errors.push('GOOGLE_SHEETS_SPREADSHEET_ID appears to be a placeholder - use actual spreadsheet ID from URL');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
    * Authenticate with Google Sheets API using service account credentials
    * @returns {Promise<boolean>} - True if authentication successful
    */
   async authenticate() {
-    try {
-      if (!this.isConfigured()) {
-        throw new Error('Google Sheets credentials not configured. Check .env file.');
-      }
+    // Validate credentials format first
+    const validation = this.validateCredentials();
+    if (!validation.valid) {
+      const errorMsg =
+        'Google Sheets credentials validation failed:\n' +
+        validation.errors.map(e => `  - ${e}`).join('\n') +
+        '\n\nSetup instructions:\n' +
+        '  1. Go to https://console.cloud.google.com/\n' +
+        '  2. Enable Google Sheets API\n' +
+        '  3. Create Service Account and download JSON key\n' +
+        '  4. Copy client_email and private_key to .env\n' +
+        '  5. Share your spreadsheet with the service account email\n' +
+        '\nSee .env.example for required format.';
 
+      this._log('error', `[SheetManager] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
+    try {
       this.auth = new google.auth.JWT(
         this.clientEmail,
         null,
@@ -68,8 +116,27 @@ class SheetManager {
       this._log('debug', '[SheetManager] Authenticated with Google Sheets API');
       return true;
     } catch (error) {
-      this._log('error', `[SheetManager] Authentication failed: ${error.message}`);
-      throw error;
+      // Provide helpful error messages for common issues
+      let helpMessage = '';
+      if (error.message.includes('invalid_grant') || error.message.includes('Invalid JWT')) {
+        helpMessage = '\n\nPossible causes:\n' +
+          '  - Private key format is incorrect (missing \\n newlines)\n' +
+          '  - Service account credentials are expired\n' +
+          '  - Client email doesn\'t match the private key';
+      } else if (error.message.includes('Not found') || error.message.includes('404')) {
+        helpMessage = '\n\nPossible causes:\n' +
+          '  - Spreadsheet ID is incorrect\n' +
+          '  - Spreadsheet was deleted\n' +
+          '  - Service account doesn\'t have access (share spreadsheet with service account email!)';
+      } else if (error.message.includes('forbidden') || error.message.includes('403')) {
+        helpMessage = '\n\nPossible causes:\n' +
+          '  - Google Sheets API not enabled for your project\n' +
+          '  - Service account doesn\'t have Editor permissions on spreadsheet\n' +
+          '  - Share the spreadsheet with your service account email as Editor';
+      }
+
+      this._log('error', `[SheetManager] Authentication failed: ${error.message}${helpMessage}`);
+      throw new Error(`Google Sheets authentication failed: ${error.message}${helpMessage}`);
     }
   }
 
