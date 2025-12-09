@@ -1392,6 +1392,8 @@ const { compareAndMerge, compareAllFields } = require('./src/features/enrichment
 5. **Field-Level Transparency**: Added `fieldDetails` structure to enrichment metadata showing oldValue → removed → newValue for each field
 6. **Fallback Cleaning**: When profile extraction fails, name/location fields are still cleaned (removes title suffixes from names, phones from locations)
 7. **Enhanced Logging**: Added `logFieldTransformations()` for verbose debug output of ENRICHED/CLEANED/REPLACED actions
+8. **RateLimiter Constructor Fixed**: Fixed `enrich-contacts.js` to pass `logger` as first argument to `RateLimiter(logger, options)` - was passing only options causing "this.logger.debug is not a function" errors
+9. **BrowserManager Safe Logging**: Added `_log(level, message)` helper method with console fallback for robust async logging in browser event handlers
 
 **Enrichment Metadata Structure**:
 ```javascript

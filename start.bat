@@ -200,6 +200,38 @@ echo.
 echo   OUTPUT: JSON config file ready for --method select scraping
 echo.
 echo --------------------------------------------------------------------------------
+echo [ENRICH CONTACTS - POST-SCRAPE ENHANCEMENT]
+echo --------------------------------------------------------------------------------
+echo   Visits profile pages to validate, clean, and enrich scraped contacts.
+echo   Fixes contaminated names, fills missing emails, removes noise from fields.
+echo.
+echo   USAGE:
+echo     node src/tools/enrich-contacts.js --input output/scrape.json
+echo     node src/tools/enrich-contacts.js --input output/scrape.json --limit 10 --verbose
+echo     node src/tools/enrich-contacts.js --input output/scrape.json --core-fields-only
+echo.
+echo   OPTIONS:
+echo     -i, --input ^<file^>        Input JSON file from scrape (required)
+echo     -o, --output ^<file^>       Output file (default: adds -enriched suffix)
+echo     -l, --limit ^<n^>           Limit contacts to process
+echo     --delay ^<ms^>              Delay between profile visits (default: 3000)
+echo     --headless/--no-headless  Browser visibility mode
+echo     --resume-from ^<n^>         Resume from contact index
+echo     --fields ^<list^>           Comma-separated fields to enrich (name,email,phone)
+echo     --core-fields-only        Only enrich core fields (skip bio, education, etc.)
+echo     --report ^<file^>           Generate enrichment report
+echo     --report-format ^<fmt^>     Report format: json or text
+echo     -v, --verbose             Verbose logging with field transformations
+echo.
+echo   FIELD ACTIONS:
+echo     ENRICHED  - Added missing data from profile
+echo     VALIDATED - Confirmed original data matches profile
+echo     CLEANED   - Removed noise (e.g., "John DoePartner" -^> "John Doe")
+echo     REPLACED  - Original differed, using profile value (flagged for review)
+echo.
+echo   OUTPUT: Enriched JSON with _original audit trail and enrichment metadata
+echo.
+echo --------------------------------------------------------------------------------
 echo [PROJECT STRUCTURE]
 echo --------------------------------------------------------------------------------
 echo   orchestrator.js             - Main CLI entry point
@@ -247,6 +279,9 @@ echo     node orchestrator.js --url "https://www.compass.com/agents/locations/ma
 echo.
 echo   FULL SCRAPE:
 echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
+echo.
+echo   ENRICH CONTACTS:
+echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --verbose --limit 10
 echo.
 echo   # Debug mode (visible browser, keep files)
 echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose

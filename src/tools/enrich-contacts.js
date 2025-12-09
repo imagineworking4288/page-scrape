@@ -91,7 +91,7 @@ async function main() {
     await browserManager.launch(options.headless);
 
     // Initialize rate limiter
-    const rateLimiter = new RateLimiter({
+    const rateLimiter = new RateLimiter(logger, {
       minDelay: options.delay,
       maxDelay: options.delay + 2000,
       maxRetries: 2

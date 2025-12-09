@@ -11,6 +11,14 @@ class BrowserManager {
     this.navigationCount = 0;
     this.initialMemory = 0;
 
+    // Create fallback logger for console operations
+    this._safeLogger = {
+      debug: (msg) => this._log('debug', msg),
+      info: (msg) => this._log('info', msg),
+      warn: (msg) => this._log('warn', msg),
+      error: (msg) => this._log('error', msg)
+    };
+
     this.userAgents = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -23,6 +31,25 @@ class BrowserManager {
     ];
   }
 
+  /**
+   * Safe logger helper - checks if logger exists and has the method
+   * Falls back to console if logger is unavailable
+   * @param {string} level - Log level (debug, info, warn, error)
+   * @param {string} message - Message to log
+   */
+  _log(level, message) {
+    if (this.logger && typeof this.logger[level] === 'function') {
+      this.logger[level](message);
+    } else if (this.logger && typeof this.logger.info === 'function') {
+      // Fallback to info if specific level not available
+      this.logger.info(message);
+    } else {
+      // Fallback to console
+      const consoleFn = console[level] || console.log;
+      consoleFn(message);
+    }
+  }
+
   async launch(headless = true) {
     try {
       if (headless === 'false' || headless === false) {
@@ -31,7 +58,7 @@ class BrowserManager {
         headless = true;
       }
 
-      this.logger.info('Launching browser with stealth configuration...');
+      this._log('info', 'Launching browser with stealth configuration...');
 
       this.browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
@@ -64,12 +91,12 @@ class BrowserManager {
 
       this.initialMemory = process.memoryUsage().heapUsed;
 
-      this.logger.info('Browser launched successfully');
-      this.logger.info(`Headless mode: ${headless}`);
-      this.logger.info('CSP bypass enabled');
+      this._log('info', 'Browser launched successfully');
+      this._log('info', `Headless mode: ${headless}`);
+      this._log('info', 'CSP bypass enabled');
       return true;
     } catch (error) {
-      this.logger.error(`Failed to launch browser: ${error.message}`);
+      this._log('error', `Failed to launch browser: ${error.message}`);
       throw error;
     }
   }
@@ -91,9 +118,9 @@ class BrowserManager {
       // Log other messages at appropriate level
       const type = msg.type();
       if (type === 'error') {
-        this.logger.debug(`[Browser Console Error] ${text}`);
+        this._log('debug', `[Browser Console Error] ${text}`);
       } else if (type === 'warning') {
-        this.logger.debug(`[Browser Console Warning] ${text}`);
+        this._log('debug', `[Browser Console Warning] ${text}`);
       }
     });
   }
@@ -102,7 +129,7 @@ class BrowserManager {
     try {
       await this.checkMemoryAndRecycle();
 
-      this.logger.info(`Navigating to: ${url}`);
+      this._log('info', `Navigating to: ${url}`);
 
       await this.page.goto(url, {
         waitUntil: 'networkidle2',
@@ -120,11 +147,11 @@ class BrowserManager {
       return true;
     } catch (error) {
       if (error.name === 'TimeoutError') {
-        this.logger.warn(`Navigation timeout for ${url}`);
+        this._log('warn', `Navigation timeout for ${url}`);
       } else if (error.message.includes('CAPTCHA_DETECTED')) {
         throw error;
       } else {
-        this.logger.error(`Navigation failed for ${url}: ${error.message}`);
+        this._log('error', `Navigation failed for ${url}: ${error.message}`);
       }
       throw error;
     }
@@ -145,7 +172,7 @@ class BrowserManager {
 
       for (const keyword of captchaKeywords) {
         if (pageText.includes(keyword)) {
-          this.logger.error(`CAPTCHA detected on ${url} (keyword: "${keyword}")`);
+          this._log('error', `CAPTCHA detected on ${url} (keyword: "${keyword}")`);
           const error = new Error('CAPTCHA_DETECTED');
           error.url = url;
           throw error;
@@ -155,7 +182,7 @@ class BrowserManager {
       if (error.message === 'CAPTCHA_DETECTED') {
         throw error;
       }
-      this.logger.debug(`Could not check for CAPTCHA: ${error.message}`);
+      this._log('debug', `Could not check for CAPTCHA: ${error.message}`);
     }
   }
 
@@ -164,7 +191,7 @@ class BrowserManager {
     const memoryGrowthMB = (currentMemory - this.initialMemory) / 1024 / 1024;
 
     if (this.navigationCount >= 50 || memoryGrowthMB >= 1024) {
-      this.logger.info(`Recycling page - Navigations: ${this.navigationCount}, Memory growth: ${memoryGrowthMB.toFixed(2)}MB`);
+      this._log('info', `Recycling page - Navigations: ${this.navigationCount}, Memory growth: ${memoryGrowthMB.toFixed(2)}MB`);
 
       await this.page.close();
       this.page = await this.browser.newPage();
@@ -182,7 +209,7 @@ class BrowserManager {
 
       if (global.gc) {
         global.gc();
-        this.logger.debug('Forced garbage collection');
+        this._log('debug', 'Forced garbage collection');
       }
     }
   }
@@ -193,7 +220,7 @@ class BrowserManager {
     const heapTotalMB = (memUsage.heapTotal / 1024 / 1024).toFixed(2);
     const rssMB = (memUsage.rss / 1024 / 1024).toFixed(2);
 
-    this.logger.info(`Memory - Heap: ${heapUsedMB}/${heapTotalMB}MB, RSS: ${rssMB}MB, Navigations: ${this.navigationCount}`);
+    this._log('info', `Memory - Heap: ${heapUsedMB}/${heapTotalMB}MB, RSS: ${rssMB}MB, Navigations: ${this.navigationCount}`);
   }
 
   getPage() {
@@ -207,10 +234,10 @@ class BrowserManager {
     try {
       if (this.browser) {
         await this.browser.close();
-        this.logger.info('Browser closed successfully');
+        this._log('info', 'Browser closed successfully');
       }
     } catch (error) {
-      this.logger.error(`Error closing browser: ${error.message}`);
+      this._log('error', `Error closing browser: ${error.message}`);
     }
   }
 }
