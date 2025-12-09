@@ -1389,3 +1389,59 @@ const { compareAndMerge, compareAllFields } = require('./src/features/enrichment
 2. **Report Statistics Fixed**: Report generator now checks both `contact.enrichment` and `contact._enrichment` for compatibility
 3. **Confidence Handling Fixed**: Handles confidence as both object `{overall: 'high'}` and string `'high'`
 4. **Action Counting Fixed**: Properly counts actions from `{field: action}` object structure
+5. **Field-Level Transparency**: Added `fieldDetails` structure to enrichment metadata showing oldValue → removed → newValue for each field
+6. **Fallback Cleaning**: When profile extraction fails, name/location fields are still cleaned (removes title suffixes from names, phones from locations)
+7. **Enhanced Logging**: Added `logFieldTransformations()` for verbose debug output of ENRICHED/CLEANED/REPLACED actions
+
+**Enrichment Metadata Structure**:
+```javascript
+{
+  enrichedAt: '2025-12-09T...',
+  profileVisited: true,
+  profileUrl: 'https://...',
+  actions: {
+    name: 'CLEANED',
+    email: 'ENRICHED',
+    phone: 'VALIDATED',
+    title: 'ENRICHED',
+    location: 'CLEANED'
+  },
+  fieldDetails: {
+    name: {
+      oldValue: 'Arthur S. AdlerPartner',
+      removed: ['title: Partner'],
+      newValue: 'Arthur S. Adler',
+      action: 'CLEANED',
+      source: 'profile'
+    },
+    email: {
+      oldValue: null,
+      removed: [],
+      newValue: 'aadler@sullcrom.com',
+      action: 'ENRICHED',
+      source: 'profile'
+    }
+    // ... other fields
+  },
+  removed: ['title: Partner from name', 'phone: +1-212-558-3960 from location'],
+  confidence: {
+    overall: 'high',
+    fields: { name: 'high', email: 'high', phone: 'high' }
+  }
+}
+```
+
+**Fallback Cleaning** (when profile extraction fails):
+```javascript
+// Even if profile page fails to load, we still clean:
+// 1. Name: Remove embedded title suffixes ("John DoePartner" → "John Doe")
+// 2. Location: Remove phone numbers ("New York\n+1-212-558-3960" → "New York")
+// 3. Extract title from name if contact has no title
+
+// Metadata includes:
+{
+  fallbackCleaning: true,
+  fallbackActions: { name: 'CLEANED', title: 'ENRICHED', location: 'CLEANED' },
+  fieldDetails: { ... }
+}
+```

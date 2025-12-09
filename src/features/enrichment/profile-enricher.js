@@ -233,14 +233,23 @@ class ProfileEnricher {
 
     if (!profileResult.success) {
       this.stats.failed++;
+
+      // FALLBACK CLEANING: Even when profile extraction fails,
+      // apply basic cleaning to name and location fields
+      const fallbackResult = this.applyFallbackCleaning(contact);
+
       return {
-        ...contact,
+        ...fallbackResult.contact,
         enrichment: {
           enrichedAt: new Date().toISOString(),
           profileVisited: true,
           profileUrl: contact.profileUrl,
-          error: profileResult.error
-        }
+          error: profileResult.error,
+          fallbackCleaning: true,
+          fallbackActions: fallbackResult.actions,
+          fieldDetails: fallbackResult.fieldDetails
+        },
+        _original: fallbackResult.original
       };
     }
 
@@ -266,6 +275,9 @@ class ProfileEnricher {
 
     // Update statistics
     this.updateStats(comparisons);
+
+    // Enhanced debug logging for field transformations
+    this.logFieldTransformations(contact, comparisons);
 
     // Record timing
     const profileTime = Date.now() - profileStartTime;
@@ -299,9 +311,28 @@ class ProfileEnricher {
   buildEnrichmentMetadata(comparisons, originalContact, profileFields) {
     const actions = {};
     const removed = [];
+    const fieldDetails = {};
 
     for (const [field, comparison] of Object.entries(comparisons)) {
       actions[field] = comparison.action;
+
+      // Build detailed field breakdown
+      fieldDetails[field] = {
+        oldValue: comparison.originalValue || originalContact[field] || null,
+        removed: comparison.removedNoise || [],
+        newValue: comparison.value,
+        action: comparison.action,
+        source: comparison.action === 'ENRICHED' ? 'profile' :
+                comparison.action === 'VALIDATED' ? 'original' :
+                comparison.action === 'CLEANED' ? 'profile' :
+                comparison.action === 'REPLACED' ? 'profile' :
+                comparison.action === 'UNCHANGED' ? 'original' : 'unknown'
+      };
+
+      // Add note if title was extracted from name
+      if (field === 'title' && comparison.extracted) {
+        fieldDetails[field].note = 'Extracted from name suffix';
+      }
 
       if (comparison.removedNoise) {
         for (const noise of comparison.removedNoise) {
@@ -315,6 +346,7 @@ class ProfileEnricher {
       profileVisited: true,
       profileUrl: originalContact.profileUrl,
       actions,
+      fieldDetails,
       removed: removed.length > 0 ? removed : undefined,
       flags: fieldComparator.getFlags(comparisons),
       needsReview: fieldComparator.needsManualReview(comparisons),
@@ -375,6 +407,101 @@ class ProfileEnricher {
           break;
       }
     }
+  }
+
+  /**
+   * Log field transformations for debugging
+   * @param {Object} contact - Original contact
+   * @param {Object} comparisons - Field comparisons
+   */
+  logFieldTransformations(contact, comparisons) {
+    const significantActions = ['ENRICHED', 'CLEANED', 'REPLACED'];
+    const transforms = [];
+
+    for (const [field, comp] of Object.entries(comparisons)) {
+      if (significantActions.includes(comp.action)) {
+        const oldVal = comp.originalValue || contact[field] || '(empty)';
+        const newVal = comp.value || '(empty)';
+        const removed = comp.removedNoise ? ` [removed: ${comp.removedNoise.join(', ')}]` : '';
+
+        transforms.push(`  ${field}: ${comp.action} "${oldVal}" → "${newVal}"${removed}`);
+      }
+    }
+
+    if (transforms.length > 0) {
+      this.logger.debug(`[ProfileEnricher] Field transformations for ${contact.name || 'Unknown'}:`);
+      for (const t of transforms) {
+        this.logger.debug(t);
+      }
+    }
+  }
+
+  /**
+   * Apply fallback cleaning when profile extraction fails
+   * Cleans name (removes title suffixes) and location (removes phones)
+   * @param {Object} contact - Original contact
+   * @returns {Object} - { contact, actions, fieldDetails, original }
+   */
+  applyFallbackCleaning(contact) {
+    const cleanedContact = { ...contact };
+    const actions = {};
+    const fieldDetails = {};
+    const original = {};
+
+    // Clean name: Remove embedded titles
+    if (contact.name) {
+      const nameResult = cleaners.cleanName(contact.name);
+      if (nameResult.wasContaminated) {
+        original.name = contact.name;
+        cleanedContact.name = nameResult.cleaned;
+        actions.name = 'CLEANED';
+        fieldDetails.name = {
+          oldValue: contact.name,
+          removed: nameResult.extractedTitle ? [`title: ${nameResult.extractedTitle}`] : [],
+          newValue: nameResult.cleaned,
+          action: 'CLEANED',
+          source: 'fallback_cleaning'
+        };
+
+        // If title was extracted, use it if contact has no title
+        if (nameResult.extractedTitle && !contact.title) {
+          cleanedContact.title = nameResult.extractedTitle;
+          actions.title = 'ENRICHED';
+          fieldDetails.title = {
+            oldValue: null,
+            removed: [],
+            newValue: nameResult.extractedTitle,
+            action: 'ENRICHED',
+            source: 'fallback_cleaning',
+            note: 'Extracted from name during fallback cleaning'
+          };
+        }
+      }
+    }
+
+    // Clean location: Remove phone numbers
+    if (contact.location) {
+      const locationResult = cleaners.cleanLocation(contact.location, contact.phone ? [contact.phone] : []);
+      if (locationResult.removedNoise.length > 0 && locationResult.cleaned) {
+        original.location = contact.location;
+        cleanedContact.location = locationResult.cleaned;
+        actions.location = 'CLEANED';
+        fieldDetails.location = {
+          oldValue: contact.location,
+          removed: locationResult.removedNoise,
+          newValue: locationResult.cleaned,
+          action: 'CLEANED',
+          source: 'fallback_cleaning'
+        };
+      }
+    }
+
+    return {
+      contact: cleanedContact,
+      actions,
+      fieldDetails,
+      original: Object.keys(original).length > 0 ? original : undefined
+    };
   }
 
   /**
