@@ -5,9 +5,9 @@ const DomainExtractor = require('../src/utils/domain-extractor');
 const { Command } = require('commander');
 
 // Real imports for live testing
-const logger = require('../src/utils/logger');
-const BrowserManager = require('../src/utils/browser-manager');
-const RateLimiter = require('../src/utils/rate-limiter');
+const logger = require('../src/core/logger');
+const BrowserManager = require('../src/core/browser-manager');
+const RateLimiter = require('../src/core/rate-limiter');
 
 // Mock logger for unit tests (silent logger to avoid console clutter during tests)
 class MockLogger {

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 const { Command } = require('commander');
-const BrowserManager = require('../src/utils/browser-manager');
-const RateLimiter = require('../src/utils/rate-limiter');
-const ConfigLoader = require('../src/utils/config-loader');
+const BrowserManager = require('../src/core/browser-manager');
+const RateLimiter = require('../src/core/rate-limiter');
+const ConfigLoader = require('../src/config/config-loader');
 const Paginator = require('../src/features/pagination/paginator');
 const SelectScraper = require('../src/scrapers/select-scraper');
-const logger = require('../src/utils/logger');
+const logger = require('../src/core/logger');
 
 const program = new Command();
 program

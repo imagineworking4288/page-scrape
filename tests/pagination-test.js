@@ -28,10 +28,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Import utilities
-const logger = require('../src/utils/logger');
-const BrowserManager = require('../src/utils/browser-manager');
-const RateLimiter = require('../src/utils/rate-limiter');
-const ConfigLoader = require('../src/utils/config-loader');
+const logger = require('../src/core/logger');
+const BrowserManager = require('../src/core/browser-manager');
+const RateLimiter = require('../src/core/rate-limiter');
+const ConfigLoader = require('../src/config/config-loader');
 const Paginator = require('../src/features/pagination/paginator');
 
 // CLI setup

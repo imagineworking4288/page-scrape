@@ -33,12 +33,12 @@ This document provides comprehensive context for Claude when editing this projec
 | `package-lock.json` | Locked dependency versions |
 | `README.md` | Project documentation for users |
 | `CLAUDE_CONTEXT.md` | This file - comprehensive documentation for Claude |
+| `PROJECT-CLEANUP-ANALYSIS.md` | December 2025 project cleanup analysis |
 | `.env` | Environment variables (API keys, settings) |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Git ignore patterns |
 | `start.bat` | Windows batch script for quick startup |
 | `eng.traineddata` | Tesseract OCR English language data |
-| `cleanup-analysis.txt` | Analysis notes from code cleanup |
 
 ### Directory Structure
 
@@ -103,17 +103,13 @@ page-scrape/
 │   │       ├── binary-searcher.js  # True max page finder
 │   │       └── url-generator.js    # Page URL generation
 │   │
-│   ├── utils/                  # Utilities (legacy + active)
-│   │   ├── browser-manager.js  # [Legacy - prefer src/core/]
-│   │   ├── config-loader.js    # [Legacy - prefer src/config/]
-│   │   ├── logger.js           # [Legacy - prefer src/core/]
-│   │   ├── rate-limiter.js     # [Legacy - prefer src/core/]
-│   │   ├── contact-extractor.js # Shared extraction logic (active)
-│   │   ├── domain-extractor.js # Email domain classification (active)
-│   │   ├── text-parser.js      # Text-to-contact parsing (active)
-│   │   ├── profile-visitor.js  # Profile page enrichment (active)
-│   │   ├── google-sheets-exporter.js # Google Sheets export (active)
-│   │   └── constants.js        # Shared constants (active)
+│   ├── utils/                  # Active utilities
+│   │   ├── contact-extractor.js # Shared extraction logic
+│   │   ├── domain-extractor.js # Email domain classification
+│   │   ├── text-parser.js      # Text-to-contact parsing
+│   │   ├── profile-visitor.js  # Profile page enrichment
+│   │   ├── google-sheets-exporter.js # Google Sheets export
+│   │   └── constants.js        # Shared constants
 │   │
 │   └── tools/                  # Development/utility tools
 │       ├── config-generator.js # Interactive config creator (v2.3)
@@ -128,21 +124,15 @@ page-scrape/
 │           ├── element-capture.js     # Element selection
 │           ├── config-builder.js      # v2.3 Config assembly
 │           ├── extraction-tester.js   # v2.3 Multi-method testing
-│           ├── email-extractor.js     # Email extraction for config gen
-│           ├── phone-extractor.js     # Phone extraction for config gen
-│           ├── link-extractor.js      # Link extraction for config gen
-│           ├── label-extractor.js     # Label extraction for config gen
-│           ├── screenshot-extractor.js # OCR extraction for config gen
-│           ├── coordinate-extractor.js # Coordinate extraction
 │           ├── config-schemas.js      # v2.3 schema definitions
-│           ├── smart-field-extractor.js # Smart field detection
-│           ├── multi-method-extractor.js # Multi-method extraction
 │           ├── card-matcher.js        # Card similarity matching
 │           ├── enhanced-capture.js    # Enhanced element capture
 │           ├── profile-enrichment.js  # Profile page enrichment
 │           ├── config-validator.js    # Config validation
 │           ├── test-orchestrator.js   # Test orchestration
 │           ├── test-reporter.js       # Test result reporting
+│           ├── constants/             # Field requirement constants
+│           │   └── field-requirements.js
 │           └── pagination-diagnostic.js # Pagination diagnosis
 │
 ├── tests/                      # Test files
@@ -151,7 +141,6 @@ page-scrape/
 │   ├── pagination-test.js      # Pagination tests
 │   ├── pagination-integration-test.js # Integration tests
 │   ├── pdf-scraper-test.js     # PDF scraper tests
-│   ├── v22-integration.test.js # v2.2 integration tests
 │   ├── selenium-infinite-scroll.test.js # Selenium infinite scroll tests
 │   └── test-utils.js           # Test utilities
 │
@@ -860,7 +849,6 @@ node src/tools/test-config.js example-com --limit 10 --verbose --show
 | `pagination-test.js` | Pagination tests - pattern detection, URL generation |
 | `pagination-integration-test.js` | Integration tests for pagination |
 | `pdf-scraper-test.js` | PDF scraper tests |
-| `v22-integration.test.js` | v2.2 integration tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
 | `test-utils.js` | Test utilities and helpers |
 
@@ -1074,6 +1062,27 @@ Add pagination section to your config:
 ---
 
 ## Architecture Notes
+
+### Module Organization (December 2025 Cleanup)
+
+The project uses canonical module paths:
+
+**Core Infrastructure** (`src/core/`):
+- `browser-manager.js` - Puppeteer browser management
+- `logger.js` - Winston logging
+- `rate-limiter.js` - Request throttling
+- `selenium-manager.js` - Selenium WebDriver for infinite scroll
+
+**Configuration** (`src/config/`):
+- `config-loader.js` - Site config loading/validation
+- `schemas.js` - v2.3 schema definitions
+
+**Extraction** (`src/extraction/`):
+- `extractors/` - Individual field extractors (email, phone, link, label, screenshot, coordinate)
+- `multi-method-extractor.js` - Multi-method runtime extractor
+- `smart-field-extractor.js` - Smart field detection
+
+**Note**: Legacy duplicates in `src/utils/` and `src/tools/lib/` were removed. All imports should use the canonical paths above.
 
 ### Infinite Scroll Implementation (Selenium PAGE_DOWN Only)
 

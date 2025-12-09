@@ -18,7 +18,7 @@ process.chdir(path.join(__dirname, '..'));
 
 const { SeleniumManager } = require('../src/core');
 const { InfiniteScrollScraper } = require('../src/scrapers/config-scrapers');
-const logger = require('../src/utils/logger');
+const logger = require('../src/core/logger');
 
 // Test URL - Sullivan & Cromwell lawyer listing (all lawyers)
 const TEST_URL = 'https://www.sullcrom.com/LawyerListing?custom_is_office=27567';

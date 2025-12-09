@@ -8,13 +8,13 @@ const fs = require('fs');
 const path = require('path');
 
 // Import utilities from src/
-const logger = require('./src/utils/logger');
-const BrowserManager = require('./src/utils/browser-manager');
+const logger = require('./src/core/logger');
+const BrowserManager = require('./src/core/browser-manager');
 const { SeleniumManager } = require('./src/core');
-const RateLimiter = require('./src/utils/rate-limiter');
+const RateLimiter = require('./src/core/rate-limiter');
 const DomainExtractor = require('./src/utils/domain-extractor');
 const Paginator = require('./src/features/pagination/paginator');
-const ConfigLoader = require('./src/utils/config-loader');
+const ConfigLoader = require('./src/config/config-loader');
 const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 
 // Import scrapers from src/

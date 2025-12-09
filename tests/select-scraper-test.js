@@ -3,11 +3,11 @@
  */
 
 const assert = require('assert');
-const ConfigLoader = require('../src/utils/config-loader');
+const ConfigLoader = require('../src/config/config-loader');
 const TextParser = require('../src/utils/text-parser');
-const logger = require('../src/utils/logger');
-const BrowserManager = require('../src/utils/browser-manager');
-const RateLimiter = require('../src/utils/rate-limiter');
+const logger = require('../src/core/logger');
+const BrowserManager = require('../src/core/browser-manager');
+const RateLimiter = require('../src/core/rate-limiter');
 const SelectScraper = require('../src/scrapers/select-scraper');
 
 // Test URLs

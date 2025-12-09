@@ -5,12 +5,13 @@
  * Tests all applicable methods for a field and returns top 5 for user validation.
  */
 
-const ScreenshotExtractor = require('./screenshot-extractor');
-const CoordinateExtractor = require('./coordinate-extractor');
-const EmailExtractor = require('./email-extractor');
-const PhoneExtractor = require('./phone-extractor');
-const LinkExtractor = require('./link-extractor');
-const LabelExtractor = require('./label-extractor');
+// Use canonical extraction modules
+const ScreenshotExtractor = require('../../extraction/extractors/screenshot-extractor');
+const CoordinateExtractor = require('../../extraction/extractors/coordinate-extractor');
+const EmailExtractor = require('../../extraction/extractors/email-extractor');
+const PhoneExtractor = require('../../extraction/extractors/phone-extractor');
+const LinkExtractor = require('../../extraction/extractors/link-extractor');
+const LabelExtractor = require('../../extraction/extractors/label-extractor');
 const { EXTRACTION_METHODS, FIELD_METADATA } = require('./config-schemas');
 
 class ExtractionTester {

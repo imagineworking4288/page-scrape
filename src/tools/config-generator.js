@@ -17,11 +17,11 @@ require('dotenv').config();
 const { Command } = require('commander');
 const path = require('path');
 
-// Import existing utilities
-const logger = require('../utils/logger');
-const BrowserManager = require('../utils/browser-manager');
-const RateLimiter = require('../utils/rate-limiter');
-const ConfigLoader = require('../utils/config-loader');
+// Import core utilities
+const logger = require('../core/logger');
+const BrowserManager = require('../core/browser-manager');
+const RateLimiter = require('../core/rate-limiter');
+const ConfigLoader = require('../config/config-loader');
 
 // Import tool-specific modules
 const InteractiveSession = require('./lib/interactive-session');

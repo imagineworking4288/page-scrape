@@ -4,7 +4,6 @@ logs
 output
 .claude
 configs/website-configs/
-
 # Tesseract OCR cache (default location in node_modules)
 node_modules/.cache/
 

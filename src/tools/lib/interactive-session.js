@@ -32,7 +32,7 @@ const { URL } = require('url');
 const ConfigBuilder = require('./config-builder');
 const ConfigValidator = require('./config-validator');
 const CardMatcher = require('./card-matcher');
-const SmartFieldExtractor = require('./smart-field-extractor');
+const SmartFieldExtractor = require('../../extraction/smart-field-extractor');
 const EnhancedCapture = require('./enhanced-capture');
 const ElementCapture = require('./element-capture');
 

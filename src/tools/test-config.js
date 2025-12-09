@@ -16,13 +16,13 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs').promises;
 const path = require('path');
 
-// v2.3 extractors
-const ScreenshotExtractor = require('./lib/screenshot-extractor');
-const CoordinateExtractor = require('./lib/coordinate-extractor');
-const EmailExtractor = require('./lib/email-extractor');
-const PhoneExtractor = require('./lib/phone-extractor');
-const LinkExtractor = require('./lib/link-extractor');
-const LabelExtractor = require('./lib/label-extractor');
+// v2.3 extractors - use canonical extraction modules
+const ScreenshotExtractor = require('../extraction/extractors/screenshot-extractor');
+const CoordinateExtractor = require('../extraction/extractors/coordinate-extractor');
+const EmailExtractor = require('../extraction/extractors/email-extractor');
+const PhoneExtractor = require('../extraction/extractors/phone-extractor');
+const LinkExtractor = require('../extraction/extractors/link-extractor');
+const LabelExtractor = require('../extraction/extractors/label-extractor');
 
 puppeteer.use(StealthPlugin());
 

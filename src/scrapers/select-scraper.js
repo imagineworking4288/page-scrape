@@ -4,7 +4,7 @@
  */
 
 const BaseScraper = require('./base-scraper');
-const ConfigLoader = require('../utils/config-loader');
+const ConfigLoader = require('../config/config-loader');
 const TextParser = require('../utils/text-parser');
 const ContactExtractor = require('../utils/contact-extractor');
 
