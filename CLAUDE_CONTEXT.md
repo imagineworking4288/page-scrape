@@ -19,6 +19,7 @@ This document provides comprehensive context for Claude when editing this projec
 - **Domain classification**: Identifies business vs personal email domains
 - **OCR extraction**: Tesseract.js-based screenshot text extraction
 - **Multiple output formats**: JSON, CSV, Google Sheets export
+- **Profile enrichment**: Post-scrape validation and enrichment using profile pages
 
 ---
 
@@ -33,7 +34,6 @@ This document provides comprehensive context for Claude when editing this projec
 | `package-lock.json` | Locked dependency versions |
 | `README.md` | Project documentation for users |
 | `CLAUDE_CONTEXT.md` | This file - comprehensive documentation for Claude |
-| `PROJECT-CLEANUP-ANALYSIS.md` | December 2025 project cleanup analysis |
 | `.env` | Environment variables (API keys, settings) |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Git ignore patterns |
@@ -96,12 +96,26 @@ page-scrape/
 │   │       └── pagination-scraper.js      # Traditional pagination
 │   │
 │   ├── features/
-│   │   └── pagination/         # Pagination subsystem
+│   │   ├── index.js            # Features exports
+│   │   ├── pagination/         # Pagination subsystem
+│   │   │   ├── index.js        # Exports
+│   │   │   ├── paginator.js    # Main pagination orchestrator
+│   │   │   ├── pattern-detector.js # Pattern discovery
+│   │   │   ├── binary-searcher.js  # True max page finder
+│   │   │   └── url-generator.js    # Page URL generation
+│   │   │
+│   │   └── enrichment/         # Profile enrichment system
 │   │       ├── index.js        # Exports
-│   │       ├── paginator.js    # Main pagination orchestrator
-│   │       ├── pattern-detector.js # Pattern discovery
-│   │       ├── binary-searcher.js  # True max page finder
-│   │       └── url-generator.js    # Page URL generation
+│   │       ├── profile-enricher.js  # Main enrichment orchestrator
+│   │       ├── profile-extractor.js # Profile page extraction
+│   │       ├── field-comparator.js  # Field comparison logic
+│   │       ├── report-generator.js  # Enrichment report generation
+│   │       └── cleaners/       # Field cleaning modules
+│   │           ├── index.js
+│   │           ├── name-cleaner.js      # Remove title suffixes from names
+│   │           ├── location-cleaner.js  # Remove phones from locations
+│   │           ├── title-extractor.js   # Extract/normalize titles
+│   │           └── noise-detector.js    # Detect duplicate/leaked data
 │   │
 │   ├── utils/                  # Active utilities
 │   │   ├── contact-extractor.js # Shared extraction logic
@@ -737,6 +751,40 @@ node src/tools/test-config.js sullcrom-com --limit 5
 node src/tools/test-config.js example-com --limit 10 --verbose --show
 ```
 
+#### src/tools/enrich-contacts.js
+
+**Purpose**: CLI tool to enrich scraped contacts using profile page data.
+
+**Usage**:
+```bash
+# Basic usage
+node src/tools/enrich-contacts.js --input output/scrape.json
+
+# With options
+node src/tools/enrich-contacts.js --input output/scrape.json --limit 10 --verbose
+
+# Resume from specific contact
+node src/tools/enrich-contacts.js --input output/scrape.json --resume-from 50
+
+# Output manual review queue
+node src/tools/enrich-contacts.js --input output/scrape.json --review-output output/review.json
+```
+
+**CLI Options**:
+- `-i, --input <file>` - Input JSON file (required)
+- `-o, --output <file>` - Output file (default: adds `-enriched` suffix)
+- `-l, --limit <n>` - Limit contacts to process
+- `--delay <ms>` - Delay between profile visits (default: 3000)
+- `--headless/--no-headless` - Browser visibility mode
+- `--validate-only` - Only validate, don't enrich
+- `--resume-from <n>` - Resume from contact index
+- `--save-every <n>` - Save progress every N contacts (default: 50)
+- `--skip-errors/--no-skip-errors` - Continue on errors
+- `--review-output <file>` - Output manual review queue
+- `--report <file>` - Generate enrichment report to file
+- `--report-format <format>` - Report format: `json` or `text` (default: text)
+- `-v, --verbose` - Verbose logging (also prints report summary)
+
 #### src/tools/site-tester.js
 
 **Purpose**: Site testing utility for debugging extraction issues.
@@ -850,11 +898,13 @@ node src/tools/test-config.js example-com --limit 10 --verbose --show
 | `pagination-integration-test.js` | Integration tests for pagination |
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
+| `enrichment-test.js` | Profile enrichment system tests (68 test cases) |
 | `test-utils.js` | Test utilities and helpers |
 
 **Run Tests**:
 - `npm test` - Run basic scraper tests
 - `node tests/selenium-infinite-scroll.test.js` - Test Selenium infinite scroll
+- `node tests/enrichment-test.js` - Test enrichment cleaners and comparators
 
 ---
 
@@ -1031,6 +1081,27 @@ Add pagination section to your config:
 
 **Note**: The `scrollMethod` field is no longer required. All infinite scroll uses Selenium PAGE_DOWN simulation (the only reliable method).
 
+### Enriching Scraped Contacts
+```bash
+# Enrich all contacts with profile page data
+node src/tools/enrich-contacts.js --input output/scrape.json
+
+# Test with limited contacts first
+node src/tools/enrich-contacts.js --input output/scrape.json --limit 10 --verbose
+
+# Resume from a specific contact (if interrupted)
+node src/tools/enrich-contacts.js --input output/scrape.json --resume-from 100
+
+# Output contacts needing manual review
+node src/tools/enrich-contacts.js --input output/scrape.json --review-output output/review.json
+```
+
+### Testing Enrichment System
+```bash
+# Run all enrichment tests (68 test cases)
+node tests/enrichment-test.js
+```
+
 ---
 
 ## Editing Guidelines for Claude
@@ -1200,4 +1271,95 @@ config.fields.email
 
 // WRONG (v2.1/v2.2 style):
 config.fieldExtraction.fields.email
+```
+
+### Profile Enrichment System (December 2025)
+
+The enrichment system validates and fills missing data by visiting profile pages after scraping.
+
+**Problem Solved**: Scraped contacts often have:
+- Missing emails (listing page doesn't show them)
+- Contaminated names (e.g., "Arthur S. AdlerPartner")
+- Phone numbers leaked into location fields
+- Missing titles
+
+**Solution**: Profile page data is treated as "source of truth" to clean and enrich contacts.
+
+**Module Architecture**:
+
+```
+src/features/enrichment/
+├── profile-enricher.js      # Main orchestrator
+├── profile-extractor.js     # Multi-strategy profile extraction
+├── field-comparator.js      # Comparison logic (6 actions)
+└── cleaners/
+    ├── name-cleaner.js      # Remove title suffixes
+    ├── location-cleaner.js  # Remove phones from locations
+    ├── title-extractor.js   # Extract/normalize titles
+    └── noise-detector.js    # Detect duplicate/leaked data
+```
+
+**Field Comparison Actions**:
+1. `ENRICHED` - Original missing, profile has data
+2. `VALIDATED` - Exact match between original and profile
+3. `CLEANED` - Original contaminated, profile has clean version
+4. `REPLACED` - Mismatch, profile wins (flagged for review)
+5. `UNCHANGED` - Original exists, profile missing
+6. `BOTH_MISSING` - Neither has data
+
+**Profile Extraction Strategies** (tried in order):
+1. Semantic HTML (`<a href="mailto:...">`, `<a href="tel:...">`)
+2. Structured data (JSON-LD, `<script type="application/ld+json">`)
+3. Label-based (e.g., "Email: john@example.com")
+4. vCard data if present
+5. Meta tags (og:email, etc.)
+
+**Name Cleaning Examples**:
+```javascript
+cleanName('Arthur S. AdlerPartner')
+// → { cleaned: 'Arthur S. Adler', extractedTitle: 'Partner', wasContaminated: true }
+
+cleanName('Jane DoeOf Counsel')
+// → { cleaned: 'Jane Doe', extractedTitle: 'Of Counsel', wasContaminated: true }
+```
+
+**Location Cleaning Examples**:
+```javascript
+cleanLocation('New York\n +1-212-558-3960', ['+1-212-558-3960'])
+// → { cleaned: 'New York', removedNoise: ['+1-212-558-3960'] }
+
+cleanLocation('New York\nFrankfurt')
+// → { cleaned: 'New York', isMultiLocation: true, locations: ['New York', 'Frankfurt'] }
+```
+
+**Enriched Contact Structure**:
+```javascript
+{
+  name: 'Arthur S. Adler',           // Cleaned
+  email: 'aadler@sullcrom.com',      // Enriched from profile
+  phone: '+1-212-558-3960',          // Validated
+  location: 'New York',              // Cleaned (phone removed)
+  title: 'Partner',                  // Enriched from profile
+  profileUrl: 'https://...',         // Original
+  _original: {                       // Audit trail
+    name: 'Arthur S. AdlerPartner',
+    location: 'New York\n +1-212-558-3960'
+  },
+  _enrichment: {
+    enrichedAt: '2025-12-09T...',
+    actions: { CLEANED: 2, ENRICHED: 2, VALIDATED: 1 },
+    confidence: 'high'
+  }
+}
+```
+
+**CLI Usage**:
+```bash
+node src/tools/enrich-contacts.js --input output/scrape.json --verbose
+```
+
+**Import Paths**:
+```javascript
+const { ProfileEnricher, cleanName, cleanLocation } = require('./src/features/enrichment');
+const { compareAndMerge, compareAllFields } = require('./src/features/enrichment/field-comparator');
 ```

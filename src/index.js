@@ -22,6 +22,9 @@ const config = require('./config');
 // Extraction system
 const extraction = require('./extraction');
 
+// Features
+const features = require('./features');
+
 // Re-export all modules
 module.exports = {
   // Core
@@ -35,6 +38,11 @@ module.exports = {
   // Extraction
   ...extraction,
   extraction,
+
+  // Features
+  features,
+  enrichment: features.enrichment,
+  pagination: features.pagination,
 
   // Legacy aliases for backward compatibility
   logger: core.logger,
