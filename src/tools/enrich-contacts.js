@@ -25,6 +25,7 @@ const BrowserManager = require('../core/browser-manager');
 const RateLimiter = require('../core/rate-limiter');
 const ProfileEnricher = require('../features/enrichment/profile-enricher');
 const { generateReport, saveReport, printReport } = require('../features/enrichment/report-generator');
+const { SheetExporter } = require('../features/export');
 
 const program = new Command();
 
@@ -47,6 +48,7 @@ program
   .option('--report-format <format>', 'Report format: json or text', 'text')
   .option('--fields <fields>', 'Comma-separated list of fields to enrich (e.g., name,email,phone)')
   .option('--core-fields-only', 'Only enrich core fields (name, email, phone, location, title)', false)
+  .option('--export-sheets [name]', 'Export enriched contacts to Google Sheets (optional sheet name)')
   .option('-v, --verbose', 'Verbose logging', false)
   .parse(process.argv);
 
@@ -155,6 +157,11 @@ async function main() {
       printReport(report);
     }
 
+    // Export to Google Sheets if requested
+    if (options.exportSheets !== undefined) {
+      await exportToGoogleSheets(result, options.exportSheets);
+    }
+
     // Cleanup
     await browserManager.close();
     process.exit(0);
@@ -193,6 +200,53 @@ async function main() {
 function getDefaultOutputFile(inputFile) {
   const parsed = path.parse(inputFile);
   return path.join(parsed.dir, `${parsed.name}-enriched${parsed.ext}`);
+}
+
+/**
+ * Export enriched contacts to Google Sheets
+ * @param {Object} enrichmentResult - Result from enrichment process
+ * @param {string|boolean} sheetNameArg - Sheet name or true for auto-generate
+ */
+async function exportToGoogleSheets(enrichmentResult, sheetNameArg) {
+  try {
+    console.log('');
+    logger.info('[EnrichContacts] Exporting to Google Sheets...');
+
+    const exporter = new SheetExporter(logger);
+
+    // Check if Google Sheets is configured
+    if (!exporter.isConfigured()) {
+      logger.warn('[EnrichContacts] Google Sheets not configured. Skipping export.');
+      console.log('');
+      console.log('To enable Google Sheets export, add credentials to .env:');
+      console.log('  GOOGLE_SHEETS_CLIENT_EMAIL=...');
+      console.log('  GOOGLE_SHEETS_PRIVATE_KEY="..."');
+      console.log('  GOOGLE_SHEETS_SPREADSHEET_ID=...');
+      return;
+    }
+
+    // Determine sheet name
+    const sheetName = typeof sheetNameArg === 'string' && sheetNameArg.length > 0
+      ? sheetNameArg
+      : null; // Let exporter auto-generate
+
+    // Export using the enriched output file
+    const exportResult = await exporter.exportToSheet(enrichmentResult.outputFile, {
+      sheetName,
+      includeEnrichment: true // Include enrichment metadata by default
+    });
+
+    console.log('');
+    console.log(`Google Sheets export successful!`);
+    console.log(`Sheet URL: ${exportResult.spreadsheetUrl}`);
+
+  } catch (error) {
+    // Don't fail the entire operation if export fails
+    logger.error(`[EnrichContacts] Google Sheets export failed: ${error.message}`);
+    console.error('');
+    console.error(`Warning: Google Sheets export failed: ${error.message}`);
+    console.error('Enrichment completed successfully, but export to Sheets failed.');
+  }
 }
 
 /**

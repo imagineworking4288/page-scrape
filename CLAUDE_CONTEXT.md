@@ -1447,3 +1447,82 @@ const { compareAndMerge, compareAllFields } = require('./src/features/enrichment
   fieldDetails: { ... }
 }
 ```
+
+---
+
+## Google Sheets Export Feature
+
+**Location**: `src/features/export/`
+
+**Purpose**: Export scraped or enriched contacts to Google Sheets with automatic column detection, batch writing, and formatting.
+
+**Module Architecture**:
+```
+src/features/export/
+├── sheet-manager.js      # Google Sheets API authentication & operations
+├── column-detector.js    # Auto-detect columns from contact data
+├── data-formatter.js     # Format contact data for sheets
+├── batch-writer.js       # Efficient batch write operations
+├── sheet-exporter.js     # Main orchestrator
+└── index.js              # Feature exports
+```
+
+**Key Components**:
+
+1. **SheetManager** - Handles Google Sheets API:
+   - `authenticate()` - OAuth2 with service account
+   - `createSheet(name)` - Create new sheet tab
+   - `writeRows(spreadsheetId, range, values)` - Write data
+   - `formatHeaders(sheetId, columnCount)` - Bold, freeze headers
+   - `autoResizeColumns(sheetId, columnCount)` - Auto-fit columns
+
+2. **ColumnDetector** - Auto-detect and order columns:
+   - `detectColumns(contacts)` - Scan contacts for available fields
+   - `filterColumns(fields, options)` - Apply include/exclude filters
+   - `getColumnHeaders(columns)` - Get display header names
+
+3. **DataFormatter** - Format data for sheets:
+   - `formatContact(contact, columns)` - Convert to row array
+   - `formatDate(timestamp)` - "Dec 9, 2025 6:10 PM"
+   - `formatPhone(phone)` - "+1-XXX-XXX-XXXX"
+   - `formatEnrichmentActions(actions)` - "name:CLEANED, email:ENRICHED"
+
+4. **BatchWriter** - Efficient batch writes:
+   - `writeAllRows(spreadsheetId, sheetName, rows, options)` - Write in batches of 100
+   - Progress reporting via `onProgress` callback
+
+5. **SheetExporter** - Main orchestrator:
+   - `exportToSheet(contactsOrFile, options)` - Main entry point
+   - `createNewSheet(name, contacts, options)` - Create and populate
+   - `generateSheetName(contacts, metadata)` - Auto-generate from domain
+
+**CLI Tool**: `src/tools/export-to-sheets.js`
+```bash
+# Basic usage
+node src/tools/export-to-sheets.js --input output/scrape-enriched.json
+
+# With options
+node src/tools/export-to-sheets.js --input output/scrape.json \
+  --name "My Contacts" \
+  --include-enrichment \
+  --core-only \
+  --verbose
+```
+
+**Integration with Enrichment**:
+```bash
+# Export directly after enrichment
+node src/tools/enrich-contacts.js --input output/scrape.json --export-sheets "Sheet Name"
+```
+
+**Environment Setup** (`.env`):
+```
+GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
+```
+
+**Import Paths**:
+```javascript
+const { SheetExporter, SheetManager, ColumnDetector } = require('./src/features/export');
+```

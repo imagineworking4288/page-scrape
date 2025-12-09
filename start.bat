@@ -232,6 +232,36 @@ echo.
 echo   OUTPUT: Enriched JSON with _original audit trail and enrichment metadata
 echo.
 echo --------------------------------------------------------------------------------
+echo [EXPORT TO GOOGLE SHEETS]
+echo --------------------------------------------------------------------------------
+echo   Exports scraped or enriched contacts to Google Sheets.
+echo   Creates new sheet tabs with formatted headers and auto-sized columns.
+echo.
+echo   USAGE:
+echo     node src/tools/export-to-sheets.js --input output/scrape-enriched.json
+echo     node src/tools/export-to-sheets.js --input output/scrape.json --name "My Contacts"
+echo     node src/tools/export-to-sheets.js --input output/scrape.json --include-enrichment
+echo.
+echo   OPTIONS:
+echo     -i, --input ^<file^>        Input JSON file (required)
+echo     -n, --name ^<name^>         Sheet name (auto-generated if not provided)
+echo     --mode ^<mode^>             create ^| append (default: create)
+echo     --columns ^<list^>          Comma-separated columns to include
+echo     --exclude ^<list^>          Columns to exclude
+echo     --include-enrichment      Include enrichment metadata columns
+echo     --core-only               Only core fields (name, email, phone, etc.)
+echo     --batch-size ^<n^>          Rows per batch (default: 100)
+echo     -v, --verbose             Verbose logging
+echo.
+echo   INTEGRATION WITH ENRICHMENT:
+echo     node src/tools/enrich-contacts.js --input output/scrape.json --export-sheets "My Sheet"
+echo.
+echo   SETUP: Add to .env:
+echo     GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+echo     GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+echo     GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
+echo.
+echo --------------------------------------------------------------------------------
 echo [PROJECT STRUCTURE]
 echo --------------------------------------------------------------------------------
 echo   orchestrator.js             - Main CLI entry point
@@ -259,6 +289,8 @@ echo       constants.js            - Centralized configuration values
 echo     tools/                    - Developer tools
 echo       site-tester.js          - Diagnostic tool for URL testing
 echo       config-generator.js     - Visual config generation tool
+echo       enrich-contacts.js      - Profile enrichment with validation
+echo       export-to-sheets.js     - Google Sheets export tool
 echo   configs/                     - Site-specific JSON configurations
 echo   tests/                       - Test suites (pagination)
 echo   output/                      - JSON output files
@@ -282,6 +314,12 @@ echo     node orchestrator.js --url "https://www.compass.com/agents/locations/ma
 echo.
 echo   ENRICH CONTACTS:
 echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --verbose --limit 10
+echo.
+echo   EXPORT TO SHEETS:
+echo     node src/tools/export-to-sheets.js --input output/scrape-sullcrom-com-1765260032682-enriched.json --name "S and C Lawyers"
+echo.
+echo   ENRICH + EXPORT (combined):
+echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --limit 10 --export-sheets "S and C Lawyers"
 echo.
 echo   # Debug mode (visible browser, keep files)
 echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
