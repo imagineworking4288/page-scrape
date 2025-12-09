@@ -1082,7 +1082,37 @@ The project uses canonical module paths:
 - `multi-method-extractor.js` - Multi-method runtime extractor
 - `smart-field-extractor.js` - Smart field detection
 
-**Note**: Legacy duplicates in `src/utils/` and `src/tools/lib/` were removed. All imports should use the canonical paths above.
+**Active Utilities** (`src/utils/`):
+- `contact-extractor.js` - Shared extraction logic (regex patterns, name validation, universal extraction code)
+- `text-parser.js` - Text-to-contact parsing
+- `domain-extractor.js` - Email domain classification
+- `profile-visitor.js` - Profile page enrichment
+- `google-sheets-exporter.js` - Google Sheets export
+- `constants.js` - Shared constants
+
+**Features** (`src/features/`):
+- `pagination/paginator.js` - Main pagination orchestrator
+- `pagination/pattern-detector.js` - Pattern discovery
+- `pagination/binary-searcher.js` - True max page finder
+- `pagination/url-generator.js` - Page URL generation
+
+**Note**: Legacy duplicates in `src/tools/lib/` were removed (email-extractor.js, phone-extractor.js, etc.). These now live in `src/extraction/extractors/`. The files in `src/utils/` are NOT duplicates - they are canonical utilities.
+
+**Import Path Reference**:
+| Module | Canonical Import Path |
+|--------|----------------------|
+| BrowserManager | `src/core/browser-manager` |
+| SeleniumManager | `src/core/selenium-manager` |
+| logger | `src/core/logger` |
+| RateLimiter | `src/core/rate-limiter` |
+| ConfigLoader | `src/config/config-loader` |
+| EmailExtractor | `src/extraction/extractors/email-extractor` |
+| SmartFieldExtractor | `src/extraction/smart-field-extractor` |
+| MultiMethodExtractor | `src/extraction/multi-method-extractor` |
+| contactExtractor | `src/utils/contact-extractor` |
+| TextParser | `src/utils/text-parser` |
+| DomainExtractor | `src/utils/domain-extractor` |
+| Paginator | `src/features/pagination/paginator` |
 
 ### Infinite Scroll Implementation (Selenium PAGE_DOWN Only)
 

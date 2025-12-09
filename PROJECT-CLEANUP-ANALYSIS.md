@@ -426,3 +426,62 @@ npm install selenium-webdriver
 - `src/extraction/extractors/coordinate-extractor.js`
 - `src/extraction/multi-method-extractor.js`
 - `src/extraction/smart-field-extractor.js`
+
+---
+
+## Appendix C: December 9, 2025 - Post-Cleanup Fixes
+
+After the initial cleanup, additional broken import paths were discovered and fixed:
+
+### Fixes Applied
+
+| File | Old Import | New Import | Issue |
+|------|-----------|------------|-------|
+| `src/tools/lib/pagination-diagnostic.js:8` | `../../utils/paginator` | `../../features/pagination/paginator` | Paginator moved to features/ |
+| `src/scrapers/config-scraper.js:20-21` | Two separate `../tools/lib/` requires | `const { SmartFieldExtractor, MultiMethodExtractor } = require('../extraction');` | Extractors deleted from tools/lib/ |
+
+### Validation Results
+
+All 14 major modules now load successfully:
+```
+✓ src/core
+✓ src/config
+✓ src/extraction
+✓ src/scrapers/base-scraper
+✓ src/scrapers/simple-scraper
+✓ src/scrapers/select-scraper
+✓ src/scrapers/pdf-scraper
+✓ src/scrapers/config-scraper
+✓ src/scrapers/config-scrapers
+✓ src/utils/contact-extractor
+✓ src/utils/text-parser
+✓ src/utils/domain-extractor
+✓ src/tools/lib
+✓ src/features/pagination/paginator
+```
+
+### Test File Validation
+
+All test files load correctly:
+- `tests/scraper-test.js` ✓
+- `tests/select-scraper-test.js` ✓
+- `tests/pdf-scraper-test.js` ✓
+- `tests/pagination-test.js` ✓
+- `tests/pagination-integration-test.js` ✓
+- `tests/selenium-infinite-scroll.test.js` ✓
+- `tests/test-utils.js` ✓
+
+### Key Insight: src/utils/ is NOT All Duplicates
+
+During the modernization task, it was confirmed that `src/utils/` contains **canonical utilities** that should NOT be deleted:
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `contact-extractor.js` | Shared regex patterns, name validation, universal extraction code | KEEP |
+| `text-parser.js` | Text-to-contact parsing | KEEP |
+| `domain-extractor.js` | Email domain classification | KEEP |
+| `profile-visitor.js` | Profile page enrichment | KEEP |
+| `google-sheets-exporter.js` | Google Sheets export | KEEP |
+| `constants.js` | Shared constants | KEEP |
+
+The scrapers (`simple-scraper.js`, `select-scraper.js`, `pdf-scraper.js`) correctly import from `../utils/contact-extractor` - these paths are valid and should not be changed.

@@ -5,7 +5,7 @@
  * Provides additional analysis for testing purposes.
  */
 
-const Paginator = require('../../utils/paginator');
+const Paginator = require('../../features/pagination/paginator');
 
 class PaginationDiagnostic {
   constructor(browserManager, rateLimiter, logger, configLoader) {

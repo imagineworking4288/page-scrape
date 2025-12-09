@@ -17,8 +17,7 @@
 
 const BaseScraper = require('./base-scraper');
 const CardMatcher = require('../tools/lib/card-matcher');
-const SmartFieldExtractor = require('../tools/lib/smart-field-extractor');
-const MultiMethodExtractor = require('../tools/lib/multi-method-extractor');
+const { SmartFieldExtractor, MultiMethodExtractor } = require('../extraction');
 const fs = require('fs');
 const path = require('path');
 
