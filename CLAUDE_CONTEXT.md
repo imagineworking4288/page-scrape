@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 7, 2025
+**Last Updated**: December 9, 2025
 
 ---
 
@@ -152,6 +152,7 @@ page-scrape/
 │   ├── pagination-integration-test.js # Integration tests
 │   ├── pdf-scraper-test.js     # PDF scraper tests
 │   ├── v22-integration.test.js # v2.2 integration tests
+│   ├── selenium-infinite-scroll.test.js # Selenium infinite scroll tests
 │   └── test-utils.js           # Test utilities
 │
 ├── .cache/                     # Tesseract OCR cache (gitignored)
@@ -780,13 +781,25 @@ node src/tools/test-config.js example-com --limit 10 --verbose --show
 
 **Purpose**: Manages the interactive config generation session.
 
+**Key Features**:
+- SeleniumManager initialization for infinite-scroll scraping
+- Automatic cleanup on session end and process signals (SIGINT, SIGTERM)
+- Multi-method extraction testing
+- Config validation and generation
+
 **Exposed Browser Functions**:
 - `__configGen_testFieldExtraction(data)` - Test extraction methods
 - `__configGen_confirmFieldExtraction(data)` - User confirms selection
 - `__configGen_generateV23Config(selections)` - Generate final config
 - `__configGen_diagnosePagination` - Pagination type detection
-- `__configGen_startScraping` - Start scraping workflow
-- `__configGen_finalSaveAndClose` - Finalize session
+- `__configGen_startScraping` - Start scraping workflow (initializes SeleniumManager for infinite-scroll)
+- `__configGen_finalSaveAndClose` - Finalize session (cleanup SeleniumManager)
+
+**SeleniumManager Integration** (added Dec 2025):
+- Import: `const SeleniumManager = require('../../core/selenium-manager');`
+- Property: `this.seleniumManager = null;`
+- Initialization in `handleStartScraping()` when `paginationType === 'infinite-scroll'`
+- Cleanup in `handleFinalSaveAndClose()` and `cleanupResources()`
 
 #### src/tools/lib/extraction-tester.js
 
@@ -848,9 +861,12 @@ node src/tools/test-config.js example-com --limit 10 --verbose --show
 | `pagination-integration-test.js` | Integration tests for pagination |
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `v22-integration.test.js` | v2.2 integration tests |
+| `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
 | `test-utils.js` | Test utilities and helpers |
 
-**Run Tests**: `npm test`
+**Run Tests**:
+- `npm test` - Run basic scraper tests
+- `node tests/selenium-infinite-scroll.test.js` - Test Selenium infinite scroll
 
 ---
 
@@ -1009,13 +1025,12 @@ node orchestrator.js --url "URL" --method config --config example-com --force-se
 node tests/selenium-infinite-scroll.test.js
 ```
 
-### Creating Selenium Config for Infinite Scroll
+### Creating Config for Infinite Scroll
 Add pagination section to your config:
 ```json
 {
   "pagination": {
     "paginationType": "infinite-scroll",
-    "scrollMethod": "selenium-pagedown",
     "scrollConfig": {
       "maxRetries": 25,
       "scrollDelay": 400,
@@ -1025,6 +1040,8 @@ Add pagination section to your config:
   }
 }
 ```
+
+**Note**: The `scrollMethod` field is no longer required. All infinite scroll uses Selenium PAGE_DOWN simulation (the only reliable method).
 
 ---
 
@@ -1058,32 +1075,25 @@ Add pagination section to your config:
 
 ## Architecture Notes
 
-### Mouse Wheel Simulation (Infinite Scroll)
+### Infinite Scroll Implementation (Selenium PAGE_DOWN Only)
 
-The infinite scroll scraper uses active mouse wheel simulation instead of passive monitoring:
+The infinite scroll scraper uses Selenium WebDriver with PAGE_DOWN key simulation. This is the ONLY infinite scroll implementation - Puppeteer wheel events were found to be unreliable and have been removed.
 
-**Why Passive Monitoring Failed**:
-- Single `scrollTo({ behavior: 'smooth' })` was blocked by site JavaScript
-- Scrollbar position stuck at 0%
-- Page never actually scrolled
+**Why Puppeteer Wheel Events Failed**:
+- Puppeteer's `scrollBy()` and `WheelEvent` didn't trigger some sites' infinite scroll JavaScript
+- Sullivan & Cromwell test: Puppeteer found only 10 contacts, Selenium found 584
+- Mouse wheel simulation is blocked by some site JavaScript
 
-**Why Active Simulation Works**:
-- WheelEvent fires JavaScript event listeners that trigger infinite scroll
-- scrollBy() guarantees scroll position actually changes
-- Rapid firing (20/second) loads pages in 10-30 seconds
-- Dual mechanism maximizes compatibility
+**Why Selenium PAGE_DOWN Works**:
+- PAGE_DOWN key simulation fires proper keyboard events
+- Keyboard events trigger scroll event handlers more reliably
+- Works across all tested infinite scroll sites
+- Dual-phase approach: Phase 1 scrolls, Phase 2 extracts via JS
 
-### Selenium PAGE_DOWN Scrolling
-
-For sites where mouse wheel simulation doesn't trigger infinite scroll, use Selenium with PAGE_DOWN key simulation:
-
-**When to Use Selenium**:
-- Site doesn't respond to scrollBy() or wheel events
-- Lazy loading requires actual keyboard interaction
-- Config specifies `pagination.scrollMethod: 'selenium-pagedown'`
-- Use `--force-selenium` CLI flag
-
-**Key Insight**: PAGE_DOWN key simulation fires proper keyboard events that trigger scroll event handlers more reliably than programmatic scrollBy().
+**When Infinite Scroll is Used**:
+- Config specifies `pagination.paginationType: 'infinite-scroll'`
+- Use `--scroll` or `--force-selenium` CLI flag
+- Automatically detected by config generator pagination diagnosis
 
 **Retry Counter Reset Logic**:
 ```javascript
@@ -1105,7 +1115,7 @@ while (retries < maxRetries) {
 
 **Files**:
 - `src/core/selenium-manager.js` - Selenium browser manager
-- `src/scrapers/config-scrapers/selenium-infinite-scroll-scraper.js` - Selenium-based scraper
+- `src/scrapers/config-scrapers/infinite-scroll-scraper.js` - Selenium-based infinite scroll scraper
 
 **CLI Flags**:
 ```bash
@@ -1114,24 +1124,32 @@ while (retries < maxRetries) {
 --max-retries <n>        # Max no-change attempts (default: 25)
 ```
 
-### Two-Phase Extraction
+### Two-Phase Selenium Extraction
 
-The infinite scroll scraper uses two phases:
+The infinite scroll scraper uses a Selenium-only two-phase approach:
 
-**Phase 1 - Load All Content** (NO extraction):
-- Fire rapid wheel events + scrollBy
-- Monitor page height for new content
-- Stop when height stable for 5 consecutive checks AND at bottom
+**Phase 1 - Load All Content with Selenium** (NO extraction):
+- Press PAGE_DOWN key via Selenium WebDriver
+- Monitor document.body.scrollHeight for changes
+- Reset retry counter when height changes (more content loaded)
+- Try scroll up/down cycle every 5 failed retries
+- Stop when maxRetries (25) consecutive no-change attempts
 
-**Phase 2 - Extract All Cards** (NO scrolling):
-- Page is fully loaded with all content
-- Find ALL card elements in one query
-- Extract contacts in single pass
+**Phase 2 - Extract via Selenium JavaScript** (NO scrolling):
+- Page is fully loaded with all content in Selenium DOM
+- Execute JavaScript in Selenium to find all card elements
+- Extract contact data using config field definitions
+- Process contacts in batches, flush to file every 100
 
-**Why Two-Phase Works**:
-- Lazy-loading has unpredictable delays
-- Incremental extraction can exit prematurely
-- All links are fully rendered before extraction begins
+**Why Selenium-Only Architecture**:
+- Single browser instance (no Puppeteer handoff issues)
+- Selenium's executeScript() accesses the fully-loaded DOM
+- Avoids "Requesting main frame too early" errors
+- Proven to extract 584 contacts from Sullivan & Cromwell
+
+**Config Generator Integration**:
+- `interactive-session.js` initializes SeleniumManager for infinite-scroll pages
+- Cleanup handled on session end and process signals (SIGINT, SIGTERM)
 
 ### v2.3 Config Structure
 
