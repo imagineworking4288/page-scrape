@@ -1383,3 +1383,9 @@ node src/tools/enrich-contacts.js --input output/scrape.json --verbose
 const { ProfileEnricher, cleanName, cleanLocation } = require('./src/features/enrichment');
 const { compareAndMerge, compareAllFields } = require('./src/features/enrichment/field-comparator');
 ```
+
+**Bug Fixes Applied (December 2025)**:
+1. **Logger Errors Fixed**: Added safe `log(level, message)` helper in ProfileExtractor to prevent "debug is not a function" errors
+2. **Report Statistics Fixed**: Report generator now checks both `contact.enrichment` and `contact._enrichment` for compatibility
+3. **Confidence Handling Fixed**: Handles confidence as both object `{overall: 'high'}` and string `'high'`
+4. **Action Counting Fixed**: Properly counts actions from `{field: action}` object structure

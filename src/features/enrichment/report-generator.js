@@ -44,7 +44,8 @@ function generateReport(enrichmentResult, options = {}) {
  */
 function generateSummary(contacts, stats) {
   const totalContacts = contacts.length;
-  const enrichedContacts = contacts.filter(c => c._enrichment).length;
+  // Check both enrichment and _enrichment for compatibility
+  const enrichedContacts = contacts.filter(c => c.enrichment || c._enrichment).length;
 
   // Count actions across all contacts
   const actionCounts = {
@@ -57,9 +58,15 @@ function generateSummary(contacts, stats) {
   };
 
   contacts.forEach(contact => {
-    if (contact._enrichment && contact._enrichment.actions) {
-      Object.entries(contact._enrichment.actions).forEach(([action, count]) => {
-        actionCounts[action] = (actionCounts[action] || 0) + count;
+    // Check both enrichment and _enrichment for compatibility
+    const enrichmentData = contact.enrichment || contact._enrichment;
+    if (enrichmentData && enrichmentData.actions) {
+      // Actions is an object like { name: "CLEANED", email: "ENRICHED" }
+      // Count each action type
+      Object.values(enrichmentData.actions).forEach(action => {
+        if (actionCounts.hasOwnProperty(action)) {
+          actionCounts[action]++;
+        }
       });
     }
   });
@@ -207,16 +214,23 @@ function calculateDataQuality(contacts) {
       if (contact[field]) fieldCounts[field]++;
     });
 
-    if (contact._enrichment && contact._enrichment.confidence) {
-      confidenceCounts[contact._enrichment.confidence] =
-        (confidenceCounts[contact._enrichment.confidence] || 0) + 1;
+    // Check both enrichment and _enrichment for compatibility
+    const enrichmentData = contact.enrichment || contact._enrichment;
+    if (enrichmentData && enrichmentData.confidence) {
+      // confidence can be an object { overall: 'high', fields: {...} } or a string
+      const confValue = typeof enrichmentData.confidence === 'object'
+        ? enrichmentData.confidence.overall
+        : enrichmentData.confidence;
+      if (confValue && confidenceCounts.hasOwnProperty(confValue)) {
+        confidenceCounts[confValue]++;
+      }
     }
 
     // Check for issues
-    if (contact._enrichment && contact._enrichment.needsReview) {
+    if (enrichmentData && enrichmentData.needsReview) {
       issues.push({
         contact: contact.name || 'Unknown',
-        reason: contact._enrichment.flags ? contact._enrichment.flags.join(', ') : 'needs review'
+        reason: enrichmentData.flags ? enrichmentData.flags.join(', ') : 'needs review'
       });
     }
   });
@@ -310,9 +324,12 @@ function generateRecommendations(contacts, stats) {
   }
 
   // Check for high replacement rate (data conflicts)
-  const replacedCount = contacts.filter(c =>
-    c._enrichment && c._enrichment.actions && c._enrichment.actions.REPLACED > 0
-  ).length;
+  const replacedCount = contacts.filter(c => {
+    const enrichmentData = c.enrichment || c._enrichment;
+    if (!enrichmentData || !enrichmentData.actions) return false;
+    // Check if any action is REPLACED
+    return Object.values(enrichmentData.actions).includes('REPLACED');
+  }).length;
   if (replacedCount > contacts.length * 0.1) {
     recommendations.push({
       priority: 'medium',
@@ -331,9 +348,14 @@ function generateRecommendations(contacts, stats) {
   }
 
   // Check for low confidence
-  const lowConfidenceCount = contacts.filter(c =>
-    c._enrichment && c._enrichment.confidence === 'low'
-  ).length;
+  const lowConfidenceCount = contacts.filter(c => {
+    const enrichmentData = c.enrichment || c._enrichment;
+    if (!enrichmentData || !enrichmentData.confidence) return false;
+    const confValue = typeof enrichmentData.confidence === 'object'
+      ? enrichmentData.confidence.overall
+      : enrichmentData.confidence;
+    return confValue === 'low';
+  }).length;
   if (lowConfidenceCount > contacts.length * 0.2) {
     recommendations.push({
       priority: 'medium',
