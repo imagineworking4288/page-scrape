@@ -99,34 +99,56 @@ function generateFieldBreakdown(contacts) {
 
   contacts.forEach(contact => {
     fields.forEach(field => {
-      // Check original state
-      const originalValue = contact._original && contact._original[field];
-      const currentValue = contact[field];
+      // Determine original state correctly:
+      // - If field is in _original, that WAS the original value (even if null)
+      // - If field is NOT in _original, the current value IS the original (unchanged)
+      let hadOriginalValue = false;
 
-      if (originalValue) {
+      if (contact._original && contact._original.hasOwnProperty(field)) {
+        // Field was changed - use the audit trail value
+        const auditValue = contact._original[field];
+        hadOriginalValue = auditValue !== null && auditValue !== undefined && auditValue !== '';
+      } else {
+        // Field was unchanged - original equals current
+        hadOriginalValue = contact[field] !== null && contact[field] !== undefined && contact[field] !== '';
+      }
+
+      const hasEnrichedValue = contact[field] !== null && contact[field] !== undefined && contact[field] !== '';
+
+      if (hadOriginalValue) {
         breakdown[field].original.present++;
-        // Check if it was contaminated (has _original different from current)
-        if (currentValue !== originalValue && contact._enrichment) {
-          breakdown[field].original.contaminated++;
-        }
-      } else if (!currentValue) {
+      } else {
         breakdown[field].original.missing++;
       }
 
-      // Check enriched state
-      if (currentValue) {
+      if (hasEnrichedValue) {
         breakdown[field].enriched.present++;
       } else {
         breakdown[field].enriched.missing++;
       }
+
+      // Track contamination (original existed but was different and got cleaned)
+      if (contact._original && contact._original.hasOwnProperty(field)) {
+        const auditValue = contact._original[field];
+        if (auditValue && contact[field] && auditValue !== contact[field]) {
+          breakdown[field].original.contaminated++;
+        }
+      }
     });
 
-    // Count actions per field (from comparisons)
-    if (contact._enrichment && contact._enrichment.comparisons) {
-      Object.entries(contact._enrichment.comparisons).forEach(([field, comparison]) => {
-        if (breakdown[field] && comparison.action) {
-          breakdown[field].actions[comparison.action] =
-            (breakdown[field].actions[comparison.action] || 0) + 1;
+    // Count actions per field from enrichment metadata
+    if (contact.enrichment && contact.enrichment.actions) {
+      Object.entries(contact.enrichment.actions).forEach(([field, action]) => {
+        if (breakdown[field] && breakdown[field].actions.hasOwnProperty(action)) {
+          breakdown[field].actions[action]++;
+        }
+      });
+    }
+    // Also check _enrichment (alternate structure)
+    if (contact._enrichment && contact._enrichment.actions) {
+      Object.entries(contact._enrichment.actions).forEach(([field, action]) => {
+        if (breakdown[field] && breakdown[field].actions.hasOwnProperty(action)) {
+          breakdown[field].actions[action]++;
         }
       });
     }

@@ -45,6 +45,8 @@ program
   .option('--review-output <file>', 'Output manual review queue to file')
   .option('--report <file>', 'Generate enrichment report to file')
   .option('--report-format <format>', 'Report format: json or text', 'text')
+  .option('--fields <fields>', 'Comma-separated list of fields to enrich (e.g., name,email,phone)')
+  .option('--core-fields-only', 'Only enrich core fields (name, email, phone, location, title)', false)
   .option('-v, --verbose', 'Verbose logging', false)
   .parse(process.argv);
 
@@ -79,12 +81,13 @@ async function main() {
     console.log(`Headless:      ${options.headless}`);
     console.log(`Resume from:   ${options.resumeFrom}`);
     console.log(`Validate only: ${options.validateOnly}`);
+    console.log(`Fields:        ${options.fields || (options.coreFieldsOnly ? 'core fields only' : 'auto-detect')}`);
     console.log('================================================================================');
     console.log('');
 
     // Initialize browser manager
     logger.info('[EnrichContacts] Initializing browser...');
-    browserManager = new BrowserManager();
+    browserManager = new BrowserManager(logger);
     await browserManager.launch(options.headless);
 
     // Initialize rate limiter
@@ -100,6 +103,11 @@ async function main() {
     // Determine output file
     const outputFile = options.output || getDefaultOutputFile(inputPath);
 
+    // Parse fields option if provided
+    const fieldsToEnrich = options.fields
+      ? options.fields.split(',').map(f => f.trim()).filter(f => f)
+      : null;
+
     // Run enrichment
     logger.info('[EnrichContacts] Starting enrichment process...');
     const result = await enricher.enrichContacts(inputPath, {
@@ -110,7 +118,9 @@ async function main() {
       saveProgressEvery: options.saveEvery,
       resumeFrom: options.resumeFrom,
       skipErrors: options.skipErrors,
-      outputFile
+      outputFile,
+      fieldsToEnrich,
+      onlyCoreFields: options.coreFieldsOnly
     });
 
     // Save manual review queue if requested

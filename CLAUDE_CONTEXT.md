@@ -783,6 +783,8 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 - `--review-output <file>` - Output manual review queue
 - `--report <file>` - Generate enrichment report to file
 - `--report-format <format>` - Report format: `json` or `text` (default: text)
+- `--fields <fields>` - Comma-separated list of fields to enrich (e.g., name,email,phone)
+- `--core-fields-only` - Only enrich core fields (name, email, phone, location, title)
 - `-v, --verbose` - Verbose logging (also prints report summary)
 
 #### src/tools/site-tester.js
@@ -1094,6 +1096,12 @@ node src/tools/enrich-contacts.js --input output/scrape.json --resume-from 100
 
 # Output contacts needing manual review
 node src/tools/enrich-contacts.js --input output/scrape.json --review-output output/review.json
+
+# Only enrich core fields (name, email, phone, location, title) - skip bio, education, etc.
+node src/tools/enrich-contacts.js --input output/scrape.json --core-fields-only --verbose
+
+# Enrich only specific fields
+node src/tools/enrich-contacts.js --input output/scrape.json --fields name,email,phone --limit 10
 ```
 
 ### Testing Enrichment System
@@ -1313,6 +1321,18 @@ src/features/enrichment/
 3. Label-based (e.g., "Email: john@example.com")
 4. vCard data if present
 5. Meta tags (og:email, etc.)
+
+**Domain-Aware Email Extraction** (December 2025):
+- Extracts domain from profile URL (e.g., `sullcrom.com` from `https://www.sullcrom.com/...`)
+- Generates name variations for matching (e.g., "Arthur S. Adler" → `arthur.adler`, `aadler`, `adlera`)
+- Validates extracted emails against expected domain
+- Rejects fake/generic emails (`test@`, `example@`, `noreply@`, `info@`)
+
+**Config-Aware Field Extraction**:
+- Only extracts fields that were in original scrape config
+- Core fields always extracted: `name`, `email`, `phone`, `location`, `profileUrl`, `title`
+- Use `--core-fields-only` to skip extra fields like `bio`, `education`, `practiceAreas`
+- Use `--fields name,email,phone` to specify exactly which fields to extract
 
 **Name Cleaning Examples**:
 ```javascript

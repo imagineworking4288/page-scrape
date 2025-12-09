@@ -21,6 +21,9 @@ class ProfileEnricher {
     // Initialize profile extractor
     this.profileExtractor = new ProfileExtractor(browserManager, rateLimiter, logger);
 
+    // Core fields that should always be considered for enrichment
+    this.coreFields = ['name', 'email', 'phone', 'location', 'profileUrl', 'title'];
+
     // Statistics tracking
     this.stats = {
       total: 0,
@@ -65,7 +68,9 @@ class ProfileEnricher {
       saveProgressEvery: options.saveProgressEvery || 50,
       resumeFrom: options.resumeFrom || 0,
       skipErrors: options.skipErrors !== false,
-      outputFile: options.outputFile || null
+      outputFile: options.outputFile || null,
+      fieldsToEnrich: options.fieldsToEnrich || null,  // Specific fields to enrich
+      onlyCoreFields: options.onlyCoreFields || false   // Only enrich core fields
     };
 
     this.startTime = Date.now();
@@ -96,8 +101,11 @@ class ProfileEnricher {
       const contact = contacts[i];
 
       try {
+        // Determine which fields to enrich for this contact
+        const fieldsToEnrich = this.getFieldsToEnrich(contact, opts);
+
         // Enrich single contact
-        const enrichedContact = await this.enrichSingleContact(contact, i, endIndex);
+        const enrichedContact = await this.enrichSingleContact(contact, i, endIndex, fieldsToEnrich);
         enrichedContacts.push(enrichedContact);
 
         // Update stats
@@ -163,13 +171,46 @@ class ProfileEnricher {
   }
 
   /**
+   * Get fields that should be enriched based on original contact and options
+   * @param {Object} contact - Original contact
+   * @param {Object} opts - Enrichment options
+   * @returns {string[]} - Field names to enrich
+   */
+  getFieldsToEnrich(contact, opts) {
+    // If specific fields were provided, use those
+    if (opts.fieldsToEnrich && Array.isArray(opts.fieldsToEnrich)) {
+      return opts.fieldsToEnrich;
+    }
+
+    // If only core fields requested, return core fields
+    if (opts.onlyCoreFields) {
+      return this.coreFields;
+    }
+
+    // Check which fields exist in original contact (excluding metadata)
+    const contactFields = Object.keys(contact).filter(key =>
+      !key.startsWith('_') && // Skip metadata (_cardIndex, _extractionMethods)
+      key !== 'enrichment' &&
+      key !== 'domain' &&
+      key !== 'domainType' &&
+      key !== 'confidence' &&
+      key !== 'source' &&
+      typeof contact[key] !== 'object' // Skip nested objects
+    );
+
+    // Return union of core fields + existing fields (unique)
+    return [...new Set([...this.coreFields, ...contactFields])];
+  }
+
+  /**
    * Enrich a single contact
    * @param {Object} contact - Contact to enrich
    * @param {number} index - Contact index
    * @param {number} total - Total contacts
+   * @param {string[]} fieldsToEnrich - Fields to extract from profile
    * @returns {Object} - Enriched contact
    */
-  async enrichSingleContact(contact, index, total) {
+  async enrichSingleContact(contact, index, total, fieldsToEnrich = null) {
     const profileStartTime = Date.now();
 
     // Check if contact has profile URL
@@ -187,8 +228,8 @@ class ProfileEnricher {
 
     this.logger.debug(`[ProfileEnricher] [${index + 1}/${total}] Enriching: ${contact.name || 'Unknown'}`);
 
-    // Extract data from profile page
-    const profileResult = await this.profileExtractor.extractFromProfile(contact.profileUrl);
+    // Extract data from profile page (pass fields to extract)
+    const profileResult = await this.profileExtractor.extractFromProfile(contact.profileUrl, fieldsToEnrich);
 
     if (!profileResult.success) {
       this.stats.failed++;
