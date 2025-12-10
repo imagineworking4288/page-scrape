@@ -48,6 +48,14 @@ program
   .option('--force-selenium', 'Force Selenium browser for infinite scroll (PAGE_DOWN simulation)')
   .option('--scroll-delay <ms>', 'Selenium scroll delay in ms', parseInt, 400)
   .option('--max-retries <number>', 'Max consecutive no-change attempts for Selenium scroll', parseInt, 25)
+  // Full pipeline options
+  .option('--full-pipeline', 'Run full pipeline: config → scrape → enrich → export')
+  .option('--auto', 'Skip confirmation prompts in full-pipeline mode')
+  .option('--skip-config-gen', 'Skip config generation, use existing config (requires --full-pipeline)')
+  .option('--no-enrich', 'Skip enrichment stage in full-pipeline mode')
+  // Validation tool shortcut
+  .option('--validate', 'Run validation tool (quick test with first N contacts)')
+  .option('-v, --verbose', 'Verbose logging')
   .parse(process.argv);
 
 const options = program.opts();
@@ -129,15 +137,73 @@ async function main() {
   let seleniumManager = null;
 
   try {
+    // Validate URL first
+    if (!validateUrl(options.url)) {
+      process.exit(1);
+    }
+
+    // ===========================================================================
+    // ROUTE: Validation Tool (--validate)
+    // ===========================================================================
+    if (options.validate) {
+      const { spawn } = require('child_process');
+      const validatePath = path.join(__dirname, 'src', 'tools', 'validate-config.js');
+
+      const args = ['--url', options.url];
+      if (options.limit) args.push('--limit', options.limit.toString());
+      if (options.verbose) args.push('--verbose');
+      if (!parseHeadless(options.headless)) args.push('--show');
+
+      const validateProcess = spawn('node', [validatePath, ...args], {
+        stdio: 'inherit',
+        cwd: __dirname
+      });
+
+      validateProcess.on('close', (code) => {
+        process.exit(code);
+      });
+
+      return; // Exit main function, let subprocess handle everything
+    }
+
+    // ===========================================================================
+    // ROUTE: Full Pipeline (--full-pipeline)
+    // ===========================================================================
+    if (options.fullPipeline) {
+      const FullPipelineOrchestrator = require('./src/workflows/full-pipeline');
+
+      const orchestrator = new FullPipelineOrchestrator({
+        url: options.url,
+        limit: options.limit,
+        auto: options.auto,
+        autoMode: options.auto,
+        skipConfigGen: options.skipConfigGen,
+        noEnrich: options.enrich === false,
+        noExport: options.export === false,
+        headless: parseHeadless(options.headless),
+        verbose: options.verbose
+      });
+
+      const result = await orchestrator.run();
+
+      if (result.success) {
+        logger.info('[Orchestrator] Full pipeline completed successfully');
+        process.exit(0);
+      } else {
+        logger.error(`[Orchestrator] Full pipeline failed: ${result.message}`);
+        process.exit(1);
+      }
+
+      return; // Exit main function
+    }
+
+    // ===========================================================================
+    // STANDARD SCRAPING WORKFLOW (existing behavior)
+    // ===========================================================================
     logger.info('═══════════════════════════════════════');
     logger.info('  UNIVERSAL PROFESSIONAL SCRAPER v1.0');
     logger.info('═══════════════════════════════════════');
     logger.info('');
-    
-    // Validate URL
-    if (!validateUrl(options.url)) {
-      process.exit(1);
-    }
 
     // Check if using Python scraper
     if (options.usePython) {

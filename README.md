@@ -1,589 +1,519 @@
-# Universal Professional Directory Scraper
+# Page Scrape - Universal Professional Directory Scraper
 
-A powerful web scraping tool for extracting contact information from professional directories with high accuracy.
+A powerful, enterprise-grade web scraping platform for extracting contact information from professional directories. Features visual config generation, intelligent pagination handling, profile enrichment, and Google Sheets export.
 
-## Features
+## Key Features
 
-- **Dual Extraction Methods**: Choose between Node.js (fast) or Python (accurate)
-- **Coordinate-Based PDF Extraction**: Python scraper prevents cross-contamination using spatial search
-- **HTML-First Approach**: Intelligent fallback from HTML → PDF when needed
-- **Domain Classification**: Automatic business vs personal email detection
-- **Anti-Detection**: Stealth browser settings to avoid blocking
-- **Multiple Output Formats**: JSON and CSV support
+- **Visual Config Generator (v2.3)**: Interactive 4-layer detection with click-to-select field mapping
+- **Infinite Scroll Support**: Selenium PAGE_DOWN simulation for dynamic loading sites
+- **Profile Enrichment**: Automated profile page visits to validate and fill missing data
+- **Multi-Method Extraction**: DOM-based, coordinate-based, mailto/tel link detection, OCR fallback
+- **Smart Pagination**: Auto-detection of pagination patterns (URL-based, offset, infinite scroll)
+- **Google Sheets Export**: Direct export with configurable columns and auto-formatting
+- **Full Pipeline Workflow**: End-to-end automation from config generation to export
+- **Anti-Detection**: Stealth browser configuration with random user agents
+
+---
+
+## Table of Contents
+
+1. [Quick Start](#quick-start)
+2. [Installation](#installation)
+3. [Workflows](#workflows)
+   - [Full Pipeline (Recommended)](#full-pipeline-recommended)
+   - [Config Validation](#config-validation)
+   - [Config Generation](#config-generation)
+   - [Scraping](#scraping)
+   - [Enrichment](#enrichment)
+   - [Export](#export)
+4. [CLI Reference](#cli-reference)
+5. [Configuration](#configuration)
+6. [Architecture](#architecture)
+7. [Troubleshooting](#troubleshooting)
+
+---
 
 ## Quick Start
 
-### Node.js Scraper (Fast)
+### 1. Validate an Existing Config (Recommended First Step)
+
+Test that a site config works before running a full scrape:
 
 ```bash
+node orchestrator.js --validate --url "https://www.sullcrom.com/lawyers" --limit 2
+```
+
+### 2. Run Full Pipeline (Complete Workflow)
+
+Process a site from start to finish with a single command:
+
+```bash
+# Interactive mode (prompts at each stage)
+node orchestrator.js --full-pipeline --url "https://example.com/directory"
+
+# Auto mode (no prompts)
+node orchestrator.js --full-pipeline --url "https://example.com/directory" --auto
+```
+
+### 3. Generate a New Config
+
+Create a site-specific config using the visual generator:
+
+```bash
+node src/tools/config-generator.js --url "https://example.com/directory"
+```
+
+### 4. Scrape with an Existing Config
+
+```bash
+# Single page
+node orchestrator.js --url "https://example.com/directory" --method config
+
+# With pagination
+node orchestrator.js --url "https://example.com/directory" --method config --paginate --max-pages 10
+
+# Infinite scroll sites
+node orchestrator.js --url "https://example.com/directory" --method config --scroll
+```
+
+---
+
+## Installation
+
+### Prerequisites
+
+- **Node.js** 18+ (recommended: 20+)
+- **Chrome** browser (for Selenium infinite scroll)
+- **Google Sheets API credentials** (optional, for export)
+
+### Setup
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd page-scrape
+
+# Install dependencies
 npm install
-node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --limit 20
+
+# Copy environment template
+cp .env.example .env
+
+# Edit .env with your settings (optional)
+# - Google Sheets credentials for export
+# - Other API keys if needed
 ```
 
-### Python Scraper (Recommended for Accuracy)
+### Verify Installation
 
 ```bash
-# Install Python dependencies
-pip install -r python_scraper/requirements.txt
-playwright install chromium
+# Run the help command
+node orchestrator.js --help
 
-# Run scraper
-python -m python_scraper.cli --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --limit 20
+# Or use the interactive start script (Windows)
+start.bat
 ```
 
-Or via orchestrator:
+---
+
+## Workflows
+
+### Full Pipeline (Recommended)
+
+The full pipeline chains all stages: **Config Check → Scraping → Enrichment → Export**
 
 ```bash
-node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --use-python --limit 20
+# Interactive mode - prompts at each stage
+node orchestrator.js --full-pipeline --url "https://example.com/directory"
+
+# Auto mode - runs all stages without prompts
+node orchestrator.js --full-pipeline --url "URL" --auto
+
+# Skip config generation (use existing config)
+node orchestrator.js --full-pipeline --url "URL" --skip-config-gen --auto
+
+# Skip enrichment
+node orchestrator.js --full-pipeline --url "URL" --no-enrich --auto
+
+# Limit contacts and export to Google Sheets
+node orchestrator.js --full-pipeline --url "URL" --limit 100 --output sheets --auto
 ```
 
-## Python PDF Scraper (Recommended)
+**Workflow Stages:**
 
-The Python scraper uses coordinate-based extraction for better accuracy. It solves the cross-contamination problem where names from different contacts get mixed up.
+1. **Config Check**: Verifies config exists or runs config generator
+2. **Scraping**: Extracts contacts using the appropriate method (auto-detects infinite scroll)
+3. **Enrichment**: Visits profile pages to validate/fill missing data
+4. **Export**: Saves to JSON, CSV, or Google Sheets
 
-### Why Python Scraper?
+### Config Validation
 
-**Node.js PDF Scraper (Linear):**
-- Extracts text line-by-line without spatial awareness
-- ~60% name extraction accuracy
-- Cross-contamination issues (wrong name paired with wrong email)
-
-**Python PDF Scraper (Coordinate-Based):**
-- Extracts text with X/Y coordinates
-- >85% name extraction accuracy
-- No cross-contamination (bounded spatial search)
-
-### Installation
+Quick test to verify a config works before running a full scrape:
 
 ```bash
-pip install -r python_scraper/requirements.txt
-playwright install chromium
+# Quick validation (2 contacts)
+node src/tools/validate-config.js --url "https://example.com/directory"
+
+# Thorough validation
+node src/tools/validate-config.js --url "URL" --limit 10 --verbose
+
+# Skip enrichment testing
+node src/tools/validate-config.js --url "URL" --no-enrich
+
+# Via orchestrator
+node orchestrator.js --validate --url "URL" --limit 5
 ```
 
-### Usage
+**Validation Checks:**
+- Config existence and structure
+- Card selector functionality
+- Field extraction accuracy
+- Data quality (contamination detection)
+- Profile enrichment (optional)
+
+### Config Generation
+
+Create site-specific configs using the visual generator:
 
 ```bash
-python -m python_scraper.cli --url "URL" --limit 20
+# Basic usage
+node src/tools/config-generator.js --url "https://example.com/directory"
+
+# Debug mode (visible browser)
+node src/tools/config-generator.js --url "URL" --verbose
 ```
 
-**Options:**
-```
---url, -u           Target URL (required)
---limit, -l         Limit contacts (optional)
---output, -o        Format: json|csv (default: json)
---headless          Browser mode: true|false (default: true)
---keep              Keep PDF files
---log-level         Logging: DEBUG|INFO|WARN|ERROR
-```
+**Process:**
+1. Opens browser in visible mode
+2. User draws rectangle around a contact card
+3. System finds similar cards on the page
+4. User clicks on each field (name, email, phone, etc.)
+5. System tests multiple extraction methods
+6. User validates best extraction method for each field
+7. Config saved to `configs/website-configs/{domain}.json`
 
-### Testing
+### Scraping
+
+Extract contacts using a saved config:
 
 ```bash
-python -m python_scraper.test_scraper \
-  --urls "https://www.compass.com/agents/locations/manhattan-ny/21425/" \
-  --limit 20
+# Single page extraction
+node orchestrator.js --url "URL" --method config
+
+# With traditional pagination
+node orchestrator.js --url "URL" --method config --paginate --max-pages 20
+
+# Infinite scroll sites (Selenium PAGE_DOWN)
+node orchestrator.js --url "URL" --method config --scroll
+
+# With contact limit
+node orchestrator.js --url "URL" --method config --limit 100
+
+# Visible browser (for debugging)
+node orchestrator.js --url "URL" --method config --headless false
 ```
 
-See [python_scraper/README.md](python_scraper/README.md) for detailed documentation.
+### Enrichment
 
-## Infinite Scroll Sites (Not Supported)
-
-Some sites load content dynamically as you scroll (infinite scroll). These sites are **not currently supported** by the scraper.
-
-### How to Identify
-
-The pagination discovery will detect infinite scroll and report:
-```
-✗ Pagination discovery failed
-Error: Infinite scroll not supported
-```
-
-### Examples of Infinite Scroll Sites
-- sullcrom.com/lawyers
-- Some sections of compass.com
-
-### Workaround
-
-For infinite scroll sites, you may need to:
-1. Manually scroll to load all content
-2. Save the page as HTML
-3. Extract contacts from the saved HTML using other tools
-
-## Pagination Testing
-
-Test pagination patterns before scraping multiple pages:
+Validate and fill missing data by visiting profile pages:
 
 ```bash
-# Comprehensive pagination analysis (pattern detection + validation)
-node tests/pagination-test.js --url "https://site.com/agents/" --save-cache
+# Basic enrichment
+node src/tools/enrich-contacts.js --input output/scrape.json
 
-# Integration test (full workflow: discover + scrape 5 pages)
-node tests/pagination-integration-test.js --url "URL" --max-pages 5
+# With verbose output
+node src/tools/enrich-contacts.js --input output/scrape.json --verbose
 
-# Quick validation
-node tests/pagination-test.js --url "URL" --validate-sample 5
+# Limit contacts (for testing)
+node src/tools/enrich-contacts.js --input output/scrape.json --limit 10
 
-# Export results for analysis
-node tests/pagination-test.js --url "URL" --output results.json
+# Resume from specific contact
+node src/tools/enrich-contacts.js --input output/scrape.json --resume-from 50
+
+# Only core fields (skip bio, education, etc.)
+node src/tools/enrich-contacts.js --input output/scrape.json --core-fields-only
 ```
 
-See [tests/README.md](tests/README.md) for detailed documentation.
+**Enrichment Actions:**
+- `ENRICHED`: Original missing, profile has data
+- `VALIDATED`: Exact match confirmed
+- `CLEANED`: Contaminated data fixed (e.g., "John DoePartner" → "John Doe")
+- `REPLACED`: Mismatch resolved (flagged for review)
 
-### Using Pagination
+### Export
 
-After validating pagination patterns:
+Export contacts to Google Sheets:
 
 ```bash
-# Scrape multiple pages
-node orchestrator.js --url "URL" --method select --paginate --max-pages 10
+# Default columns (Name, Email, Phone, Title, Location, Profile URL)
+node src/tools/export-to-sheets.js --input output/enriched.json --name "My Contacts"
 
-# Start from specific page (resume)
-node orchestrator.js --url "URL" --method select --paginate --start-page 5
+# Only core fields
+node src/tools/export-to-sheets.js --input output/enriched.json --core-only
 
-# Discover pattern only (no scraping)
-node orchestrator.js --url "URL" --method select --paginate --discover-only
+# Specific columns
+node src/tools/export-to-sheets.js --input output/enriched.json --columns name,email,phone
+
+# Include enrichment metadata
+node src/tools/export-to-sheets.js --input output/enriched.json --include-enrichment
 ```
 
-## Node.js Scraper
+---
 
-Fast HTML-first extraction with PDF fallback.
+## CLI Reference
 
-### Installation
+### orchestrator.js (Main Entry Point)
 
 ```bash
-npm install
+node orchestrator.js [options]
 ```
 
-### Usage
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-u, --url <url>` | Target URL (required) | - |
+| `-m, --method <type>` | Extraction method: `html\|pdf\|hybrid\|select\|config` | `hybrid` |
+| `-c, --config <name>` | Config name for `--method config` | auto-detect |
+| `-l, --limit <n>` | Maximum contacts to extract | unlimited |
+| `--headless <bool>` | Browser visibility | `true` |
+| `--paginate` | Enable pagination handling | `false` |
+| `--max-pages <n>` | Maximum pages to scrape | unlimited |
+| `--scroll` | Enable infinite scroll handling | `false` |
+| `--output <format>` | Output format: `json\|csv\|sheets\|all` | `json` |
+
+**Full Pipeline Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--full-pipeline` | Run complete workflow: config → scrape → enrich → export |
+| `--auto` | Skip confirmation prompts |
+| `--skip-config-gen` | Use existing config, don't generate |
+| `--no-enrich` | Skip enrichment stage |
+| `--no-export` | Skip export stage |
+
+**Validation Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--validate` | Run validation tool |
+| `-v, --verbose` | Detailed output |
+
+### Tools
+
+| Tool | Purpose | Usage |
+|------|---------|-------|
+| `config-generator.js` | Visual config creation | `node src/tools/config-generator.js --url "URL"` |
+| `validate-config.js` | Quick config testing | `node src/tools/validate-config.js --url "URL"` |
+| `test-config.js` | Config extraction test | `node src/tools/test-config.js domain-name --limit 5` |
+| `enrich-contacts.js` | Profile enrichment | `node src/tools/enrich-contacts.js --input file.json` |
+| `export-to-sheets.js` | Google Sheets export | `node src/tools/export-to-sheets.js --input file.json` |
+
+---
+
+## Configuration
+
+### Environment Variables (.env)
 
 ```bash
-node orchestrator.js --url "URL" [options]
+# Google Sheets API (optional)
+GOOGLE_SHEETS_CLIENT_EMAIL=service-account@project.iam.gserviceaccount.com
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
 ```
 
-**Options:**
-```
--u, --url <url>              Target URL (required)
--l, --limit <number>         Limit contacts
--m, --method <type>          Method: html|pdf|hybrid (default: hybrid)
--o, --output <format>        Format: json|csv (default: json)
---headless <true|false>      Browser mode (default: true)
---keep                       Keep PDF files
---use-python                 Use Python scraper (recommended)
-```
+### Site Configs (v2.3)
 
-**Examples:**
-
-```bash
-# Basic scrape
-node orchestrator.js --url "https://example.com/agents" --limit 20
-
-# Use Python scraper for better accuracy
-node orchestrator.js --url "https://example.com/agents" --use-python --limit 20
-
-# Visible browser
-node orchestrator.js --url "https://example.com/agents" --headless false --limit 10
-```
-
-## Project Structure
-
-```
-page-scrape/
-├── orchestrator.js           # Main Node.js CLI
-├── scrapers/
-│   ├── simple-scraper.js    # HTML-first scraper
-│   └── pdf-scraper.js       # PDF-only scraper
-├── python_scraper/          # ⭐ Python coordinate-based scraper
-│   ├── cli.py              # Python CLI entry point
-│   ├── pdf_extract.py      # Core extraction logic
-│   ├── browser.py          # Playwright browser
-│   ├── models.py           # Data structures
-│   └── test_scraper.py     # Test script
-├── utils/
-│   ├── logger.js
-│   ├── browser-manager.js
-│   └── domain-extractor.js
-├── output/                  # Output files
-│   ├── contacts-*.json     # Contact data
-│   └── pdfs/               # PDF files (if --keep)
-└── logs/                    # Log files
-```
-
-## Output Format
-
-Both scrapers produce consistent JSON output:
+Configs are stored in `configs/website-configs/{domain}.json`:
 
 ```json
 {
-  "metadata": {
-    "scrapedAt": "2025-11-21T20:30:00.000Z",
-    "url": "https://example.com/agents",
-    "totalContacts": 20,
-    "domainStats": {
-      "businessEmailCount": 20,
-      "topDomains": [...]
+  "version": "2.3",
+  "selectionMethod": "manual-validated",
+  "name": "example-com",
+  "domain": "example.com",
+  "sourceUrl": "https://example.com/directory",
+
+  "cardPattern": {
+    "primarySelector": ".person-card",
+    "sampleDimensions": { "width": 300, "height": 200 }
+  },
+
+  "fields": {
+    "name": {
+      "required": true,
+      "userValidatedMethod": "coordinate-text",
+      "coordinates": { "x": 10, "y": 20, "width": 150, "height": 30 },
+      "sampleValue": "John Smith"
+    },
+    "email": {
+      "userValidatedMethod": "mailto-link",
+      "coordinates": { "x": 10, "y": 60, "width": 200, "height": 20 }
     }
   },
-  "contacts": [
-    {
-      "name": "Brandon Abelard",
-      "email": "brandon.abelard@compass.com",
-      "phone": "+1-929-543-8528",
-      "domain": "compass.com",
-      "domainType": "business",
-      "source": "pdf",
-      "confidence": "high"
-    }
-  ]
+
+  "pagination": {
+    "paginationType": "infinite-scroll"
+  }
 }
 ```
 
-## Performance Comparison
+---
 
-| Metric | Node.js Scraper | Python Scraper |
-|--------|----------------|----------------|
-| Speed | ~10-15 sec | ~15-30 sec |
-| Name Accuracy | ~60% | >85% |
-| Cross-Contamination | Yes | No |
-| Memory | Lower | Higher |
-| **Best For** | **Speed** | **Accuracy** |
+## Architecture
 
-## How Python Scraper Works
+### Project Structure
 
-1. **PDF Rendering**: Renders webpage as PDF with Playwright
-2. **Coordinate Extraction**: PDFPlumber extracts text with X/Y coordinates
-3. **Email Detection**: Finds all emails using regex
-4. **Spatial Search**: For each email:
-   - Searches 60 pixels above for names
-   - Searches 40 pixels below for phones
-   - Within ±100 pixels horizontally
-5. **Validation**: Filters UI elements using comprehensive blacklist
-6. **Domain Classification**: Categorizes business vs personal emails
+```
+page-scrape/
+├── orchestrator.js              # Main CLI entry point
+├── configs/
+│   ├── _default.json           # Default fallback config
+│   └── website-configs/        # Site-specific configs
+├── src/
+│   ├── core/                   # Core infrastructure
+│   │   ├── browser-manager.js  # Puppeteer browser
+│   │   ├── selenium-manager.js # Selenium for infinite scroll
+│   │   ├── rate-limiter.js     # Request throttling
+│   │   └── logger.js           # Winston logging
+│   │
+│   ├── workflows/              # High-level orchestrators
+│   │   └── full-pipeline.js    # Full pipeline workflow
+│   │
+│   ├── scrapers/               # Scraping implementations
+│   │   ├── config-scraper.js   # Main config-based scraper
+│   │   └── config-scrapers/    # Specialized scrapers
+│   │       ├── infinite-scroll-scraper.js
+│   │       ├── pagination-scraper.js
+│   │       └── single-page-scraper.js
+│   │
+│   ├── features/
+│   │   ├── enrichment/         # Profile enrichment system
+│   │   ├── pagination/         # Pagination handling
+│   │   └── export/             # Google Sheets export
+│   │
+│   ├── extraction/             # Field extraction
+│   │   └── extractors/         # Email, phone, link extractors
+│   │
+│   ├── utils/                  # Utilities
+│   │   └── prompt-helper.js    # Terminal UI utilities
+│   │
+│   └── tools/                  # CLI tools
+│       ├── config-generator.js
+│       ├── validate-config.js
+│       ├── enrich-contacts.js
+│       └── export-to-sheets.js
+│
+├── output/                     # Scraped data output
+└── logs/                       # Log files
+```
 
-## Accuracy Features
+### Extraction Methods
 
-### UI Element Blacklist
+The system uses a 4-layer detection strategy:
 
-Filters out:
-- Authentication (Sign In, Log In, Register)
-- Actions (Contact Us, View Profile, Learn More)
-- Form Labels (Name, Email, Phone)
-- Locations (Manhattan, Brooklyn, NYC)
-- Company Names (Compass, Compass One)
-- Generic Terms (Agent, Broker, Team)
+1. **Direct Hit**: Click point directly on mailto/tel link
+2. **Text-Triggered**: "Email" keyword triggers nearby mailto search
+3. **Expanded Area**: Search ±100px region for links
+4. **Fallback**: Regex extraction or OCR
 
-### Name Validation
+### Infinite Scroll
 
-- Must be 2-50 characters
-- Must start with capital letter
-- Must match pattern: `^[A-Z][a-zA-Z'\-\.\s]{1,48}[a-zA-Z]$`
-- No UI words (find, agent, register)
+All infinite scroll uses **Selenium PAGE_DOWN key simulation**:
+- More reliable than Puppeteer wheel events
+- Tested: 584 contacts extracted vs 10 with Puppeteer
+- Auto-detected from config version and selectionMethod
 
-### Phone Normalization
+---
 
-Formats: `+1-XXX-XXX-XXXX`
+## Output Format
+
+### Contact JSON
+
+```json
+{
+  "name": "John Smith",
+  "email": "jsmith@company.com",
+  "phone": "+1-212-555-1234",
+  "title": "Partner",
+  "location": "New York, NY",
+  "profileUrl": "https://company.com/people/john-smith",
+  "domain": "company.com",
+  "domainType": "business",
+  "confidence": "high",
+  "_enrichment": {
+    "enrichedAt": "2025-12-10T...",
+    "actions": {
+      "name": "CLEANED",
+      "email": "ENRICHED",
+      "phone": "VALIDATED"
+    }
+  }
+}
+```
+
+---
 
 ## Troubleshooting
 
-### Python: Module not found
+### Common Issues
 
+**Config not found:**
 ```bash
-pip install -r python_scraper/requirements.txt
+# Generate a new config
+node src/tools/config-generator.js --url "https://example.com/directory"
 ```
 
-### Python: Playwright browser issues
-
+**No contacts extracted:**
 ```bash
-playwright install --with-deps chromium
+# Run validation with visible browser
+node src/tools/validate-config.js --url "URL" --show --verbose
 ```
 
-On Windows, run as Administrator.
+**Infinite scroll not loading:**
+- Ensure Chrome is installed (system Chrome, not bundled)
+- Try increasing scroll delay: `--scroll-delay 600`
+- Check max retries: `--max-retries 30`
 
-### Node.js: Puppeteer issues
+**Google Sheets export fails:**
+1. Verify `.env` credentials are correct
+2. Ensure spreadsheet is shared with service account email
+3. Check that Google Sheets API is enabled in GCP console
+
+### Logs
+
+- Main log: `logs/scraper.log`
+- Error log: `logs/error.log`
+- Verbose logging: Add `--verbose` flag
+
+---
+
+## Testing
 
 ```bash
-npm install
-npx puppeteer browsers install chrome
+# Run basic tests
+npm test
+
+# Test enrichment system (68 test cases)
+node tests/enrichment-test.js
+
+# Test post-cleaning (41 test cases)
+node tests/post-cleaning-test.js
+
+# Test Selenium infinite scroll
+node tests/selenium-infinite-scroll.test.js
 ```
 
-### No contacts extracted
-
-- Try `--headless false` to see the page
-- Use `--keep` to inspect PDFs manually
-- Check `logs/` for detailed error messages
-
-## Development
-
-### Running Tests
-
-**Python tests:**
-```bash
-python -m python_scraper.test_scraper --urls "URL1" "URL2" --limit 20
-```
-
-**Node.js tests:**
-```bash
-node test-zone-extraction.js  # (if available)
-```
-
-### Logging
-
-- Node.js logs: `logs/scraper.log`
-- Python logs: `logs/python_scraper.log`
+---
 
 ## License
 
 MIT License
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test with both scrapers
-5. Submit a pull request
+---
 
 ## Support
 
 For issues or questions:
-1. Check the troubleshooting section
+1. Check the troubleshooting section above
 2. Review logs in `logs/` directory
-3. Try with `--headless false` to debug visually
-4. Open an issue with log output
-# Site Configuration Files
-
-Site-specific configuration files for the select scraping method. Each config defines extraction boundaries and parsing rules for a specific website.
-
-## Config File Format
-
-Each config file should be named `domain.json` (e.g., `compass.com.json`) and placed in this directory.
-
-### Structure
-
-```json
-{
-  "domain": "example.com",
-  "name": "Human-Readable Site Name",
-  "description": "Description of what this site contains",
-  "markers": {
-    "start": { /* Start boundary marker */ },
-    "end": { /* End boundary marker */ }
-  },
-  "scrollBehavior": { /* Page scrolling settings */ },
-  "parsing": { /* Text parsing rules */ }
-}
-```
-
-## Marker Types
-
-Markers define the extraction boundaries on the page. Two types are supported:
-
-### Text Markers
-
-Find visible text in the DOM and use its position as the boundary.
-
-```json
-{
-  "type": "text",
-  "value": "Agents Found"
-}
-```
-
-**How it works:**
-- Searches the page for the exact text string
-- Uses the bounding rectangle of that text node
-- Useful for headings, labels, or consistent UI elements
-
-**Finding text markers:**
-1. Open the page in your browser
-2. Right-click and select "Inspect Element"
-3. Use Ctrl+F (Cmd+F on Mac) in DevTools to search for text
-4. Verify the text appears consistently on all pages
-
-### Coordinate Markers
-
-Use pixel coordinates (x, y) relative to the page to define the boundary.
-
-```json
-{
-  "type": "coordinate",
-  "value": {"x": 100, "y": 200}
-}
-```
-
-**How it works:**
-- Uses the exact pixel position on the page
-- Coordinates are relative to the top-left corner (0, 0)
-- Useful when text markers aren't reliable
-
-**Finding coordinates:**
-1. Open DevTools (F12)
-2. Go to Console tab
-3. Run this JavaScript:
-```javascript
-document.addEventListener('click', (e) => {
-  console.log(`Clicked at x: ${e.pageX}, y: ${e.pageY}`);
-});
-```
-4. Click on the page where you want the boundary
-5. Note the coordinates from the console
-
-### Mixed Markers
-
-You can mix marker types - e.g., text start with coordinate end:
-
-```json
-{
-  "markers": {
-    "start": {
-      "type": "text",
-      "value": "Contact List"
-    },
-    "end": {
-      "type": "coordinate",
-      "value": {"x": 0, "y": 5000}
-    }
-  }
-}
-```
-
-## Scroll Behavior
-
-Controls page scrolling to load lazy-loaded content (infinite scroll, dynamic lists).
-
-```json
-{
-  "scrollBehavior": {
-    "enabled": true,        // Enable/disable scrolling
-    "scrollDelay": 500,     // Wait time (ms) between scrolls
-    "maxScrolls": 50        // Maximum scroll attempts
-  }
-}
-```
-
-**Settings:**
-- `enabled`: Set to `false` for pages with no lazy loading
-- `scrollDelay`: Increase for slower-loading pages (1000-2000ms)
-- `maxScrolls`: Increase for very long lists (100+)
-
-## Parsing Rules
-
-Controls how text is parsed into contact records.
-
-```json
-{
-  "parsing": {
-    "emailDomain": "compass.com",  // Filter to specific domain (or null for all)
-    "nameBeforeEmail": true        // Look for name above (true) or below (false) email
-  }
-}
-```
-
-**Settings:**
-- `emailDomain`:
-  - Set to specific domain (e.g., `"compass.com"`) to filter emails
-  - Set to `null` to accept all email domains
-- `nameBeforeEmail`:
-  - `true`: Name appears above email in layout (most common)
-  - `false`: Name appears below email
-
-## Example Configs
-
-### Example 1: Real Estate Directory
-
-```json
-{
-  "domain": "remax.com",
-  "name": "RE/MAX Agent Directory",
-  "markers": {
-    "start": {
-      "type": "text",
-      "value": "Find an Agent"
-    },
-    "end": {
-      "type": "text",
-      "value": "Load More Agents"
-    }
-  },
-  "scrollBehavior": {
-    "enabled": true,
-    "scrollDelay": 1000,
-    "maxScrolls": 30
-  },
-  "parsing": {
-    "emailDomain": null,
-    "nameBeforeEmail": true
-  }
-}
-```
-
-### Example 2: Corporate Directory (Fixed Layout)
-
-```json
-{
-  "domain": "company.com",
-  "name": "Company Employee Directory",
-  "markers": {
-    "start": {
-      "type": "coordinate",
-      "value": {"x": 0, "y": 300}
-    },
-    "end": {
-      "type": "coordinate",
-      "value": {"x": 0, "y": 3000}
-    }
-  },
-  "scrollBehavior": {
-    "enabled": false
-  },
-  "parsing": {
-    "emailDomain": "company.com",
-    "nameBeforeEmail": true
-  }
-}
-```
-
-## Creating a New Config
-
-1. **Identify the domain**: Use the base domain (e.g., `example.com`)
-2. **Find start marker**: Locate consistent text/position before the contact list
-3. **Find end marker**: Locate consistent text/position after the contact list
-4. **Test scroll behavior**: Check if the page uses lazy loading
-5. **Verify email domain**: Check if all contacts use the same email domain
-6. **Create the file**: Name it `domain.json` and place it in `configs/`
-7. **Test**: Run the scraper with `--method select` to verify
-
-## Troubleshooting
-
-### Marker not found
-- **Text markers**: Text might be dynamic or in an iframe
-- **Solution**: Try coordinate markers or adjust the text string
-
-### Wrong content extracted
-- **Issue**: Markers are too broad or too narrow
-- **Solution**: Adjust marker positions, use more specific text
-
-### Missing contacts
-- **Issue**: Content loaded dynamically after markers found
-- **Solution**: Increase `scrollDelay` or `maxScrolls`
-
-### Too much content extracted
-- **Issue**: End marker is too far down the page
-- **Solution**: Find a marker closer to the contact list end
-
-## Testing Your Config
-
-```bash
-# Test with the select method
-node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/" --method select --limit 10
-
-# Keep PDF for debugging
-node orchestrator.js --url "https://example.com/directory" --method select --keep --limit 5
-```
-
-## Best Practices
-
-1. **Use text markers when possible** - More reliable across page changes
-2. **Test on multiple pages** - Verify markers work for different queries
-3. **Start narrow** - Begin with tight boundaries, expand if needed
-4. **Document your choices** - Add descriptive `description` field
-5. **Version control** - Commit config files to track changes
+3. Run with `--verbose` for detailed output
+4. Open an issue on GitHub with log output

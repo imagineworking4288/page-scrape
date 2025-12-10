@@ -295,13 +295,84 @@ echo   configs/                     - Site-specific JSON configurations
 echo   tests/                       - Test suites (pagination)
 echo   output/                      - JSON output files
 echo.
+echo --------------------------------------------------------------------------------
+echo [FULL PIPELINE WORKFLOW] (NEW)
+echo --------------------------------------------------------------------------------
+echo   End-to-end workflow: config generation -^> scraping -^> enrichment -^> export
+echo.
+echo   # Full pipeline with prompts at each stage
+echo   node orchestrator.js --full-pipeline --url "https://example.com/directory"
+echo.
+echo   # Auto mode (skip prompts after config generation)
+echo   node orchestrator.js --full-pipeline --url "https://example.com/directory" --auto
+echo.
+echo   # With limit for testing
+echo   node orchestrator.js --full-pipeline --url "URL" --limit 10 --auto
+echo.
+echo   # Skip config generation (use existing config)
+echo   node orchestrator.js --full-pipeline --url "URL" --skip-config-gen --auto
+echo.
+echo   # Stop after scraping (no enrichment)
+echo   node orchestrator.js --full-pipeline --url "URL" --no-enrich --auto
+echo.
+echo   # Stop after enrichment (no export)
+echo   node orchestrator.js --full-pipeline --url "URL" --no-export --auto
+echo.
+echo   WORKFLOW STAGES:
+echo     1. Config Check/Generation: Verifies or creates site-specific config
+echo     2. Scraping: Extracts contacts from all pages
+echo     3. Enrichment: Visits profiles to clean and enrich data
+echo     4. Export: Sends to Google Sheets with formatting
+echo.
+echo   CONFIRMATION POINTS (skipped in --auto mode):
+echo     - After config generation: "Proceed to scraping?"
+echo     - After scraping: "Proceed to enrichment?"
+echo     - After enrichment: "Export to Google Sheets?"
+echo.
+echo --------------------------------------------------------------------------------
+echo [CONFIG VALIDATION TOOL] (NEW)
+echo --------------------------------------------------------------------------------
+echo   Quick test to validate a config works before full scrape.
+echo   Tests first N contacts end-to-end (scraping + enrichment).
+echo.
+echo   # Test first 2 contacts (default)
+echo   node orchestrator.js --validate --url "https://example.com/directory"
+echo.
+echo   # Or use the tool directly
+echo   node src/tools/validate-config.js --url "https://example.com/directory"
+echo.
+echo   # Custom test size
+echo   node src/tools/validate-config.js --url "URL" --limit 5
+echo.
+echo   # Verbose output with field details
+echo   node src/tools/validate-config.js --url "URL" --limit 2 --verbose
+echo.
+echo   # Skip enrichment (just test scraping)
+echo   node src/tools/validate-config.js --url "URL" --no-enrich
+echo.
+echo   # Test with visible browser
+echo   node src/tools/validate-config.js --url "URL" --show
+echo.
+echo   VALIDATION OUTPUT:
+echo     - Config summary: version, fields, pagination type
+echo     - Scraped contacts table: shows data quality
+echo     - Enrichment comparison: before/after for each field
+echo     - Overall status: PASSED or ISSUES DETECTED
+echo     - Recommendations: next steps or fixes needed
+echo.
 echo ================================================================================
 echo [QUICK START]
 echo ================================================================================
 color 0E
 echo.
+echo   VALIDATE CONFIG (before full scrape):
+echo     node orchestrator.js --validate --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --limit 2
+echo.
+echo   FULL PIPELINE (complete workflow):
+echo     node orchestrator.js --full-pipeline --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --auto
+echo.
 echo   GENERATE CONFIG (visual):
-echo     node tools/config-generator.js --url "https://www.sullcrom.com/lawyers"
+echo     node src/tools/config-generator.js --url "https://www.sullcrom.com/lawyers"
 echo.
 echo   DIAGNOSE SITE:
 echo     node tools/site-tester.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/"

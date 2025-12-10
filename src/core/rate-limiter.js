@@ -164,6 +164,14 @@ class RateLimiter {
       this.logger.debug('Rate limiter reset');
     }
   }
+
+  /**
+   * Alias for waitBeforeRequest() - for backward compatibility
+   * Some scrapers use rateLimiter.wait() instead of waitBeforeRequest()
+   */
+  async wait() {
+    return this.waitBeforeRequest();
+  }
 }
 
 module.exports = RateLimiter;

@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 10, 2025
+**Last Updated**: December 10, 2025 (Added Full Pipeline Workflow, Validation Tool, Terminal Prompt Utilities)
 
 ---
 
@@ -62,6 +62,9 @@ page-scrape/
 │   │   ├── selenium-manager.js # Selenium WebDriver handling (for infinite scroll)
 │   │   ├── logger.js           # Winston logging setup
 │   │   └── rate-limiter.js     # Request throttling
+│   │
+│   ├── workflows/              # High-level workflow orchestrators
+│   │   └── full-pipeline.js    # Full pipeline: config → scrape → enrich → export
 │   │
 │   ├── config/                 # Configuration management
 │   │   ├── index.js            # Config exports
@@ -131,11 +134,13 @@ page-scrape/
 │   │   ├── text-parser.js      # Text-to-contact parsing
 │   │   ├── profile-visitor.js  # Profile page enrichment
 │   │   ├── google-sheets-exporter.js # Google Sheets export
+│   │   ├── prompt-helper.js    # Terminal prompt utilities (y/n, tables, headers)
 │   │   └── constants.js        # Shared constants
 │   │
 │   └── tools/                  # Development/utility tools
 │       ├── config-generator.js # Interactive config creator (v2.3)
 │       ├── test-config.js      # v2.3 Config testing tool
+│       ├── validate-config.js  # Quick config validation with N contacts
 │       ├── site-tester.js      # Site testing utility
 │       ├── assets/             # UI assets for config generator
 │       │   ├── overlay.html    # v2.3 overlay UI HTML/CSS
@@ -201,6 +206,17 @@ node orchestrator.js --url <url>           # Target URL (required)
                      --max-pages <n>       # Max pages to scrape
                      --scroll              # Enable infinite scroll handling
                      --max-scrolls <n>     # Max scroll attempts (default: 50)
+
+# Full Pipeline Workflow Options
+                     --full-pipeline       # Run full pipeline: config → scrape → enrich → export
+                     --auto                # Skip confirmation prompts in full-pipeline mode
+                     --skip-config-gen     # Skip config generation, use existing config
+                     --no-enrich           # Skip enrichment stage
+                     --no-export           # Skip export stage
+
+# Validation Tool Options
+                     --validate            # Run validation tool (quick test with first N contacts)
+                     -v, --verbose         # Detailed output with field-level information
 ```
 
 **Dependencies**: All scrapers, browser-manager, rate-limiter, logger, paginator
@@ -759,6 +775,76 @@ node src/tools/test-config.js sullcrom-com --limit 5
 node src/tools/test-config.js example-com --limit 10 --verbose --show
 ```
 
+#### src/tools/validate-config.js
+
+**Purpose**: Quick config validation tool that tests scraping and enrichment on first N contacts before running a full scrape.
+
+**Usage**:
+```bash
+# Basic usage - test 2 contacts
+node src/tools/validate-config.js --url "https://example.com/directory"
+
+# Test 5 contacts with verbose output
+node src/tools/validate-config.js --url "URL" --limit 5 --verbose
+
+# Skip enrichment testing
+node src/tools/validate-config.js --url "URL" --no-enrich
+
+# Show browser (visible mode)
+node src/tools/validate-config.js --url "URL" --show
+```
+
+**CLI Options**:
+- `-u, --url <url>` - Target URL (required)
+- `-l, --limit <number>` - Number of contacts to test (default: 2)
+- `-c, --config <name>` - Config name (auto-detect from URL if not provided)
+- `--no-enrich` - Skip enrichment testing
+- `--show` - Show browser (visible mode)
+- `--headless <bool>` - Browser mode (default: true)
+- `-v, --verbose` - Detailed output with field-level information
+
+**Validation Steps**:
+1. **Config Check**: Locates and validates the config file for the URL's domain
+2. **Scraping Test**: Tests extraction on first N contacts using appropriate scraper (auto-detects infinite scroll)
+3. **Enrichment Test**: Tests profile enrichment on contacts with profile URLs
+4. **Validation Summary**: Reports issues and recommendations
+
+**Auto-Detection Features**:
+- Automatically detects infinite scroll pages based on config version (v2.3) and selectionMethod
+- Uses Selenium PAGE_DOWN for infinite scroll, Puppeteer for traditional pages
+- Identifies data quality issues (contaminated names, phones in locations)
+
+**Output Example**:
+```
+============================================================
+                    CONFIG VALIDATION TOOL
+============================================================
+Target URL: https://www.sullcrom.com/lawyers
+Domain: sullcrom.com
+Test contacts: 2
+Test enrichment: yes
+
+============================================================
+                    STEP 1: CONFIG CHECK
+============================================================
+✓ Found config: sullcrom-com.json
+
+============================================================
+                    STEP 2: SCRAPING TEST
+============================================================
+Pagination type: infinite-scroll (auto-detected)
+Using Selenium (PAGE_DOWN)
+...
+✓ Scraped 2 contacts
+
+============================================================
+                    VALIDATION SUMMARY
+============================================================
+✓ VALIDATION PASSED
+Config is working correctly. Ready for full scrape:
+  node orchestrator.js --url "URL" --method config --scroll
+```
+
 #### src/tools/enrich-contacts.js
 
 **Purpose**: CLI tool to enrich scraped contacts using profile page data.
@@ -1118,6 +1204,36 @@ node src/tools/enrich-contacts.js --input output/scrape.json --fields name,email
 ```bash
 # Run all enrichment tests (68 test cases)
 node tests/enrichment-test.js
+```
+
+### Validating a Config Before Full Scrape
+```bash
+# Quick validation with 2 contacts (default)
+node src/tools/validate-config.js --url "https://example.com/directory"
+
+# Thorough validation with verbose output
+node src/tools/validate-config.js --url "URL" --limit 10 --verbose
+
+# Via orchestrator
+node orchestrator.js --url "URL" --validate --limit 5
+```
+
+### Running Full Pipeline (Config → Scrape → Enrich → Export)
+```bash
+# Interactive mode with confirmation prompts
+node orchestrator.js --url "https://example.com/directory" --full-pipeline
+
+# Auto mode (no prompts) - for automation
+node orchestrator.js --url "URL" --full-pipeline --auto
+
+# Use existing config (skip generation)
+node orchestrator.js --url "URL" --full-pipeline --skip-config-gen --auto
+
+# Skip enrichment stage
+node orchestrator.js --url "URL" --full-pipeline --no-enrich --auto
+
+# With Google Sheets export
+node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 ```
 
 ---
@@ -1750,4 +1866,299 @@ const {
 
 // Or via main enrichment index:
 const { FieldCleaner, postCleaners } = require('./src/features/enrichment');
+```
+
+---
+
+## Full Pipeline Workflow (December 2025)
+
+**Location**: `src/workflows/full-pipeline.js`
+
+**Purpose**: End-to-end workflow that chains all stages: config generation → scraping → enrichment → export. Provides a single command to process a new site from start to finish.
+
+**Module Architecture**:
+```
+src/workflows/
+└── full-pipeline.js    # FullPipelineOrchestrator class
+```
+
+**Key Features**:
+- Automatic config detection or generation
+- Interactive confirmation prompts between stages (skippable with `--auto`)
+- Graceful error handling with partial result saving
+- Progress tracking with stage headers and summaries
+- Auto-detection of infinite scroll from config characteristics
+
+**Workflow Stages**:
+1. **Config Check**: Locate existing config or generate new one
+2. **Scraping**: Extract contacts using appropriate scraper
+3. **Enrichment**: Visit profile pages to validate/fill data
+4. **Export**: Save to JSON, CSV, or Google Sheets
+
+**CLI Usage**:
+```bash
+# Full pipeline with prompts
+node orchestrator.js --url "https://example.com/directory" --full-pipeline
+
+# Full pipeline without prompts (auto mode)
+node orchestrator.js --url "URL" --full-pipeline --auto
+
+# Skip config generation (use existing)
+node orchestrator.js --url "URL" --full-pipeline --skip-config-gen
+
+# Skip enrichment
+node orchestrator.js --url "URL" --full-pipeline --no-enrich
+
+# Skip export
+node orchestrator.js --url "URL" --full-pipeline --no-export
+
+# Limit contacts and export to Google Sheets
+node orchestrator.js --url "URL" --full-pipeline --limit 100 --output sheets
+```
+
+**FullPipelineOrchestrator Class**:
+
+```javascript
+class FullPipelineOrchestrator {
+  constructor(options, logger) {
+    // options: url, limit, headless, auto, skipConfigGen, noEnrich, noExport, output
+  }
+
+  async run() {
+    await this.stageConfigCheck();
+    if (!await this.confirmProceedToScraping()) return;
+    await this.stageScraping();
+    if (!this.options.noEnrich && await this.confirmProceedToEnrichment()) {
+      await this.stageEnrichment();
+    }
+    if (!this.options.noExport && await this.confirmProceedToExport()) {
+      await this.stageExport();
+    }
+    await this.displayCompletion();
+  }
+}
+```
+
+**Key Methods**:
+- `stageConfigCheck()` - Check/generate config, display config summary
+- `stageScraping()` - Run appropriate scraper based on config
+- `stageEnrichment()` - Enrich contacts with profile data
+- `stageExport()` - Export to configured format(s)
+- `confirmProceedTo*()` - Interactive y/n prompts (skipped in auto mode)
+- `displayCompletion()` - Show final summary and next steps
+
+**Auto Mode** (`--auto`):
+- Skips all confirmation prompts
+- Runs all stages automatically
+- Useful for scheduled jobs or CI/CD pipelines
+
+**Error Handling**:
+- Each stage wrapped in try/catch
+- Partial results saved on error
+- Graceful degradation (continues to next stage if possible)
+- Cleanup on process signals (SIGINT, SIGTERM)
+
+**Import Path**:
+```javascript
+const FullPipelineOrchestrator = require('./src/workflows/full-pipeline');
+```
+
+---
+
+## Terminal Prompt Utilities (December 2025)
+
+**Location**: `src/utils/prompt-helper.js`
+
+**Purpose**: Reusable terminal prompt utilities for interactive CLI workflows. Provides consistent UI elements across all tools.
+
+**Exported Functions**:
+
+### Confirmation Prompts
+
+```javascript
+// Yes/No confirmation with default value
+const proceed = await confirmYesNo('Continue with scraping?', true);
+// Output: Continue with scraping? (Y/n):
+
+// Multiple choice options
+const choice = await confirmOptions('Select output format:', ['json', 'csv', 'sheets'], 'json');
+// Output: Select output format: [1] json, [2] csv, [3] sheets (default: json):
+
+// Wait for Enter key
+await waitForEnter('Press Enter to continue...');
+```
+
+### Display Utilities
+
+```javascript
+// Stage header with decorative borders
+displayStageHeader('SCRAPING RESULTS');
+// Output:
+// ============================================================
+//                     SCRAPING RESULTS
+// ============================================================
+
+// Summary table with key-value pairs
+displayStageSummary({
+  'Total contacts': 150,
+  'With email': '120 (80%)',
+  'Duration': '2m 30s'
+}, 'Scraping Summary:');
+
+// Success/Error/Warning/Info messages
+displaySuccess('Scraping completed successfully');  // ✓ Scraping completed successfully
+displayError('Failed to connect');                  // ✗ Failed to connect
+displayWarning('Some contacts missing emails');     // ⚠ Some contacts missing emails
+displayInfo('Using Selenium for infinite scroll');  // ℹ Using Selenium for infinite scroll
+```
+
+### Contact Display
+
+```javascript
+// Display contacts in formatted table
+displayContactsTable(contacts, 5);  // Show first 5 contacts
+// Output:
+// ┌─────────────────────┬─────────────────────┬────────────────┬──────────────┐
+// │ Name                │ Email               │ Phone          │ Title        │
+// ├─────────────────────┼─────────────────────┼────────────────┼──────────────┤
+// │ John Smith          │ jsmith@example.com  │ +1-212-555-... │ Partner      │
+// │ Jane Doe            │ jdoe@example.com    │ +1-212-555-... │ Associate    │
+// └─────────────────────┴─────────────────────┴────────────────┴──────────────┘
+
+// Field-by-field comparison (for enrichment)
+displayFieldComparison(originalContact, enrichedContact, actions);
+```
+
+### Progress Utilities
+
+```javascript
+// Progress indicator with percentage
+displayProgressIndicator(50, 200, 'Enriching contacts');
+// Output: [################                ] 50/200 (25%) - Enriching contacts
+
+// Countdown timer
+await countdown(5, 'Starting in');
+// Output: Starting in 5... 4... 3... 2... 1...
+
+// Completion summary with timing
+displayCompletionSummary({
+  'Stage': 'Enrichment',
+  'Contacts processed': 150,
+  'Duration': '5m 23s',
+  'Output file': 'output/enriched.json'
+});
+```
+
+**Function Reference**:
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `confirmYesNo(message, default)` | Y/n prompt with retry on invalid input | `Promise<boolean>` |
+| `confirmOptions(message, options, default)` | Multiple choice prompt | `Promise<string>` |
+| `waitForEnter(message)` | Wait for Enter key | `Promise<void>` |
+| `displayStageHeader(title)` | Decorative section header | `void` |
+| `displayStageSummary(data, title)` | Key-value summary table | `void` |
+| `displaySuccess(message)` | Green checkmark message | `void` |
+| `displayError(message)` | Red X message | `void` |
+| `displayWarning(message)` | Yellow warning message | `void` |
+| `displayInfo(message)` | Blue info message | `void` |
+| `displayContactsTable(contacts, limit)` | Formatted contact table | `void` |
+| `displayFieldComparison(original, enriched, actions)` | Side-by-side comparison | `void` |
+| `displayProgressIndicator(current, total, label)` | Progress bar | `void` |
+| `displayCompletionSummary(stats)` | Final summary | `void` |
+| `countdown(seconds, prefix)` | Countdown timer | `Promise<void>` |
+
+**Import Path**:
+```javascript
+const {
+  confirmYesNo,
+  confirmOptions,
+  waitForEnter,
+  displayStageHeader,
+  displayStageSummary,
+  displaySuccess,
+  displayError,
+  displayWarning,
+  displayInfo,
+  displayContactsTable,
+  displayFieldComparison,
+  displayProgressIndicator,
+  displayCompletionSummary,
+  countdown
+} = require('./src/utils/prompt-helper');
+```
+
+---
+
+## Config Validation Tool (December 2025)
+
+**Location**: `src/tools/validate-config.js`
+
+**Purpose**: Quick validation tool to test a site config works correctly before running a full scrape. Tests scraping and enrichment on first N contacts.
+
+**When to Use**:
+- After creating a new config with the config generator
+- Before running a large scrape job
+- Debugging extraction issues
+- Verifying config works after site changes
+
+**CLI Usage**:
+```bash
+# Quick validation (2 contacts)
+node src/tools/validate-config.js --url "https://example.com/directory"
+
+# Thorough validation (10 contacts, verbose)
+node src/tools/validate-config.js --url "URL" --limit 10 --verbose
+
+# Scrape-only validation (skip enrichment)
+node src/tools/validate-config.js --url "URL" --no-enrich
+
+# Visible browser for debugging
+node src/tools/validate-config.js --url "URL" --show
+```
+
+**Also accessible via orchestrator**:
+```bash
+node orchestrator.js --url "URL" --validate --limit 5 --verbose
+```
+
+**Validation Checks**:
+
+1. **Config Existence**: Verifies config file exists for domain
+2. **Config Structure**: Validates required fields and version
+3. **Card Selector**: Tests card pattern finds elements
+4. **Field Extraction**: Verifies fields extract correctly
+5. **Data Quality**: Checks for contaminated data (titles in names, phones in locations)
+6. **Enrichment** (optional): Tests profile page extraction works
+
+**Auto-Detection**:
+
+The validation tool auto-detects infinite scroll pages based on config characteristics:
+
+```javascript
+// Auto-detected as infinite scroll if:
+// - config.version === '2.3' AND no explicit pagination type
+// - config.selectionMethod === 'manual-validated'
+// - config.selectionMethod === 'manual'
+
+const looksLikeInfiniteScroll = !paginationType && (
+  config.version === '2.3' ||
+  config.selectionMethod === 'manual-validated' ||
+  config.selectionMethod === 'manual'
+);
+```
+
+**Exit Codes**:
+- `0`: Validation passed (or passed with warnings)
+- `1`: Validation failed (scraping returned no contacts)
+
+**Integration with Full Pipeline**:
+
+Run validation before starting full pipeline:
+```bash
+# First validate
+node src/tools/validate-config.js --url "URL" --limit 5
+
+# If validation passes, run full pipeline
+node orchestrator.js --url "URL" --full-pipeline --auto
 ```
