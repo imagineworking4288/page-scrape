@@ -8,6 +8,7 @@ const nameCleaner = require('./name-cleaner');
 const locationCleaner = require('./location-cleaner');
 const titleExtractor = require('./title-extractor');
 const noiseDetector = require('./noise-detector');
+const LocationPhonePreprocessor = require('./location-phone-preprocessor');
 
 module.exports = {
   // Name cleaner
@@ -44,5 +45,8 @@ module.exports = {
   nameCleaner,
   locationCleaner,
   titleExtractor,
-  noiseDetector
+  noiseDetector,
+
+  // Location-Phone Preprocessor class
+  LocationPhonePreprocessor
 };

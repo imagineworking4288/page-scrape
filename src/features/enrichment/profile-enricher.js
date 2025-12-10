@@ -11,6 +11,7 @@ const path = require('path');
 const ProfileExtractor = require('./profile-extractor');
 const fieldComparator = require('./field-comparator');
 const cleaners = require('./cleaners');
+const LocationPhonePreprocessor = require('./cleaners/location-phone-preprocessor');
 
 class ProfileEnricher {
   constructor(browserManager, rateLimiter, logger) {
@@ -20,6 +21,9 @@ class ProfileEnricher {
 
     // Initialize profile extractor
     this.profileExtractor = new ProfileExtractor(browserManager, rateLimiter, logger);
+
+    // Initialize location-phone preprocessor
+    this.locationPhonePreprocessor = new LocationPhonePreprocessor(logger);
 
     // Core fields that should always be considered for enrichment
     this.coreFields = ['name', 'email', 'phone', 'location', 'profileUrl', 'title'];
@@ -284,7 +288,7 @@ class ProfileEnricher {
     this.profileTimes.push(profileTime);
 
     // Build final enriched contact
-    const enrichedContact = {
+    let enrichedContact = {
       ...enrichedData,
       enrichment: enrichmentMetadata,
       _original: this.buildOriginalAuditTrail(contact, comparisons)
@@ -297,6 +301,9 @@ class ProfileEnricher {
     if (contact._extractionMethods) {
       enrichedContact._extractionMethods = contact._extractionMethods;
     }
+
+    // Apply location-phone preprocessing (handles multi-location/multi-phone data)
+    enrichedContact = this.applyLocationPhonePreprocessing(enrichedContact);
 
     return enrichedContact;
   }
@@ -433,6 +440,74 @@ class ProfileEnricher {
       for (const t of transforms) {
         this.logger.debug(t);
       }
+    }
+  }
+
+  /**
+   * Apply location-phone preprocessing to handle multi-location/multi-phone data
+   * Prioritizes US locations and phone numbers
+   * @param {Object} contact - Enriched contact
+   * @returns {Object} - Contact with structured location/phone + alternates
+   */
+  applyLocationPhonePreprocessing(contact) {
+    // Check if location needs preprocessing
+    if (!this.locationPhonePreprocessor.needsPreprocessing(contact.location)) {
+      return contact;
+    }
+
+    try {
+      // Preprocess location and phone data
+      const preprocessed = this.locationPhonePreprocessor.preprocessLocationPhone(contact);
+
+      // Merge preprocessing metadata into enrichment
+      if (preprocessed._enrichment && preprocessed._enrichment.locationPhonePreprocessed) {
+        // Ensure enrichment object exists
+        if (!preprocessed.enrichment) {
+          preprocessed.enrichment = {};
+        }
+
+        // Add preprocessing flag and details
+        preprocessed.enrichment.locationPhonePreprocessed = true;
+        preprocessed.enrichment.preprocessingDetails = preprocessed._enrichment.preprocessingDetails;
+
+        // Log transformation if verbose
+        this.logLocationPhoneTransformation(contact, preprocessed);
+      }
+
+      return preprocessed;
+
+    } catch (error) {
+      this.logger.error(`[ProfileEnricher] [${contact.name || 'Unknown'}] Location-phone preprocessing failed: ${error.message}`);
+      return contact; // Return unchanged on error
+    }
+  }
+
+  /**
+   * Log location-phone preprocessing transformation
+   * @param {Object} original - Original contact
+   * @param {Object} preprocessed - Preprocessed contact
+   */
+  logLocationPhoneTransformation(original, preprocessed) {
+    const changes = [];
+
+    if (original.location !== preprocessed.location) {
+      changes.push(`location: "${original.location}" → "${preprocessed.location}"`);
+    }
+
+    if (preprocessed.alternateLocation) {
+      changes.push(`alternateLocation: "${preprocessed.alternateLocation}"`);
+    }
+
+    if (original.phone !== preprocessed.phone) {
+      changes.push(`phone: "${original.phone || '(empty)'}" → "${preprocessed.phone}"`);
+    }
+
+    if (preprocessed.alternatePhone) {
+      changes.push(`alternatePhone: "${preprocessed.alternatePhone}"`);
+    }
+
+    if (changes.length > 0) {
+      this.logger.info(`[ProfileEnricher] Location-phone preprocessing for ${preprocessed.name || 'Unknown'}: ${changes.join(', ')}`);
     }
   }
 
