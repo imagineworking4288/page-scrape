@@ -10,15 +10,12 @@ class ColumnDetector {
     this.logger = logger;
 
     // Standard column order (core fields first)
-    // Note: alternatePhone/alternateLocation are inserted dynamically after their primary counterparts
     this.standardOrder = [
       'name',
       'email',
       'phone',
-      'alternatePhone',
       'title',
       'location',
-      'alternateLocation',
       'domain',
       'domainType',
       'bio',
@@ -200,10 +197,8 @@ class ColumnDetector {
       name: 'Name',
       email: 'Email',
       phone: 'Phone',
-      alternatePhone: 'Alternate Phone',
       title: 'Title',
       location: 'Location',
-      alternateLocation: 'Alternate Location',
       domain: 'Domain',
       domainType: 'Domain Type',
       bio: 'Bio',

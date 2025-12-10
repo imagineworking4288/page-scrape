@@ -31,7 +31,6 @@ function generateReport(enrichmentResult, options = {}) {
     summary: generateSummary(contacts, stats),
     fieldBreakdown: generateFieldBreakdown(contacts),
     dataQuality: calculateDataQuality(contacts),
-    preprocessing: calculatePreprocessingStats(contacts),
     reviewQueue: formatReviewQueue(reviewQueue),
     errors: formatErrors(errors),
     recommendations: generateRecommendations(contacts, stats)
@@ -272,50 +271,6 @@ function calculateDataQuality(contacts) {
 }
 
 /**
- * Calculate location-phone preprocessing statistics
- * @param {Array} contacts - Enriched contacts
- * @returns {Object} - Preprocessing statistics
- */
-function calculatePreprocessingStats(contacts) {
-  const stats = {
-    total: 0,
-    withAlternatePhone: 0,
-    withAlternateLocation: 0,
-    withBoth: 0,
-    usLocationPrioritized: 0
-  };
-
-  // US locations for checking prioritization
-  const usLocations = [
-    'New York', 'Los Angeles', 'Chicago', 'San Francisco',
-    'Washington, D.C.', 'Washington D.C.', 'Washington',
-    'Boston', 'Houston', 'Miami', 'Seattle', 'Austin'
-  ];
-
-  contacts.forEach(contact => {
-    // Check both enrichment and _enrichment for compatibility
-    const enrichmentData = contact.enrichment || contact._enrichment;
-    if (enrichmentData && enrichmentData.locationPhonePreprocessed) {
-      stats.total++;
-
-      if (contact.alternatePhone) stats.withAlternatePhone++;
-      if (contact.alternateLocation) stats.withAlternateLocation++;
-      if (contact.alternatePhone && contact.alternateLocation) stats.withBoth++;
-
-      // Check if US location was selected as primary
-      if (contact.location) {
-        const locationLower = contact.location.toLowerCase();
-        if (usLocations.some(city => locationLower.includes(city.toLowerCase()))) {
-          stats.usLocationPrioritized++;
-        }
-      }
-    }
-  });
-
-  return stats;
-}
-
-/**
  * Format review queue for report
  */
 function formatReviewQueue(reviewQueue) {
@@ -487,18 +442,6 @@ function formatReportAsText(report) {
     lines.push('');
   });
 
-  // Location-Phone Preprocessing
-  if (report.preprocessing && report.preprocessing.total > 0) {
-    lines.push('LOCATION-PHONE PREPROCESSING');
-    lines.push(subDivider);
-    lines.push(`  Contacts preprocessed:     ${report.preprocessing.total}`);
-    lines.push(`  With alternate phone:      ${report.preprocessing.withAlternatePhone}`);
-    lines.push(`  With alternate location:   ${report.preprocessing.withAlternateLocation}`);
-    lines.push(`  With both alternates:      ${report.preprocessing.withBoth}`);
-    lines.push(`  US locations prioritized:  ${report.preprocessing.usLocationPrioritized}`);
-    lines.push('');
-  }
-
   // Review Queue
   if (report.reviewQueue.count > 0) {
     lines.push('MANUAL REVIEW QUEUE');
@@ -558,6 +501,5 @@ module.exports = {
   generateSummary,
   generateFieldBreakdown,
   calculateDataQuality,
-  calculatePreprocessingStats,
   generateRecommendations
 };

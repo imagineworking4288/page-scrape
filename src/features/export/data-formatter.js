@@ -67,12 +67,6 @@ class DataFormatter {
     switch (fieldName) {
       case 'phone':
         return this.formatPhone(value);
-      case 'alternatePhone':
-        // Alternate phones may be semicolon-separated, format each one
-        return this.formatAlternatePhones(value);
-      case 'alternateLocation':
-        // Alternate locations are comma-separated, return as-is
-        return value || '';
       case 'enrichedAt':
         return this.formatDate(value);
       case 'education':
@@ -216,26 +210,6 @@ class DataFormatter {
 
     // Return original if can't format
     return str;
-  }
-
-  /**
-   * Format alternate phone numbers (semicolon-separated)
-   * @param {string} phones - Semicolon-separated phone numbers
-   * @returns {string} - Formatted phones
-   */
-  formatAlternatePhones(phones) {
-    if (!phones) return '';
-
-    const str = String(phones);
-
-    // Split by semicolon, format each, rejoin
-    const formatted = str.split(';')
-      .map(p => p.trim())
-      .filter(p => p.length > 0)
-      .map(p => this.formatPhone(p))
-      .join('; ');
-
-    return formatted;
   }
 
   /**

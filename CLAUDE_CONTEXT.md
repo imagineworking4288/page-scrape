@@ -115,8 +115,7 @@ page-scrape/
 │   │           ├── name-cleaner.js      # Remove title suffixes from names
 │   │           ├── location-cleaner.js  # Remove phones from locations
 │   │           ├── title-extractor.js   # Extract/normalize titles
-│   │           ├── noise-detector.js    # Detect duplicate/leaked data
-│   │           └── location-phone-preprocessor.js  # Multi-location/phone parsing
+│   │           └── noise-detector.js    # Detect duplicate/leaked data
 │   │
 │   ├── utils/                  # Active utilities
 │   │   ├── contact-extractor.js # Shared extraction logic
@@ -1447,94 +1446,6 @@ const { compareAndMerge, compareAllFields } = require('./src/features/enrichment
   fallbackActions: { name: 'CLEANED', title: 'ENRICHED', location: 'CLEANED' },
   fieldDetails: { ... }
 }
-```
-
-### Location-Phone Preprocessing (December 2025)
-
-The enrichment system automatically parses mixed location/phone data from profile pages (common in Sullivan & Cromwell profiles), intelligently prioritizing US locations and phone numbers while preserving international data in alternate fields.
-
-**Module**: `src/features/enrichment/cleaners/location-phone-preprocessor.js`
-
-**US Location Rankings** (1 = highest priority):
-1. New York
-2. Los Angeles
-3. Chicago
-4. San Francisco
-5. Washington, D.C.
-6. Boston
-7. Houston
-8. Miami
-9. Seattle
-10. Austin
-
-**Processing Rules**:
-- US phone numbers (starting with +1) always selected as primary phone
-- Highest-ranked US location always selected as primary location
-- Other locations/phones stored in `alternateLocation` and `alternatePhone` fields
-- Single-location contacts remain unchanged (no alternate fields added)
-- If only international data exists, it becomes primary (no alternates)
-
-**New Contact Fields**:
-- `alternatePhone` - Semicolon-separated list of alternate phone numbers
-- `alternateLocation` - Comma-separated list of alternate locations
-
-**Example Transformation**:
-```javascript
-// Input (raw from profile page):
-{
-  location: "Frankfurt+49-69-4272-5200New York+1-212-558-4000",
-  phone: ""
-}
-
-// Output (after preprocessing):
-{
-  location: "New York",
-  phone: "+1-212-558-4000",
-  alternateLocation: "Frankfurt",
-  alternatePhone: "+49-69-4272-5200",
-  enrichment: {
-    locationPhonePreprocessed: true,
-    preprocessingDetails: {
-      originalLocation: "Frankfurt+49-69-4272-5200New York+1-212-558-4000",
-      pairsFound: 2,
-      usLocationsFound: 1,
-      internationalLocationsFound: 1
-    }
-  }
-}
-```
-
-**Real-World Test Case** (Sullivan & Cromwell - Carsten Berrar):
-```javascript
-// Input:
-{
-  location: "Frankfurt\n+49-69-4272-5200\n\n\n\nNew York\n+1-212-558-4000",
-  phone: "+49-69-4272-5200"
-}
-
-// Output:
-{
-  location: "New York",          // US location prioritized
-  phone: "+1-212-558-4000",       // US phone prioritized
-  alternateLocation: "Frankfurt",
-  alternatePhone: "+49-69-4272-5200"
-}
-```
-
-**Enrichment Report Statistics**:
-```
-LOCATION-PHONE PREPROCESSING
-──────────────────────────────────────────────────────────────────────
-  Contacts preprocessed:     3
-  With alternate phone:      2
-  With alternate location:   2
-  With both alternates:      2
-  US locations prioritized:  3
-```
-
-**Import Path**:
-```javascript
-const { LocationPhonePreprocessor } = require('./src/features/enrichment/cleaners');
 ```
 
 ---
