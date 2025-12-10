@@ -25,6 +25,7 @@ const BrowserManager = require('../core/browser-manager');
 const RateLimiter = require('../core/rate-limiter');
 const ProfileEnricher = require('../features/enrichment/profile-enricher');
 const { generateReport, saveReport, printReport } = require('../features/enrichment/report-generator');
+const { FieldCleaner } = require('../features/enrichment/post-cleaners');
 const { SheetExporter } = require('../features/export');
 
 const program = new Command();
@@ -49,6 +50,10 @@ program
   .option('--fields <fields>', 'Comma-separated list of fields to enrich (e.g., name,email,phone)')
   .option('--core-fields-only', 'Only enrich core fields (name, email, phone, location, title)', false)
   .option('--export-sheets [name]', 'Export enriched contacts to Google Sheets (optional sheet name)')
+  .option('--prioritize-us', 'Prioritize US locations in multi-location contacts (default: true)')
+  .option('--no-prioritize-us', 'Do not prioritize US locations')
+  .option('--strict-validation', 'Enable strict phone-location validation', false)
+  .option('--no-post-clean', 'Skip post-enrichment cleaning phase')
   .option('-v, --verbose', 'Verbose logging', false)
   .parse(process.argv);
 
@@ -124,6 +129,36 @@ async function main() {
       fieldsToEnrich,
       onlyCoreFields: options.coreFieldsOnly
     });
+
+    // Post-enrichment cleaning phase (unless skipped)
+    if (options.postClean !== false && result.contacts && result.contacts.length > 0) {
+      console.log('');
+      console.log('================================================================================');
+      console.log('POST-ENRICHMENT CLEANING');
+      console.log('================================================================================');
+      logger.info('[Post-Cleaning] Starting field cleaning...');
+
+      const fieldCleaner = new FieldCleaner(logger);
+      const cleanedContacts = await fieldCleaner.cleanContacts(result.contacts, {
+        prioritizeUS: options.prioritizeUs !== false,
+        strictValidation: options.strictValidation || false
+      });
+
+      // Update result with cleaned contacts
+      result.contacts = cleanedContacts;
+
+      // Get and display cleaning statistics
+      const cleaningStats = fieldCleaner.getStatistics(cleanedContacts);
+      console.log(`Processed:        ${cleaningStats.totalProcessed} contacts`);
+      console.log(`Multi-location:   ${cleaningStats.multiLocation}`);
+      console.log(`Location issues:  ${cleaningStats.correlationIssues}`);
+      console.log(`High confidence:  ${cleaningStats.highConfidence}`);
+      console.log('================================================================================');
+
+      // Re-save the output file with cleaned contacts
+      fs.writeFileSync(result.outputFile, JSON.stringify(result.contacts, null, 2), 'utf8');
+      logger.info(`[Post-Cleaning] Updated output file: ${result.outputFile}`);
+    }
 
     // Save manual review queue if requested
     if (options.reviewOutput && result.reviewQueue.length > 0) {

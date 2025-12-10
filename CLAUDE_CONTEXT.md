@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 9, 2025
+**Last Updated**: December 10, 2025
 
 ---
 
@@ -110,12 +110,20 @@ page-scrape/
 │   │       ├── profile-extractor.js # Profile page extraction
 │   │       ├── field-comparator.js  # Field comparison logic
 │   │       ├── report-generator.js  # Enrichment report generation
-│   │       └── cleaners/       # Field cleaning modules
+│   │       ├── cleaners/       # Field cleaning modules (pre-enrichment)
+│   │       │   ├── index.js
+│   │       │   ├── name-cleaner.js      # Remove title suffixes from names
+│   │       │   ├── location-cleaner.js  # Remove phones from locations
+│   │       │   ├── title-extractor.js   # Extract/normalize titles
+│   │       │   └── noise-detector.js    # Detect duplicate/leaked data
+│   │       └── post-cleaners/  # Post-enrichment cleaning modules
 │   │           ├── index.js
-│   │           ├── name-cleaner.js      # Remove title suffixes from names
-│   │           ├── location-cleaner.js  # Remove phones from locations
-│   │           ├── title-extractor.js   # Extract/normalize titles
-│   │           └── noise-detector.js    # Detect duplicate/leaked data
+│   │           ├── field-cleaner.js         # Main post-cleaning orchestrator
+│   │           ├── location-normalizer.js   # Location string normalization
+│   │           ├── multi-location-handler.js # Multi-location parsing
+│   │           ├── phone-location-correlator.js # Phone-location validation
+│   │           ├── domain-classifier.js     # Email domain classification
+│   │           └── confidence-scorer.js     # Data quality confidence scoring
 │   │
 │   ├── utils/                  # Active utilities
 │   │   ├── contact-extractor.js # Shared extraction logic
@@ -901,12 +909,14 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
 | `enrichment-test.js` | Profile enrichment system tests (68 test cases) |
+| `post-cleaning-test.js` | Post-enrichment cleaning system tests (34 test cases) |
 | `test-utils.js` | Test utilities and helpers |
 
 **Run Tests**:
 - `npm test` - Run basic scraper tests
 - `node tests/selenium-infinite-scroll.test.js` - Test Selenium infinite scroll
 - `node tests/enrichment-test.js` - Test enrichment cleaners and comparators
+- `node tests/post-cleaning-test.js` - Test post-enrichment cleaning modules (34 tests)
 
 ---
 
@@ -1541,4 +1551,160 @@ GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id-from-url
 **Import Paths**:
 ```javascript
 const { SheetExporter, SheetManager, ColumnDetector } = require('./src/features/export');
+```
+
+---
+
+## Post-Enrichment Field Cleaning System (December 2025)
+
+**Location**: `src/features/enrichment/post-cleaners/`
+
+**Purpose**: Additional field cleaning and validation that runs AFTER profile enrichment completes. Handles multi-location data, phone-location correlation, domain classification, and confidence scoring.
+
+**Module Architecture**:
+```
+src/features/enrichment/post-cleaners/
+├── index.js                    # Module exports
+├── field-cleaner.js            # Main orchestrator
+├── location-normalizer.js      # Location string normalization
+├── multi-location-handler.js   # Multi-location parsing and prioritization
+├── phone-location-correlator.js # Phone-location validation
+├── domain-classifier.js        # Email domain classification (business/personal)
+└── confidence-scorer.js        # Data quality confidence scoring
+```
+
+**Key Components**:
+
+1. **FieldCleaner** - Main orchestrator:
+   - `cleanContacts(contacts, options)` - Process all contacts
+   - `cleanContact(contact, options)` - Process single contact
+   - `getStatistics(cleanedContacts)` - Get processing statistics
+   - Options: `prioritizeUS`, `strictValidation`
+
+2. **LocationNormalizer** - Normalize location strings:
+   - Preserves important patterns (Washington, D.C., St. Louis, City, STATE)
+   - Trims whitespace, normalizes separators
+   - Returns `{ normalized, wasChanged }`
+
+3. **MultiLocationHandler** - Parse multi-location data:
+   - `parse(rawLocation, primaryPhone, prioritizeUS)` - Main entry
+   - Detects multi-location strings (newline-separated)
+   - Prioritizes US locations when enabled (default)
+   - Identifies US locations by state abbreviation, city name, or phone country code
+   - Returns: `{ isMultiLocation, primaryLocation, primaryPhone, additionalLocations, allLocations, locationData }`
+
+4. **PhoneLocationCorrelator** - Validate phone-location correlation:
+   - `validate(phone, location, locationData)` - Main entry
+   - Detects country mismatches (phone country code vs location country)
+   - Detects US city mismatches (area code vs location city)
+   - Returns: `{ valid, hasMismatch, reason, details }`
+
+5. **DomainClassifier** - Classify email domains:
+   - `classify(email)` - Main entry
+   - Uses existing DomainExtractor
+   - Returns: `{ domain, domainType }` (business/personal/unknown)
+
+6. **ConfidenceScorer** - Calculate data quality scores:
+   - `calculate(contact, validationData)` - Main entry
+   - Weighted scoring: name (20%), location (20%), email (30%), phone (15%), correlation (15%)
+   - Returns: `{ overall: 'high'|'medium'|'low', score: 0-100, breakdown }`
+
+**CLI Integration**:
+
+The `enrich-contacts.js` CLI tool automatically runs post-cleaning after enrichment (unless `--no-post-clean` is specified).
+
+```bash
+# Run with post-cleaning (default)
+node src/tools/enrich-contacts.js --input output/scrape.json
+
+# Skip post-cleaning phase
+node src/tools/enrich-contacts.js --input output/scrape.json --no-post-clean
+
+# Disable US location prioritization
+node src/tools/enrich-contacts.js --input output/scrape.json --no-prioritize-us
+
+# Enable strict phone-location validation
+node src/tools/enrich-contacts.js --input output/scrape.json --strict-validation
+```
+
+**Post-Cleaned Contact Structure**:
+```javascript
+{
+  name: 'John Smith',
+  email: 'john@company.com',
+  phone: '+1-212-555-1234',
+  location: 'New York, NY',        // Primary location (US prioritized)
+  title: 'Partner',
+  profileUrl: 'https://...',
+  _original: { ... },              // Original values before enrichment
+  _enrichment: { ... },            // Enrichment metadata
+  _postCleaning: {                 // Post-cleaning metadata
+    processedAt: '2025-12-10T...',
+    locationData: {
+      isMultiLocation: true,
+      primaryLocation: 'New York, NY',
+      additionalLocations: ['Frankfurt'],
+      allLocations: ['New York, NY', 'Frankfurt']
+    },
+    phoneValidation: {
+      valid: true,
+      hasMismatch: false
+    },
+    domainType: 'business',
+    confidence: {
+      overall: 'high',
+      score: 95,
+      breakdown: { nameClean: 20, locationClean: 20, emailPresent: 30, phoneValid: 15, phoneLocationValid: 15 }
+    }
+  }
+}
+```
+
+**Multi-Location Prioritization**:
+
+When `prioritizeUS: true` (default), contacts with multiple locations are reordered to put US locations first:
+
+```javascript
+// Input location: "Frankfurt\nNew York, NY"
+// Output: location = "New York, NY", additionalLocations = ["Frankfurt"]
+
+// US detection methods:
+// 1. State abbreviation: "Austin, TX" → US
+// 2. US city name: "New York" → US
+// 3. Phone country code: "+1-555-123-4567" → US
+// 4. Special patterns: "Washington, D.C." → US
+```
+
+**Phone-Location Correlation**:
+
+Validates that phone numbers match their associated locations:
+
+```javascript
+// Country-level validation:
+// Phone +44-20-7946-0958 with location "New York" → country-mismatch
+
+// City-level validation (US only):
+// Phone +1-212-555-1234 with location "Los Angeles" → city-mismatch (area code 212 = New York)
+```
+
+**Test File**: `tests/post-cleaning-test.js`
+
+```bash
+# Run post-cleaning tests (34 test cases)
+node tests/post-cleaning-test.js
+```
+
+**Import Paths**:
+```javascript
+const {
+  FieldCleaner,
+  MultiLocationHandler,
+  PhoneLocationCorrelator,
+  LocationNormalizer,
+  DomainClassifier,
+  ConfidenceScorer
+} = require('./src/features/enrichment/post-cleaners');
+
+// Or via main enrichment index:
+const { FieldCleaner, postCleaners } = require('./src/features/enrichment');
 ```

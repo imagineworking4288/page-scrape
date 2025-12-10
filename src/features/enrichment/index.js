@@ -9,6 +9,7 @@ const ProfileExtractor = require('./profile-extractor');
 const fieldComparator = require('./field-comparator');
 const reportGenerator = require('./report-generator');
 const cleaners = require('./cleaners');
+const postCleaners = require('./post-cleaners');
 
 module.exports = {
   // Main orchestrator
@@ -40,5 +41,14 @@ module.exports = {
   nameCleaner: cleaners.nameCleaner,
   locationCleaner: cleaners.locationCleaner,
   titleExtractor: cleaners.titleExtractor,
-  noiseDetector: cleaners.noiseDetector
+  noiseDetector: cleaners.noiseDetector,
+
+  // Post-enrichment cleaners
+  postCleaners,
+  FieldCleaner: postCleaners.FieldCleaner,
+  MultiLocationHandler: postCleaners.MultiLocationHandler,
+  PhoneLocationCorrelator: postCleaners.PhoneLocationCorrelator,
+  LocationNormalizer: postCleaners.LocationNormalizer,
+  DomainClassifier: postCleaners.DomainClassifier,
+  ConfidenceScorer: postCleaners.ConfidenceScorer
 };
