@@ -5,11 +5,105 @@
  * column ordering and filtering capabilities.
  */
 
+// ============================================================================
+// COLUMN CONFIGURATION
+// ============================================================================
+//
+// Easily customize which columns are exported to Google Sheets by default.
+//
+// To ADD a column:
+//   1. Add the field name to DEFAULT_COLUMNS array below
+//   2. Ensure the field exists in your contact data
+//   3. Optionally add display name to COLUMN_DISPLAY_NAMES
+//
+// To REMOVE a column:
+//   1. Delete the field name from DEFAULT_COLUMNS array
+//
+// To REORDER columns:
+//   1. Change the order of fields in DEFAULT_COLUMNS array
+//
+// ============================================================================
+
+/**
+ * Default columns exported to Google Sheets (in order)
+ *
+ * These are the columns that will be exported when no --columns option is provided.
+ *
+ * Available standard fields:
+ * - name, email, phone, title, location, profileUrl
+ * - domain, domainType, confidence
+ * - bio, education, practiceAreas, barAdmissions
+ * - sourceUrl, sourcePage
+ *
+ * To customize: Simply add, remove, or reorder fields in this array.
+ */
+const DEFAULT_COLUMNS = [
+  'name',
+  'email',
+  'phone',
+  'title',
+  'profileUrl'
+];
+
+/**
+ * Display names for column headers in Google Sheets
+ *
+ * Maps internal field names to user-friendly headers.
+ * If a field is not listed here, the column name will be auto-formatted
+ * from camelCase to Title Case (e.g., domainType → "Domain Type").
+ */
+const COLUMN_DISPLAY_NAMES = {
+  'name': 'Name',
+  'email': 'Email',
+  'phone': 'Phone',
+  'title': 'Title',
+  'location': 'Location',
+  'profileUrl': 'Profile URL',
+  'domain': 'Domain',
+  'domainType': 'Domain Type',
+  'bio': 'Bio',
+  'education': 'Education',
+  'practiceAreas': 'Practice Areas',
+  'barAdmissions': 'Bar Admissions',
+  'sourceUrl': 'Source URL',
+  'sourcePage': 'Source Page',
+  'confidence': 'Confidence',
+  'enrichedAt': 'Enriched At',
+  'actionsSummary': 'Actions',
+  'fieldsEnrichedCount': 'Fields Enriched',
+  'fieldsCleanedCount': 'Fields Cleaned',
+  'additionalLocations': 'Additional Locations',
+  'allLocations': 'All Locations'
+};
+
+/**
+ * Column groups for quick filtering via CLI
+ *
+ * These groups can be used with --core-only and --include-enrichment options.
+ */
+const COLUMN_GROUPS = {
+  // Core: minimal essential contact fields (default export)
+  core: ['name', 'email', 'phone', 'title', 'location', 'profileUrl'],
+
+  // Extended: core + domain and confidence info
+  extended: ['name', 'email', 'phone', 'title', 'location', 'profileUrl', 'domain', 'domainType', 'confidence'],
+
+  // Enrichment: metadata about the enrichment process
+  enrichment: ['enrichedAt', 'actionsSummary', 'confidence', 'fieldsEnrichedCount', 'fieldsCleanedCount']
+};
+
+// ============================================================================
+// END CONFIGURATION
+// ============================================================================
+
 class ColumnDetector {
   constructor(logger = null) {
     this.logger = logger;
 
-    // Standard column order (core fields first)
+    // Use the configurable default columns
+    this.defaultColumns = [...DEFAULT_COLUMNS];
+
+    // Standard column order for sorting (when detecting all columns)
     this.standardOrder = [
       'name',
       'email',
@@ -27,17 +121,14 @@ class ColumnDetector {
       'sourcePage'
     ];
 
-    // Core fields that are always important
-    this.coreFields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+    // Core fields (same as COLUMN_GROUPS.core)
+    this.coreFields = COLUMN_GROUPS.core;
 
     // Enrichment metadata columns
-    this.enrichmentColumns = [
-      'enrichedAt',
-      'actionsSummary',
-      'confidence',
-      'fieldsEnrichedCount',
-      'fieldsCleanedCount'
-    ];
+    this.enrichmentColumns = COLUMN_GROUPS.enrichment;
+
+    // Display name mapping
+    this.displayNames = COLUMN_DISPLAY_NAMES;
   }
 
   /**
@@ -49,6 +140,14 @@ class ColumnDetector {
     if (this.logger && typeof this.logger[level] === 'function') {
       this.logger[level](message);
     }
+  }
+
+  /**
+   * Get default columns (from DEFAULT_COLUMNS configuration)
+   * @returns {string[]} - Array of default column names
+   */
+  getDefaultColumns() {
+    return [...this.defaultColumns];
   }
 
   /**
@@ -146,16 +245,17 @@ class ColumnDetector {
 
   /**
    * Filter columns based on options
-   * @param {string[]} fields - Array of field names
+   * @param {string[]} fields - Array of available field names (from detectColumns)
    * @param {Object} options - Filter options
    * @param {boolean} options.includeEnrichment - Include enrichment metadata columns
    * @param {boolean} options.coreOnly - Only include core fields
+   * @param {boolean} options.includeAll - Include all detected fields (not just defaults)
    * @param {string[]} options.columns - Explicit list of columns to include
    * @param {string[]} options.exclude - Columns to exclude
    * @returns {string[]} - Filtered array of field names
    */
   filterColumns(fields, options = {}) {
-    let filtered = [...fields];
+    let filtered;
 
     // If explicit columns specified, use only those
     if (options.columns && options.columns.length > 0) {
@@ -164,8 +264,18 @@ class ColumnDetector {
     }
     // If core only, filter to core fields
     else if (options.coreOnly) {
-      filtered = filtered.filter(f => this.coreFields.includes(f));
+      filtered = fields.filter(f => this.coreFields.includes(f));
       this._log('debug', '[ColumnDetector] Filtering to core fields only');
+    }
+    // If includeAll, use all detected fields
+    else if (options.includeAll) {
+      filtered = [...fields];
+      this._log('debug', '[ColumnDetector] Using all detected columns');
+    }
+    // Default: use DEFAULT_COLUMNS (filtered to only those that exist in contacts)
+    else {
+      filtered = this.defaultColumns.filter(col => fields.includes(col));
+      this._log('debug', `[ColumnDetector] Using default columns: ${filtered.join(', ')}`);
     }
 
     // Add enrichment columns if requested
@@ -184,38 +294,48 @@ class ColumnDetector {
     // Remove internal marker fields
     filtered = filtered.filter(f => !f.startsWith('_'));
 
-    return this.orderColumns(filtered);
+    // Order according to default column order (preserves DEFAULT_COLUMNS order)
+    return this._orderByDefault(filtered);
+  }
+
+  /**
+   * Order columns by DEFAULT_COLUMNS order, then standard order, then alphabetically
+   * @param {string[]} columns - Array of column names
+   * @returns {string[]} - Ordered array
+   * @private
+   */
+  _orderByDefault(columns) {
+    const ordered = [];
+    const remaining = new Set(columns);
+
+    // First: add columns in DEFAULT_COLUMNS order
+    for (const col of this.defaultColumns) {
+      if (remaining.has(col)) {
+        ordered.push(col);
+        remaining.delete(col);
+      }
+    }
+
+    // Second: add remaining columns in standard order
+    for (const col of this.standardOrder) {
+      if (remaining.has(col)) {
+        ordered.push(col);
+        remaining.delete(col);
+      }
+    }
+
+    // Third: add any remaining alphabetically
+    const rest = Array.from(remaining).sort();
+    return [...ordered, ...rest];
   }
 
   /**
    * Get column headers for display
    * @param {string[]} columns - Array of column field names
-   * @returns {Object} - Map of field name to display header
+   * @returns {string[]} - Array of display headers (same order as columns)
    */
   getColumnHeaders(columns) {
-    const headers = {
-      name: 'Name',
-      email: 'Email',
-      phone: 'Phone',
-      title: 'Title',
-      location: 'Location',
-      domain: 'Domain',
-      domainType: 'Domain Type',
-      bio: 'Bio',
-      education: 'Education',
-      practiceAreas: 'Practice Areas',
-      barAdmissions: 'Bar Admissions',
-      profileUrl: 'Profile URL',
-      sourceUrl: 'Source URL',
-      sourcePage: 'Source Page',
-      confidence: 'Confidence',
-      enrichedAt: 'Enriched At',
-      actionsSummary: 'Actions',
-      fieldsEnrichedCount: 'Fields Enriched',
-      fieldsCleanedCount: 'Fields Cleaned'
-    };
-
-    return columns.map(col => headers[col] || this._formatHeader(col));
+    return columns.map(col => this.displayNames[col] || this._formatHeader(col));
   }
 
   /**

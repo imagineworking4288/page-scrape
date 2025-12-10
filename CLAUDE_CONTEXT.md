@@ -909,14 +909,14 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
 | `enrichment-test.js` | Profile enrichment system tests (68 test cases) |
-| `post-cleaning-test.js` | Post-enrichment cleaning system tests (34 test cases) |
+| `post-cleaning-test.js` | Post-enrichment cleaning system tests (41 test cases) |
 | `test-utils.js` | Test utilities and helpers |
 
 **Run Tests**:
 - `npm test` - Run basic scraper tests
 - `node tests/selenium-infinite-scroll.test.js` - Test Selenium infinite scroll
 - `node tests/enrichment-test.js` - Test enrichment cleaners and comparators
-- `node tests/post-cleaning-test.js` - Test post-enrichment cleaning modules (34 tests)
+- `node tests/post-cleaning-test.js` - Test post-enrichment cleaning modules (41 tests)
 
 ---
 
@@ -1508,16 +1508,59 @@ src/features/export/
 
 **CLI Tool**: `src/tools/export-to-sheets.js`
 ```bash
-# Basic usage
-node src/tools/export-to-sheets.js --input output/scrape-enriched.json
+# Default columns (Name, Email, Phone, Title, Location, Profile URL)
+node src/tools/export-to-sheets.js --input output/enriched.json --name "My Contacts"
 
-# With options
-node src/tools/export-to-sheets.js --input output/scrape.json \
-  --name "My Contacts" \
-  --include-enrichment \
-  --core-only \
-  --verbose
+# Only core fields
+node src/tools/export-to-sheets.js --input output/enriched.json --core-only
+
+# Specific columns
+node src/tools/export-to-sheets.js --input output/enriched.json --columns name,email,phone,profileUrl
+
+# All available columns from contact data
+node src/tools/export-to-sheets.js --input output/enriched.json --include-all
+
+# Exclude certain columns
+node src/tools/export-to-sheets.js --input output/enriched.json --exclude domain,confidence
+
+# Include enrichment metadata columns
+node src/tools/export-to-sheets.js --input output/enriched.json --include-enrichment
 ```
+
+**Column Configuration**:
+
+Location: `src/features/export/column-detector.js` (top of file)
+
+Default columns exported to Google Sheets (in order):
+1. Name
+2. Email
+3. Phone
+4. Title
+5. Location
+6. Profile URL
+
+**To customize default columns**, edit the `DEFAULT_COLUMNS` array:
+
+```javascript
+// In src/features/export/column-detector.js (line 40)
+const DEFAULT_COLUMNS = [
+  'name',
+  'email',
+  'phone',
+  'title',
+  'location',
+  'profileUrl',
+  'domain',      // ADD: include domain
+  'confidence'   // ADD: include confidence score
+];
+```
+
+**Available fields**:
+- Core: `name`, `email`, `phone`, `title`, `location`, `profileUrl`
+- Extended: `domain`, `domainType`, `confidence`
+- Profile: `bio`, `education`, `practiceAreas`, `barAdmissions`
+- Source: `sourceUrl`, `sourcePage`
+- Enrichment: `enrichedAt`, `actionsSummary`, `fieldsEnrichedCount`, `fieldsCleanedCount`
 
 **Integration with Enrichment**:
 ```bash

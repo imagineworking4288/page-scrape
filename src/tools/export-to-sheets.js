@@ -30,10 +30,36 @@ program
   .option('--mode <mode>', 'Export mode: create | append', 'create')
   .option('--columns <list>', 'Comma-separated columns to include')
   .option('--exclude <list>', 'Comma-separated columns to exclude')
+  .option('--include-all', 'Include all available columns from contacts', false)
   .option('--include-enrichment', 'Include enrichment metadata columns', false)
   .option('--core-only', 'Only include core fields (name, email, phone, title, location, profileUrl)', false)
   .option('--batch-size <n>', 'Rows per batch (default: 100)', parseInt, 100)
   .option('-v, --verbose', 'Verbose logging', false)
+  .addHelpText('after', `
+
+Examples:
+  # Default columns (Name, Email, Phone, Title, Location, Profile URL)
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --name "My Contacts"
+
+  # Only core fields
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --core-only
+
+  # Specific columns
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --columns name,email,phone,profileUrl
+
+  # All available columns from the contact data
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --include-all
+
+  # Exclude certain columns from default
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --exclude domain,confidence
+
+  # Include enrichment metadata
+  $ node src/tools/export-to-sheets.js --input output/enriched.json --include-enrichment
+
+Column Customization:
+  Edit DEFAULT_COLUMNS array in src/features/export/column-detector.js
+  to change which columns are exported by default.
+`)
   .parse(process.argv);
 
 const options = program.opts();
@@ -62,8 +88,8 @@ async function main() {
     console.log(`Input file:         ${inputPath}`);
     console.log(`Sheet name:         ${options.name || '(auto-generate)'}`);
     console.log(`Mode:               ${options.mode}`);
+    console.log(`Columns:            ${options.columns || (options.coreOnly ? 'core only' : options.includeAll ? 'all available' : 'default (6 columns)')}`);
     console.log(`Include enrichment: ${options.includeEnrichment}`);
-    console.log(`Core fields only:   ${options.coreOnly}`);
     console.log(`Batch size:         ${options.batchSize}`);
     console.log('================================================================================');
     console.log('');
@@ -93,7 +119,8 @@ async function main() {
       sheetId: options.sheetId,
       mode: options.mode,
       includeEnrichment: options.includeEnrichment,
-      coreOnly: options.coreOnly
+      coreOnly: options.coreOnly,
+      includeAll: options.includeAll
     };
 
     // Parse columns if provided
