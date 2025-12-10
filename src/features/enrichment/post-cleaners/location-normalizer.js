@@ -32,18 +32,41 @@ class LocationNormalizer {
   /**
    * Normalize a location string
    * @param {string} location - Raw location string
-   * @returns {Object} - { normalized, wasChanged }
+   * @returns {Object} - { normalized, wasChanged, phonesRemoved }
    */
   normalize(location) {
     if (!location) {
-      return { normalized: null, wasChanged: false };
+      return { normalized: null, wasChanged: false, phonesRemoved: [] };
     }
 
     const original = location;
     let normalized = location;
+    const phonesRemoved = [];
 
     try {
-      // Check if location has special patterns to preserve
+      // STEP 1: Remove embedded phone numbers FIRST (critical fix)
+      // Match patterns like: +1-212-558-1623, +49-69-4272-5200, (212) 555-1234
+      const phonePattern = /\+?\d[\d\s\-\(\)\.]{7,}/g;
+
+      // Extract phones before removing them (for metadata)
+      const phoneMatches = normalized.match(phonePattern);
+      if (phoneMatches) {
+        for (const phone of phoneMatches) {
+          // Only count it as a phone if it has enough digits
+          const digitCount = (phone.match(/\d/g) || []).length;
+          if (digitCount >= 7) {
+            phonesRemoved.push(phone.trim());
+          }
+        }
+      }
+
+      // Remove phone numbers
+      if (phonesRemoved.length > 0) {
+        normalized = normalized.replace(phonePattern, '');
+        this._log('debug', `[LocationNormalizer] Removed ${phonesRemoved.length} phone(s): ${phonesRemoved.join(', ')}`);
+      }
+
+      // STEP 2: Check if location has special patterns to preserve
       const hasPreservePattern = this.preservePatterns.some(p => p.test(normalized));
 
       if (!hasPreservePattern) {
@@ -64,7 +87,7 @@ class LocationNormalizer {
         normalized = normalized.replace(/\s+,/g, ',');
       }
 
-      // Normalize all Washington D.C. variations to standard format
+      // STEP 3: Normalize all Washington D.C. variations to standard format
       normalized = normalized.replace(
         /Washington(?:\s*,?\s*D\.?\s*C\.?)?/gi,
         (match) => {
@@ -76,11 +99,18 @@ class LocationNormalizer {
         }
       );
 
+      // STEP 4: Clean up artifacts from phone removal
       // Remove trailing/leading commas
       normalized = normalized.replace(/^,\s*|,\s*$/g, '');
 
       // Remove duplicate commas
       normalized = normalized.replace(/,\s*,+/g, ',');
+
+      // Remove excessive spaces that might remain after phone removal
+      normalized = normalized.replace(/\s{2,}/g, ' ').trim();
+
+      // Remove trailing newlines or spaces
+      normalized = normalized.trim();
 
       const wasChanged = normalized !== original;
 
@@ -90,11 +120,12 @@ class LocationNormalizer {
 
       return {
         normalized,
-        wasChanged
+        wasChanged,
+        phonesRemoved
       };
     } catch (error) {
       this._log('error', `[LocationNormalizer] Error normalizing location: ${error.message}`);
-      return { normalized: original, wasChanged: false };
+      return { normalized: original, wasChanged: false, phonesRemoved: [] };
     }
   }
 }

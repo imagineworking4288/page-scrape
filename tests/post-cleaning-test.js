@@ -101,6 +101,37 @@ test('handles null/empty location', () => {
   assertFalse(result.wasChanged);
 });
 
+test('removes embedded phone number from location', () => {
+  const normalizer = new LocationNormalizer(testLogger);
+  const result = normalizer.normalize('New York +1-212-558-1623');
+  assertEqual(result.normalized, 'New York');
+  assertTrue(result.wasChanged);
+  assertTrue(result.phonesRemoved.length > 0);
+});
+
+test('removes phone with newline separator', () => {
+  const normalizer = new LocationNormalizer(testLogger);
+  const result = normalizer.normalize('New York\n            +1-212-558-3960');
+  assertEqual(result.normalized, 'New York');
+  assertTrue(result.wasChanged);
+  assertTrue(result.phonesRemoved.length > 0);
+});
+
+test('removes multiple phone numbers', () => {
+  const normalizer = new LocationNormalizer(testLogger);
+  const result = normalizer.normalize('Frankfurt +49-69-4272-5200\nNew York +1-212-558-4000');
+  assertFalse(result.normalized.includes('+'));
+  assertEqual(result.phonesRemoved.length, 2);
+});
+
+test('returns empty phonesRemoved for clean location', () => {
+  const normalizer = new LocationNormalizer(testLogger);
+  const result = normalizer.normalize('New York');
+  assertEqual(result.normalized, 'New York');
+  assertFalse(result.wasChanged);
+  assertEqual(result.phonesRemoved.length, 0);
+});
+
 // ============================================================================
 // MultiLocationHandler Tests
 // ============================================================================
@@ -375,6 +406,50 @@ test('handles null contacts', async () => {
   const cleaner = new FieldCleaner(testLogger);
   const result = await cleaner.cleanContacts(null);
   assertEqual(result.length, 0);
+});
+
+test('cleans contaminated location regardless of enrichment status', async () => {
+  const cleaner = new FieldCleaner(testLogger);
+  const contacts = [{
+    name: 'John Smith',
+    phone: '+1 212 555 1234',
+    location: 'New York +1-212-558-1623',  // Contaminated
+    email: 'john@example.com',
+    enrichment: {
+      actions: {
+        location: 'UNCHANGED'  // This should NOT prevent cleaning
+      }
+    }
+  }];
+  const result = await cleaner.cleanContacts(contacts);
+  assertEqual(result[0].location, 'New York');
+  assertTrue(result[0]._postCleaning.operations.includes('location-normalized'));
+  assertTrue(result[0]._postCleaning.operations.includes('location-phones-removed'));
+});
+
+test('tracks removed phones in post-cleaning metadata', async () => {
+  const cleaner = new FieldCleaner(testLogger);
+  const contacts = [{
+    name: 'Jane Doe',
+    location: 'Washington, D.C.\n+1-202-555-1234'
+  }];
+  const result = await cleaner.cleanContacts(contacts);
+  assertTrue(result[0]._postCleaning.locationPhonesRemoved !== undefined);
+  assertTrue(result[0]._postCleaning.locationPhonesRemoved.length > 0);
+});
+
+test('improves confidence score after phone removal', async () => {
+  const cleaner = new FieldCleaner(testLogger);
+  const contacts = [{
+    name: 'Test Contact',
+    email: 'test@company.com',
+    phone: '+1-212-555-1234',
+    location: 'New York +1-212-555-1234'  // Before: fails locationClean
+  }];
+  const result = await cleaner.cleanContacts(contacts);
+  // After cleaning, location should be clean and score should include locationClean
+  assertEqual(result[0].location, 'New York');
+  assertTrue(result[0].confidenceBreakdown.locationClean === 20);
 });
 
 // ============================================================================

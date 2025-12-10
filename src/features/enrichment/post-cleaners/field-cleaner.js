@@ -131,17 +131,33 @@ class FieldCleaner {
       this._log('error', `[FieldCleaner] Phone-location validation error for ${cleaned.name}: ${error.message}`);
     }
 
-    // Step 3: Location normalization
+    // Step 3: Location normalization (ALWAYS runs - critical for phone removal)
     try {
-      const normalizedLocation = this.locationNormalizer.normalize(cleaned.location);
+      if (cleaned.location) {
+        const normalizedLocation = this.locationNormalizer.normalize(cleaned.location);
 
-      if (normalizedLocation.wasChanged) {
-        cleaned._original = cleaned._original || {};
-        cleaned._original.location_pre_normalization = cleaned.location;
-        cleaned.location = normalizedLocation.normalized;
-        cleaningLog.push('location-normalized');
+        if (normalizedLocation.wasChanged) {
+          // Preserve original location before normalization
+          cleaned._original = cleaned._original || {};
+          if (!cleaned._original.location_pre_normalization) {
+            cleaned._original.location_pre_normalization = cleaned.location;
+          }
 
-        this._log('debug', `[FieldCleaner] Location normalized for ${cleaned.name}`);
+          cleaned.location = normalizedLocation.normalized;
+          cleaningLog.push('location-normalized');
+
+          // Track removed phones in metadata
+          if (normalizedLocation.phonesRemoved && normalizedLocation.phonesRemoved.length > 0) {
+            cleaningLog.push('location-phones-removed');
+            // Will be added to _postCleaning at end
+            cleaned._locationPhonesRemoved = normalizedLocation.phonesRemoved;
+          }
+
+          this._log('debug', `[FieldCleaner] Location normalized for ${cleaned.name}`);
+          if (normalizedLocation.phonesRemoved && normalizedLocation.phonesRemoved.length > 0) {
+            this._log('info', `[FieldCleaner] Removed ${normalizedLocation.phonesRemoved.length} phone(s) from location for ${cleaned.name}`);
+          }
+        }
       }
     } catch (error) {
       this._log('error', `[FieldCleaner] Location normalization error for ${cleaned.name}: ${error.message}`);
@@ -180,8 +196,33 @@ class FieldCleaner {
     cleaned._postCleaning = {
       cleanedAt: new Date().toISOString(),
       operations: cleaningLog,
-      version: '1.0'
+      version: '1.1'
     };
+
+    // Add location phones removed if present
+    if (cleaned._locationPhonesRemoved) {
+      cleaned._postCleaning.locationPhonesRemoved = cleaned._locationPhonesRemoved;
+      delete cleaned._locationPhonesRemoved; // Remove temp property
+    }
+
+    // Add location data if multi-location
+    if (locationData && locationData.isMultiLocation) {
+      cleaned._postCleaning.locationData = {
+        isMultiLocation: true,
+        primaryLocation: locationData.primaryLocation,
+        additionalLocations: locationData.additionalLocations,
+        allLocations: locationData.allLocations
+      };
+    }
+
+    // Add phone validation info if there was a mismatch
+    if (phoneValidation && phoneValidation.hasMismatch) {
+      cleaned._postCleaning.phoneValidation = {
+        valid: phoneValidation.valid,
+        hasMismatch: phoneValidation.hasMismatch,
+        reason: phoneValidation.reason
+      };
+    }
 
     return cleaned;
   }
@@ -192,11 +233,26 @@ class FieldCleaner {
    * @returns {Object} - Statistics summary
    */
   getStatistics(cleanedContacts) {
+    if (!cleanedContacts || cleanedContacts.length === 0) {
+      return {
+        totalProcessed: 0,
+        multiLocation: 0,
+        correlationIssues: 0,
+        locationNormalized: 0,
+        locationPhonesRemoved: 0,
+        domainClassified: 0,
+        highConfidence: 0,
+        mediumConfidence: 0,
+        lowConfidence: 0
+      };
+    }
+
     const stats = {
-      total: cleanedContacts.length,
+      totalProcessed: cleanedContacts.length,
       multiLocation: 0,
-      phoneMismatch: 0,
+      correlationIssues: 0,
       locationNormalized: 0,
+      locationPhonesRemoved: 0,
       domainClassified: 0,
       highConfidence: 0,
       mediumConfidence: 0,
@@ -207,8 +263,9 @@ class FieldCleaner {
       const ops = contact._postCleaning?.operations || [];
 
       if (ops.includes('multi-location-detected')) stats.multiLocation++;
-      if (ops.includes('phone-location-mismatch')) stats.phoneMismatch++;
+      if (ops.includes('phone-location-mismatch')) stats.correlationIssues++;
       if (ops.includes('location-normalized')) stats.locationNormalized++;
+      if (ops.includes('location-phones-removed')) stats.locationPhonesRemoved++;
       if (ops.includes('domain-classified')) stats.domainClassified++;
 
       switch (contact.confidence) {

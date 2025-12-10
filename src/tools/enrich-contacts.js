@@ -151,6 +151,7 @@ async function main() {
       const cleaningStats = fieldCleaner.getStatistics(cleanedContacts);
       console.log(`Processed:        ${cleaningStats.totalProcessed} contacts`);
       console.log(`Multi-location:   ${cleaningStats.multiLocation}`);
+      console.log(`Phones removed:   ${cleaningStats.locationPhonesRemoved} (from locations)`);
       console.log(`Location issues:  ${cleaningStats.correlationIssues}`);
       console.log(`High confidence:  ${cleaningStats.highConfidence}`);
       console.log('================================================================================');
