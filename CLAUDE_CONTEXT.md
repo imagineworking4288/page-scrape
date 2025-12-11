@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 11, 2025 (Added Load More button detection for infinite scroll, --core-only export flag)
+**Last Updated**: December 11, 2025 (Added Navigation Testing System, timeline callbacks for scroll testing, Load More button detection)
 
 ---
 
@@ -1421,6 +1421,136 @@ node orchestrator.js --url "https://www.skadden.com/professionals?skip=25&office
 [Selenium] Clicked Load More button (1/50), loaded 25 new elements
 [Selenium] No Load More button found, scroll complete
 ```
+
+### Timeline Callbacks for Scroll Testing (December 2025)
+
+The SeleniumManager's `scrollToFullyLoad()` method now supports optional callback hooks for testing and progress tracking:
+
+**Callback Options**:
+```javascript
+const scrollStats = await seleniumManager.scrollToFullyLoad({
+  // ... standard options ...
+
+  // Timeline callbacks (all optional)
+  onHeightChange: (data) => {
+    // Called when page height increases
+    // data: { type, scrollCount, previousHeight, newHeight, delta, timestamp }
+  },
+  onButtonClick: (data) => {
+    // Called when Load More button is clicked
+    // data: { type, buttonClicks, scrollCount, buttonText, strategy, newElementCount, timestamp }
+  },
+  onScrollBatch: (data) => {
+    // Called every 10 scrolls
+    // data: { type, scrollCount, heightChanges, buttonClicks, currentHeight, retriesAtBatch, timestamp }
+  }
+});
+```
+
+**Return Value Includes Timeline**:
+```javascript
+{
+  scrollCount: 150,
+  heightChanges: 12,
+  finalHeight: 45000,
+  stopReason: 'Scroll complete (no more content)',
+  retriesAtEnd: 25,
+  buttonClicks: 3,
+  timeline: [
+    { type: 'height_change', scrollCount: 5, previousHeight: 2000, newHeight: 4500, delta: 2500, timestamp: 2340 },
+    { type: 'scroll_batch', scrollCount: 10, heightChanges: 2, currentHeight: 4500, timestamp: 4200 },
+    // ... more events
+  ],
+  duration: 45000  // Total duration in ms
+}
+```
+
+### Navigation Testing System (December 2025)
+
+A dedicated testing system for verifying navigation functionality (infinite scroll, pagination) independent of data extraction quality.
+
+**Test Files**:
+```
+tests/
+├── test-urls.json                            # Test URL database
+├── run-navigation-tests.js                   # Unified CLI test runner
+└── navigation/
+    ├── navigation-test-utils.js              # Shared utilities
+    ├── infinite-scroll-navigation.test.js    # Scroll tests
+    └── pagination-navigation.test.js         # Pagination tests
+```
+
+**NPM Scripts**:
+```bash
+npm run test:nav           # Run all navigation tests
+npm run test:nav:scroll    # Infinite scroll tests only
+npm run test:nav:page      # Pagination tests only
+npm run test:nav:quick     # Quick test suite (reduced limits)
+npm run test:nav:verbose   # Verbose output
+```
+
+**CLI Usage**:
+```bash
+# Run all navigation tests
+node tests/run-navigation-tests.js
+
+# Test specific URL
+node tests/run-navigation-tests.js --url "https://example.com/directory"
+
+# Scroll tests only, verbose
+node tests/run-navigation-tests.js --type scroll --verbose
+
+# Quick pagination tests
+node tests/run-navigation-tests.js --type pagination --quick
+
+# Save results to JSON
+node tests/run-navigation-tests.js --save results.json
+```
+
+**Test Categories**:
+
+1. **Infinite Scroll Navigation Tests**:
+   - Basic scroll navigation (height changes detected)
+   - Timeline callback verification
+   - Load More button fallback
+   - Scroll completion without hitting limits
+
+2. **Pagination Navigation Tests**:
+   - Pattern detection (URL parameter, path, offset)
+   - Visual control detection
+   - Page URL generation
+   - Infinite scroll detection
+
+**Test URL Database** (`tests/test-urls.json`):
+```json
+{
+  "infiniteScroll": {
+    "reliable": [
+      {
+        "name": "Sullivan & Cromwell Lawyers",
+        "url": "https://www.sullcrom.com/LawyerListing?custom_is_office=27567",
+        "expectedBehavior": {
+          "minHeightChanges": 5,
+          "hasLoadMoreButton": false
+        }
+      }
+    ],
+    "hasLoadMoreButton": [...],
+    "unreliable": [...]
+  },
+  "pagination": {
+    "urlParameter": [...],
+    "pathBased": [...],
+    "offset": [...]
+  }
+}
+```
+
+**Adding New Test URLs**:
+1. Edit `tests/test-urls.json`
+2. Add entry to appropriate category
+3. Set `skip: true` for placeholder entries
+4. Define `expectedBehavior` for validation
 
 ### Two-Phase Selenium Extraction
 

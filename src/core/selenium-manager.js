@@ -135,13 +135,30 @@ class SeleniumManager {
    * Falls back to Load More button detection when scrolling stops producing new content
    *
    * @param {Object} options - Scroll options
-   * @returns {Promise<Object>} - Scroll statistics
+   * @param {number} options.scrollDelay - Delay between scrolls in ms (default: 400)
+   * @param {number} options.maxRetries - Max consecutive no-change attempts (default: 25)
+   * @param {number} options.maxScrolls - Max total scrolls safety limit (default: 1000)
+   * @param {number} options.initialWait - Initial wait for content in ms (default: 5000)
+   * @param {string} options.scrollContainer - CSS selector for scroll container (default: null/body)
+   * @param {boolean} options.verbose - Log progress (default: true)
+   * @param {boolean} options.enableLoadMoreButton - Try Load More buttons (default: true)
+   * @param {number} options.maxButtonClicks - Max button click attempts (default: 50)
+   * @param {number} options.waitAfterButtonClick - Wait after button click in ms (default: 2000)
+   * @param {string} options.cardSelector - CSS selector for cards to count new elements
+   * @param {Function} options.onHeightChange - Callback when height increases: ({type, scrollCount, previousHeight, newHeight, delta, timestamp}) => void
+   * @param {Function} options.onButtonClick - Callback when Load More clicked: ({type, buttonClicks, scrollCount, buttonText, strategy, newElementCount, timestamp}) => void
+   * @param {Function} options.onScrollBatch - Callback every 10 scrolls: ({type, scrollCount, heightChanges, buttonClicks, currentHeight, retriesAtBatch, timestamp}) => void
+   * @returns {Promise<Object>} - Scroll statistics including timeline array
    */
   async scrollToFullyLoad(options = {}) {
     const config = { ...this.defaultScrollConfig, ...options };
     const {
       scrollDelay, maxRetries, maxScrolls, initialWait, scrollContainer, verbose,
-      enableLoadMoreButton, maxButtonClicks, waitAfterButtonClick, cardSelector
+      enableLoadMoreButton, maxButtonClicks, waitAfterButtonClick, cardSelector,
+      // Timeline callback hooks for testing and progress tracking
+      onHeightChange,     // Called when page height increases: (data) => void
+      onButtonClick,      // Called when Load More button is clicked: (data) => void
+      onScrollBatch       // Called every 10 scrolls with progress: (data) => void
     } = config;
 
     // Wait for initial content to load
@@ -183,6 +200,10 @@ class SeleniumManager {
     let heightChanges = 0;
     let buttonClicks = 0;
 
+    // Timeline tracking for callbacks and testing
+    const timeline = [];
+    const startTime = Date.now();
+
     if (verbose) {
       this.logger.info(`[Selenium] Starting scroll: initial height = ${lastHeight}px`);
       this.logger.info(`[Selenium] Config: delay=${scrollDelay}ms, maxRetries=${maxRetries}, maxScrolls=${maxScrolls}`);
@@ -200,6 +221,25 @@ class SeleniumManager {
       // Wait for content to potentially load
       await this.driver.sleep(scrollDelay);
 
+      // Invoke onScrollBatch callback every 10 scrolls
+      if (scrollCount % 10 === 0 && typeof onScrollBatch === 'function') {
+        const batchData = {
+          type: 'scroll_batch',
+          scrollCount,
+          heightChanges,
+          buttonClicks,
+          currentHeight: lastHeight,
+          retriesAtBatch: retries,
+          timestamp: Date.now() - startTime
+        };
+        timeline.push(batchData);
+        try {
+          onScrollBatch(batchData);
+        } catch (e) {
+          this.logger.debug(`[Selenium] onScrollBatch callback error: ${e.message}`);
+        }
+      }
+
       // Check new height
       const newHeight = await this.driver.executeScript(heightScript);
 
@@ -208,6 +248,25 @@ class SeleniumManager {
         // Key insight: height only stops changing at absolute bottom
         retries = 0;
         heightChanges++;
+
+        const heightChangeData = {
+          type: 'height_change',
+          scrollCount,
+          previousHeight: lastHeight,
+          newHeight,
+          delta: newHeight - lastHeight,
+          timestamp: Date.now() - startTime
+        };
+        timeline.push(heightChangeData);
+
+        // Invoke callback if provided
+        if (typeof onHeightChange === 'function') {
+          try {
+            onHeightChange(heightChangeData);
+          } catch (e) {
+            this.logger.debug(`[Selenium] onHeightChange callback error: ${e.message}`);
+          }
+        }
 
         if (verbose) {
           this.logger.info(`[Selenium] [${scrollCount}] Height changed: ${lastHeight} -> ${newHeight} (+${newHeight - lastHeight}px)`);
@@ -278,6 +337,27 @@ class SeleniumManager {
 
               if (clickResult.success) {
                 buttonClicks++;
+
+                const buttonClickData = {
+                  type: 'button_click',
+                  buttonClicks,
+                  scrollCount,
+                  buttonText: buttonResult.text,
+                  strategy: buttonResult.strategy,
+                  newElementCount: clickResult.newElementCount || 0,
+                  timestamp: Date.now() - startTime
+                };
+                timeline.push(buttonClickData);
+
+                // Invoke callback if provided
+                if (typeof onButtonClick === 'function') {
+                  try {
+                    onButtonClick(buttonClickData);
+                  } catch (e) {
+                    this.logger.debug(`[Selenium] onButtonClick callback error: ${e.message}`);
+                  }
+                }
+
                 if (verbose) {
                   const countInfo = cardSelector && clickResult.newElementCount > 0
                     ? `, loaded ${clickResult.newElementCount} new elements`
@@ -342,7 +422,10 @@ class SeleniumManager {
       finalHeight: lastHeight,
       stopReason,
       retriesAtEnd: retries,
-      buttonClicks
+      buttonClicks,
+      // Timeline data for testing and analysis
+      timeline,
+      duration: Date.now() - startTime
     };
   }
 

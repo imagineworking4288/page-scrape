@@ -1,0 +1,111 @@
+{
+  "_comment": "Test URL Database for Navigation Tests - DO NOT COMMIT SENSITIVE URLS",
+  "_description": "This file contains URLs used for testing infinite scroll and pagination navigation. Categorized by navigation type and reliability.",
+
+  "infiniteScroll": {
+    "reliable": [
+      {
+        "name": "Sullivan & Cromwell Lawyers",
+        "url": "https://www.sullcrom.com/LawyerListing?custom_is_office=27567",
+        "description": "Law firm infinite scroll listing - PAGE_DOWN triggers content load",
+        "expectedBehavior": {
+          "minHeightChanges": 5,
+          "hasLoadMoreButton": false,
+          "expectedMinContacts": 500
+        },
+        "cardSelector": "div.BioListingCard_card__Mkk7U.row.border-bottom.py-4",
+        "notes": "Primary test target - proven to work with 584+ lawyers"
+      }
+    ],
+    "hasLoadMoreButton": [
+      {
+        "name": "Example Load More Site",
+        "url": "PLACEHOLDER_URL",
+        "description": "Site with Load More button after scroll exhaustion",
+        "expectedBehavior": {
+          "minHeightChanges": 2,
+          "hasLoadMoreButton": true,
+          "expectedButtonClicks": 3
+        },
+        "cardSelector": null,
+        "notes": "Replace with actual URL when testing Load More button feature",
+        "skip": true
+      }
+    ],
+    "unreliable": [
+      {
+        "name": "Example Flaky Site",
+        "url": "PLACEHOLDER_URL",
+        "description": "Site with intermittent infinite scroll behavior",
+        "expectedBehavior": {
+          "minHeightChanges": 1,
+          "hasLoadMoreButton": false
+        },
+        "cardSelector": null,
+        "notes": "May require multiple test runs",
+        "skip": true
+      }
+    ]
+  },
+
+  "pagination": {
+    "urlParameter": [
+      {
+        "name": "Example Page Parameter Site",
+        "url": "PLACEHOLDER_URL",
+        "description": "Standard ?page=N pagination",
+        "expectedBehavior": {
+          "parameterName": "page",
+          "expectedPages": 10,
+          "contactsPerPage": 20
+        },
+        "notes": "Replace with actual URL",
+        "skip": true
+      }
+    ],
+    "pathBased": [
+      {
+        "name": "Example Path Pagination",
+        "url": "PLACEHOLDER_URL",
+        "description": "/page/N style pagination",
+        "expectedBehavior": {
+          "pathPattern": "/page/{page}",
+          "expectedPages": 5
+        },
+        "notes": "Replace with actual URL",
+        "skip": true
+      }
+    ],
+    "offset": [
+      {
+        "name": "Example Offset Pagination",
+        "url": "PLACEHOLDER_URL",
+        "description": "?offset=N or ?start=N pagination",
+        "expectedBehavior": {
+          "parameterName": "offset",
+          "itemsPerPage": 10,
+          "expectedPages": 10
+        },
+        "notes": "Replace with actual URL",
+        "skip": true
+      }
+    ]
+  },
+
+  "mixed": [
+    {
+      "name": "Example Hybrid Site",
+      "url": "PLACEHOLDER_URL",
+      "description": "Site with both pagination and infinite scroll on different views",
+      "notes": "Replace with actual URL",
+      "skip": true
+    }
+  ],
+
+  "_testConfig": {
+    "defaultTimeout": 30000,
+    "defaultScrollDelay": 400,
+    "defaultMaxRetries": 25,
+    "defaultHeadless": true
+  }
+}

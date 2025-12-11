@@ -8,7 +8,12 @@
     "test": "node tests/scraper-test.js",
     "test:pdf": "node tests/pdf-scraper-test.js",
     "test:merger": "node tests/data-merger-test.js",
-    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js && node tests/data-merger-test.js"
+    "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js && node tests/data-merger-test.js",
+    "test:nav": "node tests/run-navigation-tests.js",
+    "test:nav:scroll": "node tests/run-navigation-tests.js --type scroll",
+    "test:nav:page": "node tests/run-navigation-tests.js --type pagination",
+    "test:nav:quick": "node tests/run-navigation-tests.js --quick",
+    "test:nav:verbose": "node tests/run-navigation-tests.js --verbose"
   },
   "keywords": [
     "scraper",
