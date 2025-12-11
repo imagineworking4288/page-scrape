@@ -465,11 +465,14 @@ class FullPipelineOrchestrator {
       const enricher = new ProfileEnricher(this.browserManager, enrichRateLimiter, logger);
 
       // Enrich contacts
-      this.enrichedContacts = await enricher.enrichContactsList(contactsWithProfiles, {
+      const enrichResult = await enricher.enrichContacts(contactsWithProfiles, {
         limit: this.options.limit,
         skipErrors: true,
         onlyCoreFields: true
       });
+
+      // enrichContacts returns an object with contacts array
+      this.enrichedContacts = enrichResult.contacts || enrichResult;
 
       // Run post-cleaning
       displayInfo('Running post-enrichment cleaning...');
