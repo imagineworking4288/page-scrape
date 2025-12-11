@@ -219,9 +219,19 @@ class SeleniumManager {
 
     // Main scroll loop
     while (scrollCount < maxScrolls) {
+      // CHECK BUTTON LIMIT FIRST - Exit cleanly if max clicks reached
+      // This prevents StaleElementReferenceError by not querying DOM after limit
+      if (buttonClickMode && buttonClicks >= maxButtonClicks) {
+        if (verbose) {
+          this.logger.info(`[Selenium] Button pagination complete: ${buttonClicks} clicks, exiting cleanly`);
+          this.logger.info(`[Selenium] Final stats - Height changes: ${heightChanges}, Scrolls: ${scrollCount}`);
+        }
+        break;  // Exit main loop - do NOT query DOM anymore
+      }
+
       // BUTTON-FIRST MODE: Check for button immediately instead of scrolling
       // This optimizes button-based pagination (e.g., Skadden's VIEW MORE)
-      if (buttonClickMode && enableLoadMoreButton && buttonClicks < maxButtonClicks) {
+      if (buttonClickMode && enableLoadMoreButton) {
         const buttonResult = await this.detectLoadMoreButton(verbose);
 
         if (buttonResult) {
@@ -263,6 +273,14 @@ class SeleniumManager {
                 ? `, loaded ${clickResult.newElementCount} new elements`
                 : '';
               this.logger.info(`[Selenium] [Button-first] Clicked (${buttonClicks}/${maxButtonClicks})${countInfo}`);
+            }
+
+            // Check if we just hit the limit - exit immediately without more DOM queries
+            if (buttonClicks >= maxButtonClicks) {
+              if (verbose) {
+                this.logger.info(`[Selenium] Reached max button clicks (${maxButtonClicks}), stopping pagination`);
+              }
+              break;  // Exit main loop cleanly
             }
 
             // Update height and continue in button-first mode

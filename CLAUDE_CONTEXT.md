@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 11, 2025 (Added Navigation Testing System, timeline callbacks for scroll testing, Load More button detection)
+**Last Updated**: December 11, 2025 (Added button-first mode optimization, pagination constants system, StaleElementReferenceError fix for button limit)
 
 ---
 
@@ -170,7 +170,6 @@ page-scrape/
 │   ├── scraper-test.js         # SimpleScraper tests
 │   ├── select-scraper-test.js  # SelectScraper tests
 │   ├── pagination-test.js      # Pagination tests
-│   ├── pagination-paul-weiss.test.js # Paul Weiss pagingNumber tests
 │   ├── pagination-integration-test.js # Integration tests
 │   ├── pdf-scraper-test.js     # PDF scraper tests
 │   ├── selenium-infinite-scroll.test.js # Selenium infinite scroll tests
@@ -712,7 +711,7 @@ this.scrollConfig = {
 
 **Supported Page Parameter Names**:
 - `page`, `p`, `pg` - Common formats
-- `pageNum`, `pageNumber`, `pagingNumber` - Descriptive formats (pagingNumber = Paul Weiss)
+- `pageNum`, `pageNumber`, `pagingNumber` - Descriptive formats
 - `pageNo`, `currentPage`, `paged`, `pn` - Alternative formats
 - `pagenum`, `page_number`, `page_num` - Underscore formats
 
@@ -739,7 +738,7 @@ const PAGE_PARAMETER_NAMES = [
 The URL generator preserves ALL non-pagination URL parameters when generating page URLs. This ensures filter parameters (offices, practices, industries, etc.) remain intact across pages.
 
 ```javascript
-// Example: Paul Weiss URL with filters
+// Example: URL with filters and pagingNumber parameter
 // Original: ?pageId=1492&pageSize=48&pagingNumber=2&offices=New%20York&practices=All
 // Page 3:   ?pageId=1492&pageSize=48&pagingNumber=3&offices=New%20York&practices=All
 // Only pagingNumber changes; all filters preserved
@@ -1055,7 +1054,6 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 | `scraper-test.js` | SimpleScraper tests - email/phone regex, name validation |
 | `select-scraper-test.js` | SelectScraper tests - text parsing, marker detection |
 | `pagination-test.js` | Pagination tests - pattern detection, URL generation |
-| `pagination-paul-weiss.test.js` | Paul Weiss pagingNumber parameter support tests |
 | `pagination-integration-test.js` | Integration tests for pagination |
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
@@ -1483,6 +1481,37 @@ node orchestrator.js --url "https://www.skadden.com/professionals?skip=25&office
 [Selenium] Clicked Load More button (1/50), loaded 25 new elements
 [Selenium] No Load More button found, scroll complete
 ```
+
+### Button-First Mode Optimization (December 2025)
+
+After the first successful Load More button click, the scraper enters "button-first mode" which checks for the button immediately at the start of each loop iteration instead of scrolling 25 times first.
+
+**Performance Impact**:
+- Before: ~25 seconds per button click (scroll 25 times first)
+- After: ~3 seconds per button click (immediate button check)
+- **~10x faster** for button-based pagination sites
+
+**How It Works**:
+1. Scroll until height stops changing
+2. Detect and click Load More button (enters button-first mode)
+3. Immediately check for button again on next iteration
+4. Repeat until button exhausted or max clicks reached
+5. Exit cleanly without StaleElementReferenceError
+
+**Log Messages**:
+```
+[Selenium] Entering button-first mode for faster button pagination
+[Selenium] [Button-first] Found button: "VIEW MORE" (strategy: text-content)
+[Selenium] [Button-first] Clicked (45/50)
+[Selenium] Reached max button clicks (50), stopping pagination
+[Selenium] Button pagination complete: 50 clicks, exiting cleanly
+```
+
+**Clean Exit on Max Clicks**:
+The code checks `buttonClicks >= maxButtonClicks` at the START of each loop to prevent StaleElementReferenceError. After 50 DOM updates, element references become stale - querying DOM after reaching the limit would crash.
+
+**Files**:
+- `src/core/selenium-manager.js` - `scrollToFullyLoad()` with button-first mode
 
 ### Timeline Callbacks for Scroll Testing (December 2025)
 

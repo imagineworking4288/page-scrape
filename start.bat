@@ -333,6 +333,49 @@ echo     - After scraping: "Proceed to enrichment?"
 echo     - After enrichment: "Export to Google Sheets?"
 echo.
 echo --------------------------------------------------------------------------------
+echo [NAVIGATION TESTING] (NEW)
+echo --------------------------------------------------------------------------------
+echo   Test infinite scroll and pagination behavior before config generation.
+echo   Verifies scrolling mechanics, button detection, and URL pattern recognition.
+echo.
+echo   # Test single URL for infinite scroll
+echo   node tests/run-navigation-tests.js --url "URL" --type scroll
+echo.
+echo   # Test with verbose output
+echo   node tests/run-navigation-tests.js --url "URL" --type scroll --verbose
+echo.
+echo   # Quick test mode (reduced limits)
+echo   node tests/run-navigation-tests.js --url "URL" --quick
+echo.
+echo   # Test pagination pattern detection
+echo   node tests/run-navigation-tests.js --url "URL" --type pagination --verbose
+echo.
+echo   # Run all navigation tests from test-urls.json
+echo   node tests/run-navigation-tests.js
+echo.
+echo   # Save results to JSON file
+echo   node tests/run-navigation-tests.js --url "URL" --save results.json
+echo.
+echo   NPM SHORTCUTS:
+echo     npm run test:nav           - Run all navigation tests
+echo     npm run test:nav:scroll    - Infinite scroll tests only
+echo     npm run test:nav:page      - Pagination tests only
+echo     npm run test:nav:quick     - Quick test suite
+echo     npm run test:nav:verbose   - Verbose output
+echo.
+echo   SCROLL TEST OUTPUT:
+echo     - Height changes: How many times page grew during scroll
+echo     - Button clicks: Load More button detections and clicks
+echo     - Timeline: Detailed scroll/click event log
+echo     - Duration: Total time to fully load page
+echo.
+echo   PAGINATION TEST OUTPUT:
+echo     - Pattern type: parameter, path, offset, or infinite-scroll
+echo     - Parameter name: e.g., page, pagingNumber, offset
+echo     - URL generation: Verifies page URLs are correct
+echo     - Filter preservation: Confirms query params preserved
+echo.
+echo --------------------------------------------------------------------------------
 echo [CONFIG VALIDATION TOOL] (NEW)
 echo --------------------------------------------------------------------------------
 echo   Quick test to validate a config works before full scrape.
@@ -367,6 +410,12 @@ echo ===========================================================================
 echo [QUICK START]
 echo ================================================================================
 color 0E
+echo.
+echo   TEST NAVIGATION FIRST (verify scroll/pagination works):
+echo     node tests/run-navigation-tests.js --url "URL" --type scroll --verbose
+echo.
+echo   TEST PAGINATION PATTERN (verify page parameter detected):
+echo     node tests/run-navigation-tests.js --url "URL" --type pagination --verbose
 echo.
 echo   VALIDATE CONFIG (before full scrape):
 echo     node orchestrator.js --validate --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --limit 2
