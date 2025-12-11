@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 11, 2025 (Added --core-only export flag for excluding enrichment metadata)
+**Last Updated**: December 11, 2025 (Added Load More button detection for infinite scroll, --core-only export flag)
 
 ---
 
@@ -1369,6 +1369,57 @@ while (retries < maxRetries) {
 --force-selenium         # Use Selenium for infinite scroll
 --scroll-delay <ms>      # Delay between PAGE_DOWN presses (default: 400)
 --max-retries <n>        # Max no-change attempts (default: 25)
+```
+
+### Load More Button Support (December 2025)
+
+The Selenium infinite scroll system now includes automatic "Load More" button detection and clicking as a fallback mechanism when scrolling stops producing new content.
+
+**How It Works**:
+1. Scroll using PAGE_DOWN key simulation until height stops changing (maxRetries reached)
+2. Detect "Load More" button using multiple strategies
+3. If found, click button and wait for new content
+4. Resume scrolling after content loads
+5. Repeat until no button found or maxButtonClicks reached
+
+**Detection Strategies** (tried in order):
+1. **Text content patterns** - Case-insensitive matching for: "load more", "show more", "view more", "see more", "more results", "next page", "see all", "view all"
+2. **ARIA label patterns** - aria-label attributes containing "load" or "more"
+3. **CSS class patterns** - .load-more, .show-more, [class*="load-more"], etc.
+4. **Data attribute patterns** - [data-action*="load"], [data-load-more], etc.
+5. **Generic fallback** - Any button/link with "more" in text
+
+**Configuration Options** (in pagination.scrollConfig):
+```javascript
+{
+  enableLoadMoreButton: true,   // Enable button detection (default: true)
+  maxButtonClicks: 50,          // Max clicks before stopping (default: 50)
+  waitAfterButtonClick: 2000,   // Wait time after click (default: 2000ms)
+  cardSelector: '.card-class'   // CSS selector for counting new elements
+}
+```
+
+**No Configuration Required**: Works automatically with default settings. The system will:
+- Try scrolling first (more efficient for pure infinite scroll)
+- Fall back to button clicking when scroll exhausts
+- Continue scrolling after each button click loads new content
+
+**Example Test URL**:
+```bash
+# Site with "Load More" button pagination:
+node orchestrator.js --url "https://www.skadden.com/professionals?skip=25&office=74507339-7adf-4528-ba0d-000000000055" --scroll --limit 100
+```
+
+**Files**:
+- `src/core/selenium-manager.js` - `detectLoadMoreButton()`, `clickLoadMoreButton()`, updated `scrollToFullyLoad()`
+- `src/scrapers/config-scrapers/infinite-scroll-scraper.js` - Button config support, diagnosis updates
+
+**Log Messages**:
+```
+[Selenium] Scroll exhausted (25 retries), looking for Load More button...
+[Selenium] Found Load More button via text-content: "Load More Results"
+[Selenium] Clicked Load More button (1/50), loaded 25 new elements
+[Selenium] No Load More button found, scroll complete
 ```
 
 ### Two-Phase Selenium Extraction

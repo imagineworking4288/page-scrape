@@ -30,7 +30,12 @@ class SeleniumManager {
       maxScrolls: 1000,           // safety limit for total scrolls
       initialWait: 5000,          // ms to wait for initial content to load
       scrollContainer: null,      // CSS selector for scroll container (null = use body)
-      verbose: true               // log progress
+      verbose: true,              // log progress
+      // Load More button options
+      enableLoadMoreButton: true, // try to detect and click Load More buttons
+      maxButtonClicks: 50,        // maximum number of button clicks
+      waitAfterButtonClick: 2000, // ms to wait after clicking button
+      cardSelector: null          // CSS selector for cards (used to count new elements)
     };
 
     // User agent rotation
@@ -127,13 +132,17 @@ class SeleniumManager {
   /**
    * Scroll page to fully load all infinite scroll content
    * Uses PAGE_DOWN key simulation with retry logic
+   * Falls back to Load More button detection when scrolling stops producing new content
    *
    * @param {Object} options - Scroll options
    * @returns {Promise<Object>} - Scroll statistics
    */
   async scrollToFullyLoad(options = {}) {
     const config = { ...this.defaultScrollConfig, ...options };
-    const { scrollDelay, maxRetries, maxScrolls, initialWait, scrollContainer, verbose } = config;
+    const {
+      scrollDelay, maxRetries, maxScrolls, initialWait, scrollContainer, verbose,
+      enableLoadMoreButton, maxButtonClicks, waitAfterButtonClick, cardSelector
+    } = config;
 
     // Wait for initial content to load
     if (verbose) this.logger.info(`[Selenium] Waiting ${initialWait}ms for initial content...`);
@@ -172,14 +181,18 @@ class SeleniumManager {
     let retries = 0;
     let scrollCount = 0;
     let heightChanges = 0;
+    let buttonClicks = 0;
 
     if (verbose) {
       this.logger.info(`[Selenium] Starting scroll: initial height = ${lastHeight}px`);
       this.logger.info(`[Selenium] Config: delay=${scrollDelay}ms, maxRetries=${maxRetries}, maxScrolls=${maxScrolls}`);
+      if (enableLoadMoreButton) {
+        this.logger.info(`[Selenium] Load More button detection: enabled (max ${maxButtonClicks} clicks)`);
+      }
     }
 
     // Main scroll loop
-    while (scrollCount < maxScrolls && retries < maxRetries) {
+    while (scrollCount < maxScrolls) {
       // Send PAGE_DOWN key to scroll element
       await scrollElement.sendKeys(Key.PAGE_DOWN);
       scrollCount++;
@@ -240,22 +253,86 @@ class SeleniumManager {
             lastHeight = heightAfterCycle;
           }
         }
+
+        // Check if scroll is exhausted - try Load More button as fallback
+        if (retries >= maxRetries) {
+          if (enableLoadMoreButton && buttonClicks < maxButtonClicks) {
+            if (verbose) {
+              this.logger.info(`[Selenium] Scroll exhausted (${retries} retries), looking for Load More button...`);
+            }
+
+            // Try to find and click a Load More button
+            const buttonResult = await this.detectLoadMoreButton(verbose);
+
+            if (buttonResult) {
+              if (verbose) {
+                this.logger.info(`[Selenium] Found Load More button: "${buttonResult.text}" (strategy: ${buttonResult.strategy})`);
+              }
+
+              // Click the button
+              const clickResult = await this.clickLoadMoreButton(buttonResult.button, {
+                waitAfterClick: waitAfterButtonClick,
+                scrollAfterClick: true,
+                cardSelector
+              });
+
+              if (clickResult.success) {
+                buttonClicks++;
+                if (verbose) {
+                  const countInfo = cardSelector && clickResult.newElementCount > 0
+                    ? `, loaded ${clickResult.newElementCount} new elements`
+                    : '';
+                  this.logger.info(`[Selenium] Clicked Load More button (${buttonClicks}/${maxButtonClicks})${countInfo}`);
+                }
+
+                // Reset retries and height to continue scrolling after button click
+                retries = 0;
+                lastHeight = await this.driver.executeScript(heightScript);
+
+                // Continue scrolling - don't break
+                continue;
+              } else {
+                if (verbose) {
+                  this.logger.warn(`[Selenium] Button click failed: ${clickResult.error || 'unknown error'}`);
+                }
+                // Button click failed, stop scrolling
+                break;
+              }
+            } else {
+              if (verbose) {
+                this.logger.info('[Selenium] No Load More button found, scroll complete');
+              }
+              break;
+            }
+          } else {
+            // Load More button not enabled or max clicks reached
+            if (buttonClicks >= maxButtonClicks && verbose) {
+              this.logger.info(`[Selenium] Reached max button clicks (${maxButtonClicks}), stopping`);
+            }
+            break;
+          }
+        }
       }
     }
 
     // Determine stop reason
     let stopReason;
-    if (retries >= maxRetries) {
+    if (buttonClicks >= maxButtonClicks) {
+      stopReason = `Reached max button clicks (${maxButtonClicks})`;
+    } else if (retries >= maxRetries) {
       stopReason = `Reached max retries (${maxRetries} consecutive no-change attempts)`;
     } else if (scrollCount >= maxScrolls) {
       stopReason = `Reached max scrolls (${maxScrolls})`;
     } else {
-      stopReason = 'Unknown';
+      stopReason = 'Scroll complete (no more content)';
     }
 
     if (verbose) {
       this.logger.info(`[Selenium] Scroll complete: ${stopReason}`);
       this.logger.info(`[Selenium] Total scrolls: ${scrollCount}, Height changes: ${heightChanges}`);
+      if (buttonClicks > 0) {
+        this.logger.info(`[Selenium] Load More button clicks: ${buttonClicks}`);
+      }
       this.logger.info(`[Selenium] Final height: ${lastHeight}px`);
     }
 
@@ -264,8 +341,290 @@ class SeleniumManager {
       heightChanges,
       finalHeight: lastHeight,
       stopReason,
-      retriesAtEnd: retries
+      retriesAtEnd: retries,
+      buttonClicks
     };
+  }
+
+  /**
+   * Detect a "Load More" button on the page using multiple strategies
+   *
+   * Detection strategies (in order of priority):
+   * 1. Text content patterns - buttons/links with "load more", "show more", etc.
+   * 2. ARIA label patterns - aria-label attributes with load/more text
+   * 3. CSS class patterns - .load-more, .show-more, [class*="load-more"], etc.
+   * 4. Data attribute patterns - [data-action*="load"], [data-load-more], etc.
+   * 5. Generic fallback - any button/link with "more" in text
+   *
+   * @param {boolean} verbose - Log detection attempts
+   * @returns {Promise<Object|null>} - { button: WebElement, text: string, strategy: string } or null
+   */
+  async detectLoadMoreButton(verbose = false) {
+    if (verbose) this.logger.info('[Selenium] Attempting to detect Load More button...');
+
+    const strategies = [
+      {
+        name: 'text-content',
+        description: 'Text content patterns',
+        finder: async () => {
+          // Case-insensitive text patterns for load more buttons
+          const patterns = [
+            'load more', 'show more', 'view more', 'see more', 'more results',
+            'load additional', 'show additional', 'next page', 'see all', 'view all'
+          ];
+
+          for (const pattern of patterns) {
+            try {
+              // XPath for case-insensitive text matching in buttons and links
+              const xpath = `//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${pattern}')] | //a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${pattern}')]`;
+              const elements = await this.driver.findElements(By.xpath(xpath));
+
+              for (const el of elements) {
+                try {
+                  const isDisplayed = await el.isDisplayed();
+                  const isEnabled = await el.isEnabled();
+                  if (isDisplayed && isEnabled) {
+                    const text = await el.getText();
+                    return { button: el, text: text.trim() || pattern };
+                  }
+                } catch (e) {
+                  // Element may have become stale, continue
+                }
+              }
+            } catch (e) {
+              // Pattern not found, continue to next
+            }
+          }
+          return null;
+        }
+      },
+      {
+        name: 'aria-label',
+        description: 'ARIA label patterns',
+        finder: async () => {
+          try {
+            const xpath = `//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'load') or contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'more')] | //a[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'load') or contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'more')]`;
+            const elements = await this.driver.findElements(By.xpath(xpath));
+
+            for (const el of elements) {
+              try {
+                const isDisplayed = await el.isDisplayed();
+                const isEnabled = await el.isEnabled();
+                if (isDisplayed && isEnabled) {
+                  const ariaLabel = await el.getAttribute('aria-label');
+                  const text = await el.getText();
+                  return { button: el, text: text.trim() || ariaLabel || 'Load More' };
+                }
+              } catch (e) {
+                // Continue
+              }
+            }
+          } catch (e) {
+            // Not found
+          }
+          return null;
+        }
+      },
+      {
+        name: 'css-class',
+        description: 'CSS class patterns',
+        finder: async () => {
+          const selectors = [
+            '.load-more', '.show-more', '.view-more', '.btn-load-more',
+            '.load-additional', '[class*="load-more"]', '[class*="show-more"]',
+            '[class*="loadmore"]', '[class*="showmore"]'
+          ];
+
+          for (const selector of selectors) {
+            try {
+              const elements = await this.driver.findElements(By.css(selector));
+
+              for (const el of elements) {
+                try {
+                  const isDisplayed = await el.isDisplayed();
+                  const isEnabled = await el.isEnabled();
+                  if (isDisplayed && isEnabled) {
+                    const text = await el.getText();
+                    return { button: el, text: text.trim() || 'Load More' };
+                  }
+                } catch (e) {
+                  // Continue
+                }
+              }
+            } catch (e) {
+              // Selector not found, continue
+            }
+          }
+          return null;
+        }
+      },
+      {
+        name: 'data-attribute',
+        description: 'Data attribute patterns',
+        finder: async () => {
+          const selectors = [
+            '[data-action*="load"]', '[data-action*="more"]',
+            '[data-load-more]', '[data-show-more]',
+            '[data-testid*="load-more"]', '[data-testid*="show-more"]'
+          ];
+
+          for (const selector of selectors) {
+            try {
+              const elements = await this.driver.findElements(By.css(selector));
+
+              for (const el of elements) {
+                try {
+                  const isDisplayed = await el.isDisplayed();
+                  const isEnabled = await el.isEnabled();
+                  if (isDisplayed && isEnabled) {
+                    const text = await el.getText();
+                    return { button: el, text: text.trim() || 'Load More' };
+                  }
+                } catch (e) {
+                  // Continue
+                }
+              }
+            } catch (e) {
+              // Selector not found, continue
+            }
+          }
+          return null;
+        }
+      },
+      {
+        name: 'generic-more',
+        description: 'Generic fallback (any button/link with "more")',
+        finder: async () => {
+          try {
+            // Find buttons/links with "more" that look like pagination controls
+            const xpath = `//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'more')] | //a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'more') and not(contains(., '@'))]`;
+            const elements = await this.driver.findElements(By.xpath(xpath));
+
+            for (const el of elements) {
+              try {
+                const isDisplayed = await el.isDisplayed();
+                const isEnabled = await el.isEnabled();
+                if (isDisplayed && isEnabled) {
+                  const text = await el.getText();
+                  // Filter out links that are clearly not load more buttons
+                  if (text && text.length < 50 && !text.includes('@')) {
+                    return { button: el, text: text.trim() };
+                  }
+                }
+              } catch (e) {
+                // Continue
+              }
+            }
+          } catch (e) {
+            // Not found
+          }
+          return null;
+        }
+      }
+    ];
+
+    // Try each strategy in order
+    for (const strategy of strategies) {
+      try {
+        if (verbose) this.logger.debug(`[Selenium] Trying detection strategy: ${strategy.description}`);
+
+        const result = await strategy.finder();
+        if (result) {
+          if (verbose) {
+            this.logger.info(`[Selenium] Found Load More button via ${strategy.name}: "${result.text}"`);
+          }
+          return { ...result, strategy: strategy.name };
+        }
+      } catch (e) {
+        if (verbose) {
+          this.logger.debug(`[Selenium] Strategy ${strategy.name} failed: ${e.message}`);
+        }
+      }
+    }
+
+    if (verbose) this.logger.debug('[Selenium] No Load More button found');
+    return null;
+  }
+
+  /**
+   * Click a Load More button and wait for new content to load
+   *
+   * @param {WebElement} button - The button element to click
+   * @param {Object} options - Click options
+   * @param {number} options.waitAfterClick - Time to wait after clicking (ms)
+   * @param {boolean} options.scrollAfterClick - Whether to scroll to bottom after click
+   * @param {string} options.cardSelector - CSS selector for cards to count
+   * @returns {Promise<Object>} - { success: boolean, newElementCount: number, error?: string }
+   */
+  async clickLoadMoreButton(button, options = {}) {
+    const {
+      waitAfterClick = 2000,
+      scrollAfterClick = true,
+      cardSelector = null
+    } = options;
+
+    try {
+      // Get element count before click (if card selector provided)
+      let countBefore = 0;
+      if (cardSelector) {
+        try {
+          const cardsBefore = await this.driver.findElements(By.css(cardSelector));
+          countBefore = cardsBefore.length;
+        } catch (e) {
+          // Ignore count errors
+        }
+      }
+
+      // Scroll button into view before clicking
+      try {
+        await this.driver.executeScript('arguments[0].scrollIntoView({ behavior: "smooth", block: "center" });', button);
+        await this.driver.sleep(300);
+      } catch (e) {
+        this.logger.debug('[Selenium] Could not scroll button into view, attempting click anyway');
+      }
+
+      // Click the button
+      await button.click();
+      this.logger.debug('[Selenium] Clicked Load More button');
+
+      // Wait for content to load
+      await this.driver.sleep(waitAfterClick);
+
+      // Scroll to bottom to trigger any lazy loading
+      if (scrollAfterClick) {
+        const scrollElement = await this.driver.findElement(By.tagName('body'));
+        await scrollElement.sendKeys(Key.END);
+        await this.driver.sleep(500);
+      }
+
+      // Get element count after click
+      let countAfter = 0;
+      if (cardSelector) {
+        try {
+          const cardsAfter = await this.driver.findElements(By.css(cardSelector));
+          countAfter = cardsAfter.length;
+        } catch (e) {
+          // Ignore count errors
+        }
+      }
+
+      return {
+        success: true,
+        countBefore,
+        countAfter,
+        newElementCount: countAfter - countBefore
+      };
+
+    } catch (error) {
+      // StaleElementReferenceError means button disappeared after click - often means it worked
+      if (error.name === 'StaleElementReferenceError') {
+        this.logger.debug('[Selenium] Button became stale after click (may indicate success)');
+        return { success: true, newElementCount: 0, stale: true };
+      }
+
+      this.logger.warn(`[Selenium] Button click failed: ${error.message}`);
+      return { success: false, newElementCount: 0, error: error.message };
+    }
   }
 
   /**

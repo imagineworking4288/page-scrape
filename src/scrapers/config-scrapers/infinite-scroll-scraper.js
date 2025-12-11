@@ -14,11 +14,18 @@
  *   - Monitor height changes with retry logic
  *   - Reset retry counter on ANY height change (key insight from INFSCROLLTEST)
  *   - Scroll up/down cycle every 5 failed retries
+ *   - Auto-detect and click "Load More" buttons as fallback when scroll exhausts
  *
  * PHASE 2 - EXTRACT WITH SELENIUM:
  *   - Execute JavaScript in Selenium to extract all card data
  *   - Process and normalize contacts
  *   - Close Selenium when done
+ *
+ * LOAD MORE BUTTON SUPPORT:
+ *   - Automatically detects "Load More", "Show More", etc. buttons
+ *   - Uses multiple detection strategies (text, ARIA, CSS class, data attributes)
+ *   - Clicks button and continues scrolling after new content loads
+ *   - No configuration required - works out of the box
  *
  * WHY SELENIUM PAGE_DOWN:
  *   - More reliable than Puppeteer wheel events for triggering lazy loaders
@@ -44,7 +51,12 @@ class InfiniteScrollScraper extends BaseConfigScraper {
       maxScrolls: options.maxScrolls || 1000,
       initialWait: options.initialWait || 5000,
       scrollContainer: options.scrollContainer || null,
-      verbose: options.verbose !== false
+      verbose: options.verbose !== false,
+      // Load More button options (automatic detection and clicking)
+      enableLoadMoreButton: options.enableLoadMoreButton !== false,  // enabled by default
+      maxButtonClicks: options.maxButtonClicks || 50,
+      waitAfterButtonClick: options.waitAfterButtonClick || 2000,
+      cardSelector: null  // will be set from config if available
     };
   }
 
@@ -75,6 +87,22 @@ class InfiniteScrollScraper extends BaseConfigScraper {
         this.logger.info(`[InfiniteScrollScraper] Using config scroll settings`);
       }
 
+      // Pass card selector for element counting (helps track Load More button effectiveness)
+      if (this.cardSelector) {
+        this.scrollConfig.cardSelector = this.cardSelector;
+      }
+
+      // Log merged scroll config in verbose mode
+      if (this.scrollConfig.verbose) {
+        this.logger.debug(`[InfiniteScrollScraper] Scroll config: ${JSON.stringify({
+          scrollDelay: this.scrollConfig.scrollDelay,
+          maxRetries: this.scrollConfig.maxRetries,
+          maxScrolls: this.scrollConfig.maxScrolls,
+          enableLoadMoreButton: this.scrollConfig.enableLoadMoreButton,
+          maxButtonClicks: this.scrollConfig.maxButtonClicks
+        })}`);
+      }
+
       // ═══════════════════════════════════════════════════════════
       // PHASE 1: LOAD WITH SELENIUM
       // ═══════════════════════════════════════════════════════════
@@ -95,6 +123,9 @@ class InfiniteScrollScraper extends BaseConfigScraper {
       this.logger.info(`[InfiniteScrollScraper] Scroll complete:`);
       this.logger.info(`[InfiniteScrollScraper]   - Scrolls: ${scrollStats.scrollCount}`);
       this.logger.info(`[InfiniteScrollScraper]   - Height changes: ${scrollStats.heightChanges}`);
+      if (scrollStats.buttonClicks > 0) {
+        this.logger.info(`[InfiniteScrollScraper]   - Load More clicks: ${scrollStats.buttonClicks}`);
+      }
       this.logger.info(`[InfiniteScrollScraper]   - Final height: ${scrollStats.finalHeight}px`);
       this.logger.info(`[InfiniteScrollScraper]   - Stop reason: ${scrollStats.stopReason}`);
 
@@ -319,12 +350,15 @@ class InfiniteScrollScraper extends BaseConfigScraper {
         initialCardCount = cards.length;
       }
 
-      // Perform limited scroll (50 scrolls)
+      // Perform limited scroll (50 scrolls) with button detection enabled
       const scrollStats = await this.seleniumManager.scrollToFullyLoad({
         maxScrolls: 50,
         maxRetries: 10,
         scrollDelay: 300,
-        verbose: false
+        verbose: false,
+        enableLoadMoreButton: true,
+        maxButtonClicks: 5,  // Limit button clicks during diagnosis
+        cardSelector: this.cardSelector
       });
 
       // Get final state
@@ -334,6 +368,9 @@ class InfiniteScrollScraper extends BaseConfigScraper {
         const cards = await driver.findElements(By.css(this.cardSelector));
         finalCardCount = cards.length;
       }
+
+      // Check for Load More button presence after scroll
+      const loadMoreButton = await this.seleniumManager.detectLoadMoreButton(false);
 
       const diagnosis = {
         type: 'infinite-scroll',
@@ -345,12 +382,20 @@ class InfiniteScrollScraper extends BaseConfigScraper {
         finalCards: finalCardCount,
         newCards: finalCardCount - initialCardCount,
         scrollStats,
-        isInfiniteScroll: scrollStats.heightChanges > 2,
+        loadMoreButton: {
+          detected: !!loadMoreButton,
+          text: loadMoreButton?.text || null,
+          strategy: loadMoreButton?.strategy || null,
+          clicksDuringDiagnosis: scrollStats.buttonClicks || 0
+        },
+        isInfiniteScroll: scrollStats.heightChanges > 2 || scrollStats.buttonClicks > 0,
         confidence: scrollStats.heightChanges > 5 ? 'high' : (scrollStats.heightChanges > 2 ? 'medium' : 'low'),
         recommendedConfig: {
           scrollDelay: 400,
           maxRetries: 25,
-          maxScrolls: 1000
+          maxScrolls: 1000,
+          enableLoadMoreButton: true,
+          maxButtonClicks: 50
         }
       };
 
