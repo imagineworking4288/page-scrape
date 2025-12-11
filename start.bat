@@ -393,7 +393,13 @@ echo   ENRICH + EXPORT (combined):
 echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --limit 10 --export-sheets "S and C Lawyers"
 echo.
 echo   # Debug mode (visible browser, keep files)
+echo   node orchestrator.js --full-pipeline --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --limit 5 --auto --core-only
+echo.
+echo   CONFIG GENERATOR PARAMETERS:
 echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
+echo.
+echo   New Implementation PARAMETERS:
+echo   node orchestrator.js --full-pipeline --core-only --limit 5 --url "new url"
 echo.
 color 0A
 echo ================================================================================

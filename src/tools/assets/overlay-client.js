@@ -1514,6 +1514,178 @@
   };
 
   // ===========================
+  // VALIDATION FUNCTIONS
+  // ===========================
+
+  /**
+   * Validate Data - runs quick validation on generated config
+   * Tests scraping and enrichment on 5 contacts to verify config works
+   */
+  window.validateData = async function() {
+    console.log('[Validation] Validate Data button clicked');
+
+    const validateBtn = document.getElementById('validateDataBtn');
+    const originalHTML = validateBtn.innerHTML;
+
+    try {
+      // Disable button and show loading state
+      validateBtn.disabled = true;
+      validateBtn.innerHTML = '<span class="button-icon">⏳</span><span>Validating...</span>';
+
+      // Show modal with loading state
+      const modal = document.getElementById('validationModal');
+      const resultsContainer = document.getElementById('validationResults');
+      resultsContainer.innerHTML = `
+        <div class="validation-loading">
+          <div class="validation-loading-spinner"></div>
+          <p><strong>Running Validation...</strong></p>
+          <p class="loading-subtitle">Testing scraping and enrichment on 5 contacts</p>
+        </div>
+      `;
+      modal.style.display = 'flex';
+
+      // Call backend to run validation
+      if (typeof __configGen_validateData === 'function') {
+        const result = await __configGen_validateData();
+
+        if (result.success) {
+          // Display validation results
+          displayValidationResults(result.data);
+        } else {
+          // Display error
+          resultsContainer.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+              <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+              <h4 style="color: #dc3545; margin-bottom: 8px;">Validation Failed</h4>
+              <p style="color: #6c757d;">${result.error || 'Unknown error occurred'}</p>
+            </div>
+          `;
+        }
+      } else {
+        throw new Error('Validation function not available');
+      }
+
+    } catch (error) {
+      console.error('[Validation] Error:', error);
+      const resultsContainer = document.getElementById('validationResults');
+      resultsContainer.innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+          <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+          <h4 style="color: #dc3545; margin-bottom: 8px;">Error</h4>
+          <p style="color: #6c757d;">${error.message}</p>
+        </div>
+      `;
+    } finally {
+      // Re-enable button
+      validateBtn.disabled = false;
+      validateBtn.innerHTML = originalHTML;
+    }
+  };
+
+  /**
+   * Close validation modal
+   */
+  window.closeValidationModal = function() {
+    document.getElementById('validationModal').style.display = 'none';
+  };
+
+  /**
+   * Display validation results in modal
+   */
+  function displayValidationResults(data) {
+    const resultsContainer = document.getElementById('validationResults');
+
+    // Build stats cards
+    const statsHTML = `
+      <div class="validation-stats">
+        <div class="validation-stat-card ${data.contactsTested > 0 ? 'success' : 'warning'}">
+          <div class="validation-stat-label">Contacts Tested</div>
+          <div class="validation-stat-value">${data.contactsTested || 0}</div>
+        </div>
+        <div class="validation-stat-card ${data.withEmail > 0 ? 'success' : 'warning'}">
+          <div class="validation-stat-label">With Email</div>
+          <div class="validation-stat-value">${data.withEmail || 0}</div>
+        </div>
+        <div class="validation-stat-card ${data.withProfileUrl > 0 ? 'success' : 'warning'}">
+          <div class="validation-stat-label">With Profile URL</div>
+          <div class="validation-stat-value">${data.withProfileUrl || 0}</div>
+        </div>
+        <div class="validation-stat-card ${data.enriched > 0 ? 'success' : 'warning'}">
+          <div class="validation-stat-label">Enriched</div>
+          <div class="validation-stat-value">${data.enriched || 0}</div>
+        </div>
+      </div>
+    `;
+
+    // Build contact comparison cards
+    let contactsHTML = '';
+    if (data.contacts && data.contacts.length > 0) {
+      contactsHTML = '<h4 style="margin: 20px 0 12px; color: #495057;">Contact Details</h4>';
+      data.contacts.forEach((contact, idx) => {
+        const fields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+        let rowsHTML = '';
+
+        fields.forEach(fieldName => {
+          const field = contact.fields ? contact.fields[fieldName] : null;
+          const scraped = field ? field.scraped : contact[fieldName];
+          const enriched = field ? field.enriched : null;
+          const action = field ? field.action : 'UNCHANGED';
+
+          rowsHTML += `
+            <tr>
+              <td class="validation-field-name">${fieldName}</td>
+              <td class="validation-field-value ${!scraped ? 'empty' : ''}" title="${scraped || ''}">${scraped || '—'}</td>
+              <td class="validation-field-value ${!enriched ? 'empty' : ''}" title="${enriched || ''}">${enriched || '—'}</td>
+              <td><span class="validation-action-badge ${action.toLowerCase()}">${action}</span></td>
+            </tr>
+          `;
+        });
+
+        contactsHTML += `
+          <div class="validation-contact-card">
+            <div class="validation-contact-header">
+              <span class="contact-number">${idx + 1}</span>
+              <span>${contact.name || 'Unknown Contact'}</span>
+            </div>
+            <table class="validation-field-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Scraped</th>
+                  <th>Enriched</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHTML}
+              </tbody>
+            </table>
+          </div>
+        `;
+      });
+    }
+
+    // Build summary
+    const summaryClass = data.passed ? '' : (data.hasErrors ? 'error' : 'warning');
+    const summaryIcon = data.passed ? '✅' : (data.hasErrors ? '❌' : '⚠️');
+    const summaryTitle = data.passed ? 'Validation Passed' : (data.hasErrors ? 'Issues Detected' : 'Review Recommended');
+
+    const summaryHTML = `
+      <div class="validation-summary ${summaryClass}">
+        <div class="validation-summary-title">
+          <span>${summaryIcon}</span>
+          <span>${summaryTitle}</span>
+        </div>
+        <div class="validation-summary-text">
+          ${data.recommendation || 'Config validation complete. Review results before running full scrape.'}
+        </div>
+      </div>
+    `;
+
+    resultsContainer.innerHTML = statsHTML + contactsHTML + summaryHTML;
+  }
+
+  // ===========================
   // DIAGNOSIS & SCRAPING FUNCTIONS
   // ===========================
 

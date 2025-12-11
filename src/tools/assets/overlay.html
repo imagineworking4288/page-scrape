@@ -1392,6 +1392,350 @@
       border-color: #667eea;
       box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
     }
+
+    /* ===========================
+       2x2 Action Buttons Grid
+       =========================== */
+
+    .action-buttons-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 10px;
+    }
+
+    .action-grid-btn {
+      padding: 12px 8px !important;
+      font-size: 13px !important;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 44px;
+      transition: all 0.2s;
+    }
+
+    .action-grid-btn .button-icon {
+      font-size: 14px;
+    }
+
+    .action-grid-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .action-grid-btn:active {
+      transform: translateY(0);
+    }
+
+    .action-grid-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* Validate button - distinct teal/cyan color */
+    .validate-btn {
+      background: linear-gradient(135deg, #00b4db 0%, #0083b0 100%) !important;
+      border: none !important;
+    }
+
+    .validate-btn:hover {
+      background: linear-gradient(135deg, #00a3c9 0%, #00729d 100%) !important;
+    }
+
+    /* ===========================
+       Validation Modal Styles
+       =========================== */
+
+    .validation-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 1000002;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .validation-modal-content {
+      background: white;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+
+    .validation-modal-header {
+      padding: 16px 20px;
+      border-bottom: 2px solid #e9ecef;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #00b4db 0%, #0083b0 100%);
+      border-radius: 12px 12px 0 0;
+      color: white;
+    }
+
+    .validation-modal-header h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .close-modal-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      font-size: 20px;
+      color: white;
+      cursor: pointer;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    .close-modal-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .validation-modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .validation-modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid #e9ecef;
+      display: flex;
+      justify-content: flex-end;
+      background: #f8f9fa;
+      border-radius: 0 0 12px 12px;
+    }
+
+    /* Validation Result Components */
+    .validation-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .validation-stat-card {
+      background: #f8f9fa;
+      padding: 14px;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+      text-align: center;
+    }
+
+    .validation-stat-card.success {
+      border-left-color: #28a745;
+      background: #f0fff4;
+    }
+
+    .validation-stat-card.warning {
+      border-left-color: #ffc107;
+      background: #fffdf0;
+    }
+
+    .validation-stat-card.error {
+      border-left-color: #dc3545;
+      background: #fff5f5;
+    }
+
+    .validation-stat-label {
+      font-size: 11px;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .validation-stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #212529;
+    }
+
+    /* Contact Comparison Cards */
+    .validation-contact-card {
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+
+    .validation-contact-header {
+      background: #f8f9fa;
+      padding: 10px 16px;
+      font-weight: 600;
+      color: #495057;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .validation-contact-header .contact-number {
+      background: #667eea;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .validation-field-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .validation-field-table th {
+      text-align: left;
+      padding: 8px 12px;
+      background: #f8f9fa;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6c757d;
+      text-transform: uppercase;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .validation-field-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f1f3f5;
+      font-size: 13px;
+    }
+
+    .validation-field-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .validation-field-name {
+      font-weight: 600;
+      color: #495057;
+      width: 80px;
+    }
+
+    .validation-field-value {
+      color: #212529;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .validation-field-value.empty {
+      color: #adb5bd;
+      font-style: italic;
+    }
+
+    .validation-action-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .validation-action-badge.enriched {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .validation-action-badge.cleaned {
+      background: #cce5ff;
+      color: #004085;
+    }
+
+    .validation-action-badge.validated {
+      background: #d1ecf1;
+      color: #0c5460;
+    }
+
+    .validation-action-badge.unchanged {
+      background: #e9ecef;
+      color: #6c757d;
+    }
+
+    /* Summary Section */
+    .validation-summary {
+      background: #f8f9fa;
+      padding: 16px;
+      border-radius: 8px;
+      margin-top: 20px;
+      border-left: 4px solid #28a745;
+    }
+
+    .validation-summary.warning {
+      border-left-color: #ffc107;
+    }
+
+    .validation-summary.error {
+      border-left-color: #dc3545;
+    }
+
+    .validation-summary-title {
+      font-weight: 600;
+      color: #212529;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .validation-summary-text {
+      color: #495057;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    /* Loading State */
+    .validation-loading {
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .validation-loading-spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #00b4db;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+      animation: validationSpin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes validationSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .validation-loading p {
+      color: #495057;
+      margin: 8px 0;
+    }
+
+    .validation-loading .loading-subtitle {
+      color: #6c757d;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -1614,15 +1958,23 @@
           <span class="tip-text" id="configWarningsText"></span>
         </div>
 
-        <div class="btn-group-vertical" style="margin-top: 20px;">
-          <button class="btn btn-primary btn-block" id="startScrapingBtn" onclick="startDiagnosis()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); border: none;">
-            Start Scraping
+        <!-- 2x2 Action Buttons Grid -->
+        <div class="action-buttons-grid" style="margin-top: 20px;">
+          <button class="btn btn-primary action-grid-btn" id="startScrapingBtn" onclick="startDiagnosis()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); border: none;">
+            <span class="button-icon">▶</span>
+            <span>Start Scraping</span>
           </button>
-          <button class="btn btn-success btn-block" id="saveConfigBtn" onclick="saveAndCloseConfig()">
-            Save & Close
+          <button class="btn btn-primary action-grid-btn validate-btn" id="validateDataBtn" onclick="validateData()">
+            <span class="button-icon">✓</span>
+            <span>Validate Data</span>
           </button>
-          <button class="btn btn-secondary btn-block" onclick="backToEditConfig()">
-            Back to Edit
+          <button class="btn btn-success action-grid-btn" id="saveConfigBtn" onclick="saveAndCloseConfig()">
+            <span class="button-icon">💾</span>
+            <span>Save & Close</span>
+          </button>
+          <button class="btn btn-secondary action-grid-btn" onclick="backToEditConfig()">
+            <span class="button-icon">◀</span>
+            <span>Back to Edit</span>
           </button>
         </div>
       </div>
@@ -1746,6 +2098,24 @@
         <button class="btn btn-primary" id="confirmLinkBtn" onclick="confirmLinkSelection()" disabled>
           Use Selected Link
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===========================
+       Validation Results Modal
+       =========================== -->
+  <div id="validationModal" class="validation-modal" style="display: none;">
+    <div class="validation-modal-content">
+      <div class="validation-modal-header">
+        <h3>Validation Results</h3>
+        <button id="closeValidationBtn" class="close-modal-btn" onclick="closeValidationModal()">✕</button>
+      </div>
+      <div id="validationResults" class="validation-modal-body">
+        <!-- Results will be inserted here -->
+      </div>
+      <div class="validation-modal-footer">
+        <button id="closeValidationFooterBtn" class="btn btn-secondary" onclick="closeValidationModal()">Close</button>
       </div>
     </div>
   </div>

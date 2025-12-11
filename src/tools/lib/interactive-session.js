@@ -372,6 +372,16 @@ class InteractiveSession {
     });
 
     // ===========================
+    // Validation Function
+    // ===========================
+
+    // Validate config by testing scrape + enrichment on N contacts
+    await this.page.exposeFunction('__configGen_validateData', async () => {
+      this.logger.info('[Validation] Running config validation...');
+      return await this.handleValidateData();
+    });
+
+    // ===========================
     // Diagnosis & Scraping Functions
     // ===========================
 
@@ -1690,6 +1700,222 @@ class InteractiveSession {
     } catch (error) {
       this.logger.error(`[v2.3] Final save error: ${error.message}`);
       this.logger.error(`[v2.3] Error stack: ${error.stack}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ===========================
+  // Validation Handler
+  // ===========================
+
+  /**
+   * Handle validation request from UI
+   * Tests the generated config by scraping and enriching a few contacts
+   * @returns {Promise<Object>} - Validation results
+   */
+  async handleValidateData() {
+    this.logger.info('========================================');
+    this.logger.info('[Validation] STARTING CONFIG VALIDATION');
+    this.logger.info('========================================');
+
+    const VALIDATION_LIMIT = 5;  // Test with 5 contacts
+
+    try {
+      // Check if we have a saved config
+      if (!this.sessionResult?.config && !this.sessionResult?.configPath) {
+        throw new Error('No config available. Please generate config first.');
+      }
+
+      // Load config from file or use session result
+      let config = this.sessionResult?.config;
+      if (!config && this.sessionResult?.configPath) {
+        const configContent = fs.readFileSync(this.sessionResult.configPath, 'utf8');
+        config = JSON.parse(configContent);
+      }
+
+      this.logger.info(`[Validation] Using config: ${config.name || this.domain}`);
+      this.logger.info(`[Validation] Testing with ${VALIDATION_LIMIT} contacts`);
+
+      // Determine scraper type based on config
+      const isInfiniteScroll = config.pagination?.paginationType === 'infinite-scroll' ||
+                               config.version === '2.3' ||
+                               config.selectionMethod === 'manual-validated';
+
+      this.logger.info(`[Validation] Scraper type: ${isInfiniteScroll ? 'infinite-scroll (Selenium)' : 'standard (Puppeteer)'}`);
+
+      // Step 1: Scrape contacts
+      let scrapedContacts = [];
+
+      if (isInfiniteScroll) {
+        // Use Selenium for infinite scroll pages
+        const seleniumManager = new SeleniumManager(this.logger);
+        await seleniumManager.launch(true); // headless
+
+        const RateLimiter = require('../../core/rate-limiter');
+        const rateLimiter = new RateLimiter(this.logger, { minDelay: 1000, maxDelay: 2000 });
+
+        const { InfiniteScrollScraper } = require('../../scrapers/config-scrapers');
+        const scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, this.logger, {
+          scrollDelay: 400,
+          maxRetries: 10,
+          maxScrolls: 20
+        });
+
+        scraper.config = config;
+        scraper.initializeCardSelector();
+
+        this.logger.info('[Validation] Scraping with InfiniteScrollScraper...');
+        const scrapeResult = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        scrapedContacts = scrapeResult.contacts || scrapeResult || [];
+
+        await seleniumManager.close();
+      } else {
+        // Use Puppeteer for standard pages
+        const ConfigScraper = require('../../scrapers/config-scraper');
+        const RateLimiter = require('../../core/rate-limiter');
+        const rateLimiter = new RateLimiter(this.logger, { minDelay: 1000, maxDelay: 2000 });
+
+        const scraper = new ConfigScraper(this.browserManager, rateLimiter, this.logger, config);
+
+        this.logger.info('[Validation] Scraping with ConfigScraper...');
+        scrapedContacts = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+      }
+
+      // Ensure we have an array
+      if (!Array.isArray(scrapedContacts)) {
+        scrapedContacts = scrapedContacts?.contacts || [];
+      }
+
+      this.logger.info(`[Validation] Scraped ${scrapedContacts.length} contacts`);
+
+      // Step 2: Enrich contacts with profile URLs
+      const contactsWithProfiles = scrapedContacts.filter(c => c.profileUrl);
+      this.logger.info(`[Validation] ${contactsWithProfiles.length} contacts have profile URLs`);
+
+      let enrichedContacts = [];
+      if (contactsWithProfiles.length > 0) {
+        const BrowserManager = require('../../core/browser-manager');
+        const RateLimiter = require('../../core/rate-limiter');
+        const ProfileEnricher = require('../../features/enrichment/profile-enricher');
+
+        const enrichBrowser = new BrowserManager(this.logger);
+        await enrichBrowser.launch(true); // headless
+
+        const enrichRateLimiter = new RateLimiter(this.logger, { minDelay: 2000, maxDelay: 3000 });
+        const enricher = new ProfileEnricher(enrichBrowser, enrichRateLimiter, this.logger);
+
+        this.logger.info('[Validation] Enriching contacts...');
+        const enrichResult = await enricher.enrichContacts(contactsWithProfiles, {
+          delay: 2000,
+          headless: true,
+          onlyCoreFields: true,
+          skipErrors: true,
+          limit: VALIDATION_LIMIT
+        });
+
+        enrichedContacts = enrichResult.contacts || enrichResult || [];
+        await enrichBrowser.close();
+
+        this.logger.info(`[Validation] Enriched ${enrichedContacts.length} contacts`);
+      }
+
+      // Step 3: Build validation results
+      const results = {
+        contactsTested: scrapedContacts.length,
+        withEmail: scrapedContacts.filter(c => c.email).length,
+        withPhone: scrapedContacts.filter(c => c.phone).length,
+        withProfileUrl: contactsWithProfiles.length,
+        enriched: enrichedContacts.length,
+        contacts: [],
+        passed: true,
+        hasErrors: false,
+        recommendation: ''
+      };
+
+      // Build contact comparison data
+      for (let i = 0; i < Math.min(scrapedContacts.length, 5); i++) {
+        const scraped = scrapedContacts[i];
+        const enriched = enrichedContacts.find(e =>
+          e.profileUrl === scraped.profileUrl ||
+          (e.email && e.email === scraped.email) ||
+          (e.phone && e.phone === scraped.phone)
+        );
+
+        const contactData = {
+          name: scraped.name || enriched?.name || 'Unknown',
+          fields: {}
+        };
+
+        // Compare each field
+        const fields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
+        for (const field of fields) {
+          const scrapedValue = scraped[field] || null;
+          const enrichedValue = enriched ? enriched[field] : null;
+          let action = 'UNCHANGED';
+
+          if (enriched?.enrichment?.actions?.[field]) {
+            action = enriched.enrichment.actions[field];
+          } else if (!scrapedValue && enrichedValue) {
+            action = 'ENRICHED';
+          } else if (scrapedValue && enrichedValue && scrapedValue !== enrichedValue) {
+            action = 'UPDATED';
+          }
+
+          contactData.fields[field] = {
+            scraped: scrapedValue,
+            enriched: enrichedValue,
+            action: action
+          };
+        }
+
+        results.contacts.push(contactData);
+      }
+
+      // Generate recommendation
+      const emailRate = results.contactsTested > 0
+        ? Math.round((results.withEmail / results.contactsTested) * 100)
+        : 0;
+      const profileRate = results.contactsTested > 0
+        ? Math.round((results.withProfileUrl / results.contactsTested) * 100)
+        : 0;
+
+      if (results.contactsTested === 0) {
+        results.passed = false;
+        results.hasErrors = true;
+        results.recommendation = 'No contacts were scraped. Please check your config and try again.';
+      } else if (results.withEmail === 0 && results.enriched > 0) {
+        results.passed = true;
+        results.recommendation = `Config is working. Emails not on listing page but ${results.enriched} contacts successfully enriched from profile pages. Ready for full scrape.`;
+      } else if (emailRate >= 80) {
+        results.passed = true;
+        results.recommendation = `Excellent! ${emailRate}% of contacts have email addresses. Config is ready for full scrape.`;
+      } else if (emailRate >= 50) {
+        results.passed = true;
+        results.recommendation = `Good. ${emailRate}% have emails, ${profileRate}% have profile URLs for enrichment. Ready for full scrape.`;
+      } else if (profileRate >= 80) {
+        results.passed = true;
+        results.recommendation = `${profileRate}% of contacts have profile URLs. Enrichment should fill missing data. Ready for full scrape.`;
+      } else {
+        results.passed = false;
+        results.recommendation = `Low extraction rates (${emailRate}% email, ${profileRate}% profile URLs). Consider adjusting config selectors.`;
+      }
+
+      this.logger.info(`[Validation] Result: ${results.passed ? 'PASSED' : 'ISSUES'}`);
+      this.logger.info(`[Validation] ${results.recommendation}`);
+      this.logger.info('========================================');
+
+      return {
+        success: true,
+        data: results
+      };
+
+    } catch (error) {
+      this.logger.error(`[Validation] Error: ${error.message}`);
+      this.logger.error(`[Validation] Stack: ${error.stack}`);
+
       return {
         success: false,
         error: error.message
