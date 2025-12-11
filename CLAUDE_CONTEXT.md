@@ -66,6 +66,10 @@ page-scrape/
 │   ├── workflows/              # High-level workflow orchestrators
 │   │   └── full-pipeline.js    # Full pipeline: config → scrape → enrich → export
 │   │
+│   ├── constants/              # Centralized constants
+│   │   ├── index.js            # Constants exports
+│   │   └── pagination-patterns.js # Pagination parameter names (page, offset, etc.)
+│   │
 │   ├── config/                 # Configuration management
 │   │   ├── index.js            # Config exports
 │   │   ├── config-loader.js    # Config file loading/validation
@@ -166,6 +170,7 @@ page-scrape/
 │   ├── scraper-test.js         # SimpleScraper tests
 │   ├── select-scraper-test.js  # SelectScraper tests
 │   ├── pagination-test.js      # Pagination tests
+│   ├── pagination-paul-weiss.test.js # Paul Weiss pagingNumber tests
 │   ├── pagination-integration-test.js # Integration tests
 │   ├── pdf-scraper-test.js     # PDF scraper tests
 │   ├── selenium-infinite-scroll.test.js # Selenium infinite scroll tests
@@ -697,7 +702,63 @@ this.scrollConfig = {
 
 #### src/features/pagination/url-generator.js
 
-**Purpose**: Generates page URLs based on detected pattern.
+**Purpose**: Generates page URLs based on detected pattern. Preserves ALL existing query parameters from the original URL.
+
+### Pagination Pattern Constants (December 2025)
+
+**Location**: `src/constants/pagination-patterns.js`
+
+**Purpose**: Centralized list of pagination parameter names for easy extensibility. Add new parameter names to support additional pagination formats.
+
+**Supported Page Parameter Names**:
+- `page`, `p`, `pg` - Common formats
+- `pageNum`, `pageNumber`, `pagingNumber` - Descriptive formats (pagingNumber = Paul Weiss)
+- `pageNo`, `currentPage`, `paged`, `pn` - Alternative formats
+- `pagenum`, `page_number`, `page_num` - Underscore formats
+
+**Supported Offset Parameter Names**:
+- `offset`, `skip`, `start`, `from`
+- `startIndex`, `startindex`, `begin`, `first`
+
+**Adding New Pagination Formats**:
+
+To add support for a new pagination parameter (e.g., `pageIdx`):
+
+1. Edit `src/constants/pagination-patterns.js`
+2. Add to appropriate array:
+```javascript
+const PAGE_PARAMETER_NAMES = [
+  // ... existing entries
+  'pageIdx',  // New format
+];
+```
+3. Pattern automatically recognized by all pagination detectors
+
+**Filter Preservation**:
+
+The URL generator preserves ALL non-pagination URL parameters when generating page URLs. This ensures filter parameters (offices, practices, industries, etc.) remain intact across pages.
+
+```javascript
+// Example: Paul Weiss URL with filters
+// Original: ?pageId=1492&pageSize=48&pagingNumber=2&offices=New%20York&practices=All
+// Page 3:   ?pageId=1492&pageSize=48&pagingNumber=3&offices=New%20York&practices=All
+// Only pagingNumber changes; all filters preserved
+```
+
+**Helper Functions**:
+- `getPaginationParameterType(paramName)` - Returns 'page', 'offset', 'size', or null
+- `isPageParameter(paramName)` - Boolean check for page parameters
+- `isOffsetParameter(paramName)` - Boolean check for offset parameters
+
+**Import Path**:
+```javascript
+const {
+  PAGE_PARAMETER_NAMES,
+  OFFSET_PARAMETER_NAMES,
+  getPaginationParameterType,
+  isPageParameter
+} = require('./src/constants/pagination-patterns');
+```
 
 ---
 
@@ -994,6 +1055,7 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 | `scraper-test.js` | SimpleScraper tests - email/phone regex, name validation |
 | `select-scraper-test.js` | SelectScraper tests - text parsing, marker detection |
 | `pagination-test.js` | Pagination tests - pattern detection, URL generation |
+| `pagination-paul-weiss.test.js` | Paul Weiss pagingNumber parameter support tests |
 | `pagination-integration-test.js` | Integration tests for pagination |
 | `pdf-scraper-test.js` | PDF scraper tests |
 | `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |

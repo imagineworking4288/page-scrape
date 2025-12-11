@@ -60,14 +60,26 @@ class UrlGenerator {
 
   /**
    * Generate URL with parameter
+   * Preserves ALL existing query parameters from the original URL
    * @param {object} pattern - Pattern object
    * @param {number} pageNum - Page number
    * @returns {string} - Generated URL
    * @private
    */
   _generateParameterUrl(pattern, pageNum) {
-    const url = new URL(pattern.baseUrl);
+    // Use originalUrl if available (preserves all filter params like offices, practices)
+    // Otherwise fall back to baseUrl
+    const sourceUrl = pattern.originalUrl || pattern.baseUrl;
+    const url = new URL(sourceUrl);
+
+    // Update ONLY the pagination parameter, all others preserved
     url.searchParams.set(pattern.paramName, pageNum.toString());
+
+    if (this.logger && this.logger.debug) {
+      const paramCount = Array.from(url.searchParams.keys()).length;
+      this.logger.debug(`[URL Generator] Generated page ${pageNum} URL with ${paramCount} parameters preserved`);
+    }
+
     return url.toString();
   }
 
@@ -85,6 +97,7 @@ class UrlGenerator {
 
   /**
    * Generate URL with offset parameter
+   * Preserves ALL existing query parameters from the original URL
    * @param {object} pattern - Pattern object
    * @param {number} pageNum - Page number
    * @returns {string} - Generated URL
@@ -92,8 +105,19 @@ class UrlGenerator {
    */
   _generateOffsetUrl(pattern, pageNum) {
     const offset = (pageNum - 1) * pattern.itemsPerPage;
-    const url = new URL(pattern.baseUrl);
+
+    // Use originalUrl if available (preserves all filter params)
+    const sourceUrl = pattern.originalUrl || pattern.baseUrl;
+    const url = new URL(sourceUrl);
+
+    // Update ONLY the offset parameter, all others preserved
     url.searchParams.set(pattern.paramName, offset.toString());
+
+    if (this.logger && this.logger.debug) {
+      const paramCount = Array.from(url.searchParams.keys()).length;
+      this.logger.debug(`[URL Generator] Generated offset ${offset} URL with ${paramCount} parameters preserved`);
+    }
+
     return url.toString();
   }
 }

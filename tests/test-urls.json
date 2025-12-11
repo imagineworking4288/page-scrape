@@ -19,17 +19,16 @@
     ],
     "hasLoadMoreButton": [
       {
-        "name": "Example Load More Site",
-        "url": "PLACEHOLDER_URL",
-        "description": "Site with Load More button after scroll exhaustion",
+        "name": "Skadden Professionals",
+        "url": "https://www.skadden.com/professionals?skip=0&office=74507339-7adf-4528-ba0d-000000000055&hassearched=true",
+        "description": "Law firm with VIEW MORE button pagination (no infinite scroll)",
         "expectedBehavior": {
-          "minHeightChanges": 2,
+          "minHeightChanges": 0,
           "hasLoadMoreButton": true,
           "expectedButtonClicks": 3
         },
-        "cardSelector": null,
-        "notes": "Replace with actual URL when testing Load More button feature",
-        "skip": true
+        "cardSelector": ".search-results-list article",
+        "notes": "Button-only pagination - page height static until button clicked, AJAX loads more"
       }
     ],
     "unreliable": [

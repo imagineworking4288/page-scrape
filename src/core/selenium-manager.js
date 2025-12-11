@@ -200,6 +200,11 @@ class SeleniumManager {
     let heightChanges = 0;
     let buttonClicks = 0;
 
+    // Button-first mode: After first successful button click, check for button
+    // at start of each loop iteration instead of scrolling 25 times first.
+    // This optimizes sites like Skadden that use button pagination without infinite scroll.
+    let buttonClickMode = false;
+
     // Timeline tracking for callbacks and testing
     const timeline = [];
     const startTime = Date.now();
@@ -214,6 +219,72 @@ class SeleniumManager {
 
     // Main scroll loop
     while (scrollCount < maxScrolls) {
+      // BUTTON-FIRST MODE: Check for button immediately instead of scrolling
+      // This optimizes button-based pagination (e.g., Skadden's VIEW MORE)
+      if (buttonClickMode && enableLoadMoreButton && buttonClicks < maxButtonClicks) {
+        const buttonResult = await this.detectLoadMoreButton(verbose);
+
+        if (buttonResult) {
+          if (verbose) {
+            this.logger.info(`[Selenium] [Button-first] Found button: "${buttonResult.text}" (strategy: ${buttonResult.strategy})`);
+          }
+
+          const clickResult = await this.clickLoadMoreButton(buttonResult.button, {
+            waitAfterClick: waitAfterButtonClick,
+            scrollAfterClick: true,
+            cardSelector
+          });
+
+          if (clickResult.success) {
+            buttonClicks++;
+
+            const buttonClickData = {
+              type: 'button_click',
+              buttonClicks,
+              scrollCount,
+              buttonText: buttonResult.text,
+              strategy: buttonResult.strategy,
+              newElementCount: clickResult.newElementCount || 0,
+              buttonFirstMode: true,
+              timestamp: Date.now() - startTime
+            };
+            timeline.push(buttonClickData);
+
+            if (typeof onButtonClick === 'function') {
+              try {
+                onButtonClick(buttonClickData);
+              } catch (e) {
+                this.logger.debug(`[Selenium] onButtonClick callback error: ${e.message}`);
+              }
+            }
+
+            if (verbose) {
+              const countInfo = cardSelector && clickResult.newElementCount > 0
+                ? `, loaded ${clickResult.newElementCount} new elements`
+                : '';
+              this.logger.info(`[Selenium] [Button-first] Clicked (${buttonClicks}/${maxButtonClicks})${countInfo}`);
+            }
+
+            // Update height and continue in button-first mode
+            lastHeight = await this.driver.executeScript(heightScript);
+            retries = 0;
+            continue;  // Check for button again immediately
+          } else {
+            // Button click failed - exit button-first mode and resume normal scrolling
+            if (verbose) {
+              this.logger.info(`[Selenium] [Button-first] Click failed, resuming normal scroll`);
+            }
+            buttonClickMode = false;
+          }
+        } else {
+          // No button found - exit button-first mode and resume normal scrolling
+          if (verbose) {
+            this.logger.info(`[Selenium] [Button-first] No button found, resuming normal scroll`);
+          }
+          buttonClickMode = false;
+        }
+      }
+
       // Send PAGE_DOWN key to scroll element
       await scrollElement.sendKeys(Key.PAGE_DOWN);
       scrollCount++;
@@ -345,6 +416,7 @@ class SeleniumManager {
                   buttonText: buttonResult.text,
                   strategy: buttonResult.strategy,
                   newElementCount: clickResult.newElementCount || 0,
+                  buttonFirstMode: false,  // First click triggers button-first mode
                   timestamp: Date.now() - startTime
                 };
                 timeline.push(buttonClickData);
@@ -365,11 +437,18 @@ class SeleniumManager {
                   this.logger.info(`[Selenium] Clicked Load More button (${buttonClicks}/${maxButtonClicks})${countInfo}`);
                 }
 
-                // Reset retries and height to continue scrolling after button click
+                // ENABLE BUTTON-FIRST MODE: After first successful button click,
+                // check for button immediately on next iteration instead of scrolling 25 times
+                buttonClickMode = true;
+                if (verbose) {
+                  this.logger.info(`[Selenium] Entering button-first mode for faster button pagination`);
+                }
+
+                // Reset retries and height to continue
                 retries = 0;
                 lastHeight = await this.driver.executeScript(heightScript);
 
-                // Continue scrolling - don't break
+                // Continue - will check for button first on next iteration
                 continue;
               } else {
                 if (verbose) {

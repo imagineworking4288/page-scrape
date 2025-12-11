@@ -9,6 +9,11 @@
  */
 
 const { URL } = require('url');
+const {
+  PAGE_PARAMETER_NAMES,
+  OFFSET_PARAMETER_NAMES,
+  getPaginationParameterType
+} = require('../../constants/pagination-patterns');
 
 class PatternDetector {
   constructor(logger, configLoader = null) {
@@ -626,13 +631,37 @@ class PatternDetector {
     const urlObj = new URL(currentUrl);
     const params = urlObj.searchParams;
 
-    // Strategy 1: Check URL parameters
-    const pageParams = [
-      'page', 'p', 'pg', 'pageNum', 'pageNumber',
-      'pn', 'pageNo', 'paging', 'pageindex', 'pageIndex',
-      'currentPage', 'pageno'
-    ];
-    for (const param of pageParams) {
+    // Strategy 1: Check URL parameters using centralized constants
+    // This automatically supports new pagination formats added to PAGE_PARAMETER_NAMES
+    for (const [paramName, paramValue] of params.entries()) {
+      const paramType = getPaginationParameterType(paramName);
+
+      if (paramType === 'page' && /^\d+$/.test(paramValue)) {
+        this.logger.info(`[PatternDetector] Detected page parameter: "${paramName}" (value: ${paramValue})`);
+        return {
+          type: 'parameter',
+          paramName: paramName,
+          baseUrl: currentUrl, // Preserve full URL with all query params
+          originalUrl: currentUrl,
+          currentPage: parseInt(paramValue)
+        };
+      }
+
+      if (paramType === 'offset' && /^\d+$/.test(paramValue)) {
+        this.logger.info(`[PatternDetector] Detected offset parameter: "${paramName}" (value: ${paramValue})`);
+        return {
+          type: 'offset',
+          paramName: paramName,
+          baseUrl: currentUrl, // Preserve full URL with all query params
+          originalUrl: currentUrl,
+          currentOffset: parseInt(paramValue),
+          itemsPerPage: 10
+        };
+      }
+    }
+
+    // Fallback: Check known parameter names that might not be in URL yet
+    for (const param of PAGE_PARAMETER_NAMES) {
       if (params.has(param)) {
         const value = params.get(param);
         if (/^\d+$/.test(value)) {
@@ -640,19 +669,15 @@ class PatternDetector {
           return {
             type: 'parameter',
             paramName: param,
-            baseUrl: `${urlObj.origin}${urlObj.pathname}`,
+            baseUrl: currentUrl,
+            originalUrl: currentUrl,
             currentPage: parseInt(value)
           };
         }
       }
     }
 
-    // Strategy 2: Check for offset/limit parameters
-    const offsetParams = [
-      'offset', 'start', 'from', 'skip',
-      'startIndex', 'startindex', 'begin'
-    ];
-    for (const param of offsetParams) {
+    for (const param of OFFSET_PARAMETER_NAMES) {
       if (params.has(param)) {
         const value = params.get(param);
         if (/^\d+$/.test(value)) {
@@ -660,7 +685,8 @@ class PatternDetector {
           return {
             type: 'offset',
             paramName: param,
-            baseUrl: `${urlObj.origin}${urlObj.pathname}`,
+            baseUrl: currentUrl,
+            originalUrl: currentUrl,
             currentOffset: parseInt(value),
             itemsPerPage: 10
           };
