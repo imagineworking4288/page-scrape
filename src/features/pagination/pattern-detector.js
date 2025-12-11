@@ -22,7 +22,98 @@ class PatternDetector {
   }
 
   /**
-   * Discover pagination pattern from current page (VISUAL-FIRST APPROACH)
+   * Detect pagination parameters directly from URL (HIGHEST AUTOMATIC PRIORITY)
+   * @param {string} url - URL to analyze
+   * @returns {object} Detection result with type, paramName, value, confidence
+   */
+  detectUrlPaginationParams(url) {
+    try {
+      const urlObj = new URL(url);
+      const params = urlObj.searchParams;
+
+      // Check page parameters first (highest priority)
+      for (const [paramName, paramValue] of params.entries()) {
+        const paramType = getPaginationParameterType(paramName);
+
+        if (paramType === 'page' && /^\d+$/.test(paramValue)) {
+          return {
+            found: true,
+            type: 'parameter',
+            paramName: paramName,
+            currentValue: parseInt(paramValue),
+            confidence: 'high',
+            source: 'url-parameter'
+          };
+        }
+
+        if (paramType === 'offset' && /^\d+$/.test(paramValue)) {
+          return {
+            found: true,
+            type: 'offset',
+            paramName: paramName,
+            currentValue: parseInt(paramValue),
+            confidence: 'high',
+            source: 'url-parameter'
+          };
+        }
+      }
+
+      return { found: false };
+    } catch (error) {
+      this.logger.warn(`[PatternDetector] Error parsing URL: ${error.message}`);
+      return { found: false, error: error.message };
+    }
+  }
+
+  /**
+   * Extract base URL without pagination parameters
+   * @param {string} url - Full URL
+   * @returns {string} Base URL with pagination params removed
+   */
+  extractBaseUrl(url) {
+    try {
+      const urlObj = new URL(url);
+
+      // Remove known pagination parameters
+      const allPaginationParams = [
+        ...PAGE_PARAMETER_NAMES,
+        ...OFFSET_PARAMETER_NAMES
+      ];
+
+      allPaginationParams.forEach(param => {
+        urlObj.searchParams.delete(param);
+      });
+
+      return urlObj.toString();
+    } catch (error) {
+      return url;
+    }
+  }
+
+  /**
+   * Extract domain from URL
+   * @param {string} url - URL to parse
+   * @returns {string|null} Domain without www prefix
+   */
+  extractDomain(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Discover pagination pattern from current page (URL-PARAMS-FIRST APPROACH)
+   *
+   * DETECTION PRIORITY ORDER (December 2025):
+   * 1. Manual config patterns (highest)
+   * 2. Cached patterns (from previous runs)
+   * 3. URL parameters (HIGHEST AUTOMATIC) - page=N, offset=N, etc.
+   * 4. Visual controls (medium) - Load More buttons, pagination links
+   * 5. Scroll behavior (lowest) - Infinite scroll indicators
+   *
    * @param {object} page - Puppeteer page object
    * @param {string} currentUrl - Current page URL
    * @param {object} siteConfig - Site-specific configuration
@@ -30,32 +121,88 @@ class PatternDetector {
    */
   async discoverPattern(page, currentUrl, siteConfig = null) {
     try {
-      this.logger.info('[PatternDetector] Starting pattern discovery...');
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] PAGINATION PATTERN DETECTION');
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] Detection priority order:');
+      this.logger.info('[PatternDetector]   1. Manual config (if specified)');
+      this.logger.info('[PatternDetector]   2. Cached patterns (from previous runs)');
+      this.logger.info('[PatternDetector]   3. URL parameters (HIGHEST AUTOMATIC)');
+      this.logger.info('[PatternDetector]   4. Visual controls (medium priority)');
+      this.logger.info('[PatternDetector]   5. Scroll behavior (lowest priority)');
+      this.logger.info('[PatternDetector] ========================================');
 
       // PRIORITY 1: Check manual config
       if (siteConfig?.pagination?.patterns) {
         const manualPattern = this._extractManualPattern(currentUrl, siteConfig.pagination.patterns);
         if (manualPattern) {
-          this.logger.info('[PatternDetector] Using manual pattern from config');
+          this.logger.info('[PatternDetector] ✓ STEP 1: Using manual pattern from config');
           manualPattern.detectionMethod = 'manual';
           return manualPattern;
         }
       }
+      this.logger.info('[PatternDetector] Step 1: No manual config pattern');
 
       // PRIORITY 2: Check cache
-      const domain = new URL(currentUrl).hostname.replace(/^www\./, '');
+      const domain = this.extractDomain(currentUrl);
       const cachedPattern = this.configLoader?.getCachedPattern?.(domain);
       if (cachedPattern?.pattern) {
-        this.logger.info('[PatternDetector] Using cached pattern');
+        this.logger.info('[PatternDetector] ✓ STEP 2: Using cached pattern');
         return cachedPattern.pattern;
       }
+      this.logger.info('[PatternDetector] Step 2: No cached pattern');
 
-      // PRIORITY 3: Visual detection + navigation
-      this.logger.info('[PatternDetector] Attempting visual detection...');
+      // PRIORITY 3: URL PARAMETERS (HIGHEST AUTOMATIC PRIORITY)
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] STEP 3: URL PARAMETER CHECK');
+      this.logger.info('[PatternDetector] ========================================');
+      const urlParams = this.detectUrlPaginationParams(currentUrl);
+
+      if (urlParams.found) {
+        this.logger.info(`[PatternDetector] ✓ URL parameter detected: ${urlParams.paramName}=${urlParams.currentValue}`);
+        this.logger.info(`[PatternDetector] Pattern type: ${urlParams.type}`);
+        this.logger.info(`[PatternDetector] Confidence: ${urlParams.confidence}`);
+        this.logger.info(`[PatternDetector] This is the strongest automatic detection signal`);
+
+        // Check if visual controls also exist (log warning but don't use them)
+        const controls = await this.detectPaginationControls(page);
+        if (controls.hasPagination || controls.hasLoadMore) {
+          this.logger.warn('[PatternDetector] ----------------------------------------');
+          this.logger.warn('[PatternDetector] ⚠ CONFLICT DETECTED');
+          this.logger.warn('[PatternDetector] ----------------------------------------');
+          this.logger.warn('[PatternDetector] Both URL params AND visual controls found');
+          this.logger.warn('[PatternDetector] Resolution: URL parameters take precedence');
+          this.logger.warn('[PatternDetector] Reason: URL params indicate server-side pagination');
+          this.logger.warn('[PatternDetector]         (content replaces, not accumulates)');
+          this.logger.warn('[PatternDetector] ----------------------------------------');
+        }
+
+        this.logger.info('[PatternDetector] Skipping remaining detection steps');
+        this.logger.info('[PatternDetector] ========================================');
+
+        return {
+          type: urlParams.type,
+          paginationType: urlParams.type,
+          paramName: urlParams.paramName,
+          currentPage: urlParams.currentValue,
+          confidence: 1.0,  // High confidence for URL params
+          source: urlParams.source,
+          baseUrl: currentUrl,
+          originalUrl: currentUrl,
+          detectionMethod: 'url-parameter'
+        };
+      }
+
+      this.logger.info('[PatternDetector] No URL parameters found');
+      this.logger.info('[PatternDetector] ========================================');
+
+      // PRIORITY 4: Visual detection + navigation (only if no URL params)
+      this.logger.info('[PatternDetector] STEP 4: VISUAL CONTROL CHECK');
+      this.logger.info('[PatternDetector] ========================================');
       const controls = await this.detectPaginationControls(page);
 
       if (controls.hasPagination) {
-        this.logger.info(`[PatternDetector] Found pagination controls: type=${controls.controlsType}, maxPage=${controls.maxPage}`);
+        this.logger.info(`[PatternDetector] ✓ Found pagination controls: type=${controls.controlsType}, maxPage=${controls.maxPage}`);
 
         // Try to discover pattern by clicking next
         const navPattern = await this._discoverPatternByNavigation(page, currentUrl);
@@ -70,34 +217,42 @@ class PatternDetector {
         }
       } else {
         this.logger.info('[PatternDetector] No visual pagination controls found');
-
-        // PRIORITY 3.5: Check for infinite scroll
-        this.logger.info('[PatternDetector] Checking for infinite scroll...');
-        const infiniteScrollResult = await this.detectInfiniteScroll(page);
-        if (infiniteScrollResult.detected) {
-          this.logger.info(`[PatternDetector] Detected infinite scroll (score: ${infiniteScrollResult.score}/10)`);
-          return {
-            type: 'infinite-scroll',
-            paginationType: 'infinite-scroll',
-            detectionMethod: 'infinite-scroll-detection',
-            confidence: infiniteScrollResult.score / 10,
-            indicators: infiniteScrollResult.indicators
-          };
-        }
       }
 
-      // PRIORITY 4: URL pattern detection (fallback)
-      this.logger.info('[PatternDetector] Falling back to URL pattern detection...');
+      // PRIORITY 5: Check for infinite scroll (lowest priority)
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] STEP 5: SCROLL BEHAVIOR CHECK');
+      this.logger.info('[PatternDetector] ========================================');
+      const infiniteScrollResult = await this.detectInfiniteScroll(page);
+      if (infiniteScrollResult.detected) {
+        this.logger.info(`[PatternDetector] ✓ Detected infinite scroll (score: ${infiniteScrollResult.score}/10)`);
+        return {
+          type: 'infinite-scroll',
+          paginationType: 'infinite-scroll',
+          detectionMethod: 'infinite-scroll-detection',
+          confidence: infiniteScrollResult.score / 10,
+          indicators: infiniteScrollResult.indicators
+        };
+      }
+
+      this.logger.info('[PatternDetector] No infinite scroll detected');
+
+      // PRIORITY 6: URL pattern detection via page analysis (last resort fallback)
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] STEP 6: URL PATTERN ANALYSIS (FALLBACK)');
+      this.logger.info('[PatternDetector] ========================================');
       const urlPattern = await this._autoDetectPattern(page, currentUrl);
       if (urlPattern) {
         urlPattern.detectionMethod = 'url-analysis';
         const confidence = this.calculatePatternConfidence(urlPattern, controls);
         urlPattern.confidence = confidence;
-        this.logger.info(`[PatternDetector] Detected URL pattern: ${urlPattern.type} (confidence: ${confidence})`);
+        this.logger.info(`[PatternDetector] ✓ Detected URL pattern: ${urlPattern.type} (confidence: ${confidence})`);
         return urlPattern;
       }
 
-      this.logger.info('[PatternDetector] No pagination pattern detected');
+      this.logger.info('[PatternDetector] ========================================');
+      this.logger.info('[PatternDetector] DETECTION COMPLETE: No pagination found');
+      this.logger.info('[PatternDetector] ========================================');
       return null;
 
     } catch (error) {

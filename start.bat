@@ -451,7 +451,7 @@ echo   CONFIG GENERATOR PARAMETERS:
 echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
 echo.
 echo   New Implementation PARAMETERS:
-echo   node orchestrator.js --full-pipeline --core-only --url "new url"
+echo   node orchestrator.js --full-pipeline --core-only --auto --url "new url"
 echo.
 color 0A
 echo ================================================================================

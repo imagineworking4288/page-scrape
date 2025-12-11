@@ -3,9 +3,19 @@
  *
  * Wrapper around Paginator to extract detailed diagnostic information.
  * Provides additional analysis for testing purposes.
+ *
+ * Detection Priority (December 2025):
+ * 1. URL parameters (HIGHEST) - page=N, offset=N, etc.
+ * 2. Visual controls (medium) - Load More buttons, pagination links
+ * 3. Scroll behavior (lowest) - Infinite scroll indicators
  */
 
 const Paginator = require('../../features/pagination/paginator');
+const {
+  PAGE_PARAMETER_NAMES,
+  OFFSET_PARAMETER_NAMES,
+  getPaginationParameterType
+} = require('../../constants/pagination-patterns');
 
 class PaginationDiagnostic {
   constructor(browserManager, rateLimiter, logger, configLoader) {
@@ -19,6 +29,48 @@ class PaginationDiagnostic {
   }
 
   /**
+   * Check URL for pagination parameters (HIGHEST PRIORITY)
+   * @param {string} url - URL to check
+   * @returns {Object} URL parameter detection results
+   */
+  checkUrlParams(url) {
+    try {
+      const urlObj = new URL(url);
+      const params = urlObj.searchParams;
+
+      // Check page parameters first
+      for (const [paramName, paramValue] of params.entries()) {
+        const paramType = getPaginationParameterType(paramName);
+
+        if (paramType === 'page' && /^\d+$/.test(paramValue)) {
+          return {
+            found: true,
+            type: 'parameter',
+            paramName: paramName,
+            value: parseInt(paramValue),
+            confidence: 'high'
+          };
+        }
+
+        if (paramType === 'offset' && /^\d+$/.test(paramValue)) {
+          return {
+            found: true,
+            type: 'offset',
+            paramName: paramName,
+            value: parseInt(paramValue),
+            confidence: 'high'
+          };
+        }
+      }
+
+      return { found: false };
+    } catch (error) {
+      this.logger.warn(`[Diagnosis] Error parsing URL: ${error.message}`);
+      return { found: false, error: error.message };
+    }
+  }
+
+  /**
    * Run pagination diagnostic
    * @param {string} url - Target URL
    * @param {Object} options - Diagnostic options
@@ -28,11 +80,23 @@ class PaginationDiagnostic {
     const startTime = Date.now();
 
     try {
-      // Check for manual config first
+      this.logger.info('[Diagnosis] ========================================');
+      this.logger.info('[Diagnosis] PAGINATION DIAGNOSIS');
+      this.logger.info('[Diagnosis] ========================================');
+
+      // Check URL parameters FIRST (highest priority)
+      const urlParams = this.checkUrlParams(url);
+      if (urlParams.found) {
+        this.logger.info(`[Diagnosis] ✓ URL parameter detected (HIGHEST PRIORITY): ${urlParams.paramName}=${urlParams.value}`);
+      } else {
+        this.logger.info('[Diagnosis] No URL parameters found, will check visual controls');
+      }
+
+      // Check for manual config
       const siteConfig = this.configLoader?.loadConfig?.(url);
       const hasManualConfig = !!(siteConfig?.pagination?.patterns);
 
-      // Run discovery
+      // Run discovery (uses new priority logic in pattern-detector.js)
       const result = await this.paginator.paginate(url, {
         maxPages: options.maxPages || 200,
         minContacts: options.minContacts || 1,
@@ -43,18 +107,32 @@ class PaginationDiagnostic {
 
       const diagnosticTime = ((Date.now() - startTime) / 1000).toFixed(1);
 
+      // Determine primary evidence source
+      let primaryEvidence = 'none';
+      if (urlParams.found) {
+        primaryEvidence = 'url-parameter';
+      } else if (result.paginationType === 'infinite-scroll') {
+        primaryEvidence = 'scroll-behavior';
+      } else if (result.detectionMethod === 'navigation') {
+        primaryEvidence = 'visual-control';
+      }
+
       // Build diagnostic report
       const diagnostic = {
         url: url,
         diagnosticTime: diagnosticTime + 's',
         success: result.success,
 
+        // URL parameter check (HIGHEST PRIORITY)
+        urlParams: urlParams,
+
         // Detection details
         detection: {
           hasManualConfig: hasManualConfig,
           detectionMethod: result.detectionMethod || 'none',
           paginationType: result.paginationType || 'none',
-          confidence: result.confidence || 0
+          confidence: result.confidence || 0,
+          primaryEvidence: primaryEvidence
         },
 
         // Pattern details

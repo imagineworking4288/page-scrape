@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 11, 2025 (Added button-first mode optimization, pagination constants system, StaleElementReferenceError fix for button limit)
+**Last Updated**: December 11, 2025 (Pagination detection priority fix: URL params now checked BEFORE visual controls, hybrid site support)
 
 ---
 
@@ -685,15 +685,35 @@ this.scrollConfig = {
 
 #### src/features/pagination/pattern-detector.js
 
-**Purpose**: Discovers pagination patterns.
+**Purpose**: Discovers pagination patterns using priority-based detection.
 
-**Detection Priority**:
-1. Manual config patterns
-2. Cached patterns
-3. Visual controls + navigation
-4. URL analysis (fallback)
+**Detection Priority** (Updated December 2025):
+1. **Manual config patterns** (highest) - User-specified in config file
+2. **Cached patterns** - From previous successful runs
+3. **URL parameters** (HIGHEST AUTOMATIC) - `page=N`, `offset=N`, etc.
+   - Confidence: HIGH
+   - Why highest: Definitively indicates server-side pagination
+   - Examples: `?page=1`, `?offset=20`, `?pageNum=5`, `?pagingNumber=2`
+4. **Visual controls** (medium) - Load More buttons, pagination links
+   - Confidence: MEDIUM
+   - Only checked if no URL parameters found
+5. **Scroll behavior** (lowest) - Infinite scroll indicators
+   - Confidence: LOW
+   - Only checked if no URL params or visual controls
 
-**Pattern Types**: parameter, path, offset, cursor, infinite-scroll
+**Priority Principle**: URL parameters are the strongest automatic detection signal because:
+- They definitively indicate server-side pagination (page content replaces, not accumulates)
+- Visual controls can be misleading (e.g., Load More button that navigates to next page URL)
+- Parameter-based pagination is more reliable for scraping
+
+**Key Methods**:
+- `detectUrlPaginationParams(url)` - Check URL for pagination parameters (NEW)
+- `discoverPattern(page, url, options)` - Main detection with priority logic
+- `detectPaginationControls(page)` - Find buttons and pagination controls
+- `extractBaseUrl(url)` - Remove pagination params from URL
+- `extractDomain(url)` - Get domain from URL
+
+**Pattern Types**: parameter, path, offset, cursor, button-pagination, infinite-scroll, none
 
 #### src/features/pagination/binary-searcher.js
 
@@ -1512,6 +1532,42 @@ The code checks `buttonClicks >= maxButtonClicks` at the START of each loop to p
 
 **Files**:
 - `src/core/selenium-manager.js` - `scrollToFullyLoad()` with button-first mode
+
+### Hybrid Pagination Sites (December 2025)
+
+**Issue**: Some sites use BOTH URL parameters AND Load More buttons simultaneously.
+
+**Example**: Sites like Kirkland.com
+- URL: `?page=1`
+- Also has: "Load More" button
+- Clicking button navigates to `?page=2` (content replaces, not accumulates)
+
+**Resolution**: Pattern detector now prioritizes URL parameters over visual controls because:
+- URL params definitively indicate server-side pagination
+- Content replacement (not accumulation) requires different scraping strategy
+- Parameter-based pagination is more reliable
+
+**Impact on Scraping**:
+- Detected as: `parameter` type
+- Uses: `PaginationScraper` (not InfiniteScrollScraper)
+- Strategy: Navigate through pages sequentially, extract from each page
+- Result: Successful extraction of all contacts
+
+**Logging**: When both detected, logs show:
+```
+[PatternDetector] ✓ URL parameter detected: page=1
+[PatternDetector] Pattern type: parameter
+[PatternDetector] ⚠ CONFLICT DETECTED
+[PatternDetector] Both URL params AND visual controls found
+[PatternDetector] Resolution: URL parameters take precedence
+```
+
+**If You Encounter Issues**:
+If a hybrid site doesn't scrape correctly:
+1. Check logs for conflict detection
+2. Verify URL has pagination parameter
+3. Test if clicking button changes URL
+4. Report URL for investigation
 
 ### Timeline Callbacks for Scroll Testing (December 2025)
 
