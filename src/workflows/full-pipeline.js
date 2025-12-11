@@ -50,6 +50,7 @@ class FullPipelineOrchestrator {
       skipConfigGen: options.skipConfigGen || false,
       noEnrich: options.noEnrich || false,
       noExport: options.noExport || false,
+      coreOnly: options.coreOnly || false,
       headless: options.headless !== false,
       verbose: options.verbose || false,
       delay: options.delay || 3000,
@@ -97,6 +98,9 @@ class FullPipelineOrchestrator {
       displayInfo(`Limit: ${this.options.limit || 'none'}`);
       displayInfo(`Auto mode: ${this.options.autoMode ? 'yes' : 'no'}`);
       displayInfo(`Headless: ${this.options.headless ? 'yes' : 'no'}`);
+      if (this.options.coreOnly) {
+        displayInfo(`Export: core fields only (excluding enrichment metadata)`);
+      }
       console.log('');
 
       // Stage 1: Config Check/Generation
@@ -548,10 +552,14 @@ class FullPipelineOrchestrator {
       const dataPath = this.enrichedDataPath || this.scrapedDataPath;
 
       displayInfo(`Exporting ${dataToExport.length} contacts to Google Sheets...`);
+      if (this.options.coreOnly) {
+        displayInfo('Core-only mode: excluding enrichment metadata columns');
+      }
 
       const result = await exporter.exportToSheet(dataPath, {
         sheetName: `${this.domain} - ${new Date().toLocaleDateString()}`,
-        includeEnrichment: this.enrichedContacts.length > 0
+        includeEnrichment: this.options.coreOnly ? false : this.enrichedContacts.length > 0,
+        coreOnly: this.options.coreOnly
       });
 
       this.sheetUrl = result.spreadsheetUrl;

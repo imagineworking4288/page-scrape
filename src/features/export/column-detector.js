@@ -80,15 +80,24 @@ const COLUMN_DISPLAY_NAMES = {
  * Column groups for quick filtering via CLI
  *
  * These groups can be used with --core-only and --include-enrichment options.
+ *
+ * CLI Usage:
+ *   --core-only           Uses COLUMN_GROUPS.core (6 essential contact fields)
+ *   --include-enrichment  Adds COLUMN_GROUPS.enrichment to the export
+ *
+ * Note: --core-only takes full precedence. When specified, ONLY core fields
+ * are exported, even if --include-enrichment is also provided.
  */
 const COLUMN_GROUPS = {
-  // Core: minimal essential contact fields (default export)
+  // Core: 6 essential contact fields used by --core-only flag
+  // These are the only columns exported when --core-only is specified
   core: ['name', 'email', 'phone', 'title', 'location', 'profileUrl'],
 
   // Extended: core + domain and confidence info
   extended: ['name', 'email', 'phone', 'title', 'location', 'profileUrl', 'domain', 'domainType', 'confidence'],
 
-  // Enrichment: metadata about the enrichment process
+  // Enrichment: metadata about the enrichment process (added by --include-enrichment)
+  // Note: NOT added when --core-only is specified
   enrichment: ['enrichedAt', 'actionsSummary', 'confidence', 'fieldsEnrichedCount', 'fieldsCleanedCount']
 };
 
@@ -278,8 +287,8 @@ class ColumnDetector {
       this._log('debug', `[ColumnDetector] Using default columns: ${filtered.join(', ')}`);
     }
 
-    // Add enrichment columns if requested
-    if (options.includeEnrichment) {
+    // Add enrichment columns if requested (but not when coreOnly is true - coreOnly means ONLY core fields)
+    if (options.includeEnrichment && !options.coreOnly) {
       const enrichmentCols = this.enrichmentColumns.filter(col => !filtered.includes(col));
       filtered = [...filtered, ...enrichmentCols];
       this._log('debug', '[ColumnDetector] Added enrichment metadata columns');

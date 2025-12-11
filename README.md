@@ -137,6 +137,9 @@ node orchestrator.js --full-pipeline --url "URL" --no-enrich --auto
 
 # Limit contacts and export to Google Sheets
 node orchestrator.js --full-pipeline --url "URL" --limit 100 --output sheets --auto
+
+# Export only core fields (exclude enrichment metadata)
+node orchestrator.js --full-pipeline --url "URL" --core-only --auto
 ```
 
 **Workflow Stages:**
@@ -289,6 +292,7 @@ node orchestrator.js [options]
 | `--skip-config-gen` | Use existing config, don't generate |
 | `--no-enrich` | Skip enrichment stage |
 | `--no-export` | Skip export stage |
+| `--core-only` | Export only 6 core fields (Name, Email, Phone, Title, Location, Profile URL) |
 
 **Validation Options:**
 

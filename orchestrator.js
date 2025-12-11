@@ -55,6 +55,8 @@ program
   .option('--no-enrich', 'Skip enrichment stage in full-pipeline mode')
   // Validation tool shortcut
   .option('--validate', 'Run validation tool (quick test with first N contacts)')
+  // Export options
+  .option('--core-only', 'Export only core contact fields (exclude enrichment metadata)')
   .option('-v, --verbose', 'Verbose logging')
   .parse(process.argv);
 
@@ -180,6 +182,7 @@ async function main() {
         skipConfigGen: options.skipConfigGen,
         noEnrich: options.enrich === false,
         noExport: options.export === false,
+        coreOnly: options.coreOnly || false,
         headless: parseHeadless(options.headless),
         verbose: options.verbose
       });

@@ -249,7 +249,7 @@ echo     --mode ^<mode^>             create ^| append (default: create)
 echo     --columns ^<list^>          Comma-separated columns to include
 echo     --exclude ^<list^>          Columns to exclude
 echo     --include-enrichment      Include enrichment metadata columns
-echo     --core-only               Only core fields (name, email, phone, etc.)
+echo     --core-only               Only 6 core fields (Name, Email, Phone, Title, Location, Profile URL)
 echo     --batch-size ^<n^>          Rows per batch (default: 100)
 echo     -v, --verbose             Verbose logging
 echo.
@@ -317,6 +317,9 @@ echo   node orchestrator.js --full-pipeline --url "URL" --no-enrich --auto
 echo.
 echo   # Stop after enrichment (no export)
 echo   node orchestrator.js --full-pipeline --url "URL" --no-export --auto
+echo.
+echo   # Export only core fields (exclude enrichment metadata columns)
+echo   node orchestrator.js --full-pipeline --url "URL" --core-only --auto
 echo.
 echo   WORKFLOW STAGES:
 echo     1. Config Check/Generation: Verifies or creates site-specific config
@@ -399,7 +402,7 @@ echo   CONFIG GENERATOR PARAMETERS:
 echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
 echo.
 echo   New Implementation PARAMETERS:
-echo   node orchestrator.js --full-pipeline --core-only --limit 5 --url "new url"
+echo   node orchestrator.js --full-pipeline --core-only --url "new url"
 echo.
 color 0A
 echo ================================================================================

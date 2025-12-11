@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 10, 2025 (Added Full Pipeline Workflow, Validation Tool, Terminal Prompt Utilities)
+**Last Updated**: December 11, 2025 (Added --core-only export flag for excluding enrichment metadata)
 
 ---
 
@@ -213,6 +213,9 @@ node orchestrator.js --url <url>           # Target URL (required)
                      --skip-config-gen     # Skip config generation, use existing config
                      --no-enrich           # Skip enrichment stage
                      --no-export           # Skip export stage
+
+# Export Options
+                     --core-only           # Export only 6 core fields (Name, Email, Phone, Title, Location, Profile URL)
 
 # Validation Tool Options
                      --validate            # Run validation tool (quick test with first N contacts)
@@ -1672,11 +1675,22 @@ const DEFAULT_COLUMNS = [
 ```
 
 **Available fields**:
-- Core: `name`, `email`, `phone`, `title`, `location`, `profileUrl`
+- Core (used by `--core-only`): `name`, `email`, `phone`, `title`, `location`, `profileUrl`
 - Extended: `domain`, `domainType`, `confidence`
 - Profile: `bio`, `education`, `practiceAreas`, `barAdmissions`
 - Source: `sourceUrl`, `sourcePage`
 - Enrichment: `enrichedAt`, `actionsSummary`, `fieldsEnrichedCount`, `fieldsCleanedCount`
+
+**--core-only Flag**:
+When `--core-only` is specified (via CLI or full-pipeline), exports contain ONLY 6 columns:
+1. Name
+2. Email
+3. Phone
+4. Title
+5. Location
+6. Profile URL
+
+This excludes all enrichment metadata columns (Actions, Confidence, Enriched At, Fields Cleaned, Fields Enriched) even if `--include-enrichment` is also passed. The `--core-only` flag takes full precedence.
 
 **Integration with Enrichment**:
 ```bash
@@ -1914,6 +1928,9 @@ node orchestrator.js --url "URL" --full-pipeline --no-export
 
 # Limit contacts and export to Google Sheets
 node orchestrator.js --url "URL" --full-pipeline --limit 100 --output sheets
+
+# Export only core fields (exclude enrichment metadata columns)
+node orchestrator.js --url "URL" --full-pipeline --core-only --auto
 ```
 
 **FullPipelineOrchestrator Class**:
@@ -1921,7 +1938,7 @@ node orchestrator.js --url "URL" --full-pipeline --limit 100 --output sheets
 ```javascript
 class FullPipelineOrchestrator {
   constructor(options, logger) {
-    // options: url, limit, headless, auto, skipConfigGen, noEnrich, noExport, output
+    // options: url, limit, headless, auto, skipConfigGen, noEnrich, noExport, coreOnly, output
   }
 
   async run() {
