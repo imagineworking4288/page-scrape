@@ -687,7 +687,13 @@ class SeleniumManager {
                 if (isDisplayed && isEnabled) {
                   const text = await el.getText();
                   // Filter out links that are clearly not load more buttons
-                  if (text && text.length < 50 && !text.includes('@')) {
+                  // Also ensure "more" is a word boundary (not part of names like "Dellamore")
+                  const lowerText = text.toLowerCase();
+                  const hasMoreAsWord = lowerText === 'more' ||
+                                        lowerText.includes(' more') ||
+                                        lowerText.startsWith('more ') ||
+                                        lowerText.startsWith('more\n');
+                  if (text && text.length < 50 && !text.includes('@') && hasMoreAsWord) {
                     return { button: el, text: text.trim() };
                   }
                 }
