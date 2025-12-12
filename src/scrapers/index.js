@@ -5,13 +5,9 @@
  */
 
 const BaseScraper = require('./base-scraper');
-const SimpleScraper = require('./simple-scraper');
-const PdfScraper = require('./pdf-scraper');
-const SelectScraper = require('./select-scraper');
+const ConfigScraper = require('./config-scraper');
 
 module.exports = {
   BaseScraper,
-  SimpleScraper,
-  PdfScraper,
-  SelectScraper
+  ConfigScraper
 };

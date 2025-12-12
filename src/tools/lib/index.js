@@ -1,15 +1,19 @@
 /**
  * Tools Library Index
  *
- * Exports tool modules for the site tester.
+ * Exports tool modules for config generation and validation.
  */
 
-const TestOrchestrator = require('./test-orchestrator');
-const TestReporter = require('./test-reporter');
 const PaginationDiagnostic = require('./pagination-diagnostic');
+const InteractiveSession = require('./interactive-session');
+const ElementCapture = require('./element-capture');
+const ConfigBuilder = require('./config-builder');
+const ExtractionTester = require('./extraction-tester');
 
 module.exports = {
-  TestOrchestrator,
-  TestReporter,
-  PaginationDiagnostic
+  PaginationDiagnostic,
+  InteractiveSession,
+  ElementCapture,
+  ConfigBuilder,
+  ExtractionTester
 };

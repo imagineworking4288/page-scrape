@@ -18,8 +18,8 @@ const ConfigLoader = require('./src/config/config-loader');
 const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 
 // Import scrapers from src/
-const SimpleScraper = require('./src/scrapers/simple-scraper');
-const PdfScraper = require('./src/scrapers/pdf-scraper');
+const ConfigScraper = require('./src/scrapers/config-scraper');
+const { createScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
 
 // CLI setup
 const program = new Command();
@@ -29,14 +29,10 @@ program
   .version('2.0.0')
   .requiredOption('-u, --url <url>', 'Target URL to scrape')
   .option('-l, --limit <number>', 'Limit number of contacts to scrape', parseInt)
-  .option('-m, --method <type>', 'Scraping method: html|pdf|hybrid|select|config', 'hybrid')
-  .option('-c, --config <name>', 'Config file name for --method config (e.g., "sullcrom" or "sullcrom.json")')
-  .option('-o, --output <format>', 'Output format: sqlite|csv|sheets|all', 'json')
+  .option('-c, --config <name>', 'Config file name (e.g., "sullcrom" or "sullcrom.json")')
+  .option('-o, --output <format>', 'Output format: json|sheets', 'json')
   .option('--headless [value]', 'Run browser in headless mode (true/false, default: true)', 'true')
   .option('--delay <ms>', 'Delay between requests (ms)', '2000-5000')
-  .option('--keep', 'Keep PDF files in output/pdfs/ directory (default: delete after parsing)')
-  .option('--completeness <threshold>', 'Min completeness for PDF (default: 0.7)', '0.7')
-  .option('--use-python', 'Use Python PDF scraper with coordinate-based extraction (recommended for better accuracy)')
   .option('--paginate', 'Enable pagination (scrape multiple pages)')
   .option('--max-pages <number>', 'Maximum number of pages to scrape', parseInt)
   .option('--start-page <number>', 'Start from specific page number (for resume)', parseInt, 1)
@@ -85,53 +81,6 @@ function parseHeadless(value) {
   return true;
 }
 
-// Run Python scraper subprocess
-function runPythonScraper(options) {
-  const { spawn } = require('child_process');
-
-  logger.info('Using Python PDF scraper (coordinate-based extraction)...');
-  logger.info('');
-
-  // Build Python command
-  const args = [
-    '-m', 'python_scraper.cli',
-    '--url', options.url
-  ];
-
-  if (options.limit) {
-    args.push('--limit', options.limit.toString());
-  }
-
-  if (options.output) {
-    args.push('--output', options.output === 'json' ? 'json' : 'csv');
-  }
-
-  args.push('--headless', options.headless || 'true');
-
-  if (options.keep) {
-    args.push('--keep');
-  }
-
-  // Spawn Python process
-  const pythonProcess = spawn('python', args, {
-    cwd: __dirname,
-    stdio: 'inherit'
-  });
-
-  return new Promise((resolve, reject) => {
-    pythonProcess.on('close', (code) => {
-      if (code === 0) {
-        resolve(code);
-      } else {
-        reject(new Error(`Python scraper exited with code ${code}`));
-      }
-    });
-
-    pythonProcess.on('error', (err) => {
-      reject(new Error(`Failed to start Python scraper: ${err.message}`));
-    });
-  });
-}
 
 // Main execution
 async function main() {
@@ -208,12 +157,6 @@ async function main() {
     logger.info('═══════════════════════════════════════');
     logger.info('');
 
-    // Check if using Python scraper
-    if (options.usePython) {
-      const exitCode = await runPythonScraper(options);
-      process.exit(exitCode);
-    }
-
     // Parse headless option
     const headless = parseHeadless(options.headless);
 
@@ -221,10 +164,8 @@ async function main() {
     if (options.limit) {
       logger.info(`Limit: ${options.limit} contacts`);
     }
-    logger.info(`Method: ${options.method}`);
     logger.info(`Output: ${options.output}`);
     logger.info(`Headless: ${headless}`);
-    logger.info(`Keep PDFs: ${options.keep ? 'yes' : 'no'}`);
 
     // Pagination settings
     const paginationEnabled = options.paginate || (process.env.PAGINATION_ENABLED === 'true');
@@ -365,80 +306,49 @@ async function main() {
     let allContacts = [];
     let pageNumber = startPage;
 
-    // Create scraper instance
+    // Create scraper instance (config-based only)
     let scraper;
-    switch (options.method) {
-      case 'html':
-        logger.info('Using HTML-first method (PDF fallback for missing names)...');
-        scraper = new SimpleScraper(browserManager, rateLimiter, logger);
-        break;
 
-      case 'pdf':
-        logger.info('Using PDF-primary method (disk-based extraction)...');
-        scraper = new PdfScraper(browserManager, rateLimiter, logger);
-        break;
+    // Load config file
+    if (!options.config) {
+      // Try to auto-detect config from URL domain
+      const urlObj = new URL(options.url);
+      const domain = urlObj.hostname.replace(/^www\./, '').replace(/\.[^.]+$/, '');
+      options.config = domain;
+      logger.info(`Auto-detecting config: ${options.config}`);
+    }
 
-      case 'hybrid':
-        logger.info('Using hybrid method (HTML + PDF fallback, disk-based)...');
-        scraper = new SimpleScraper(browserManager, rateLimiter, logger);
-        break;
+    const configScraperInstance = new ConfigScraper(browserManager, rateLimiter, logger);
+    const loadedConfig = configScraperInstance.loadConfig(options.config);
+    logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
 
-      case 'select':
-        logger.info('Using select method (marker-based extraction)...');
-        const SelectScraper = require('./src/scrapers/select-scraper');
-        scraper = new SelectScraper(browserManager, rateLimiter, logger);
-        break;
+    // Determine if this is an infinite scroll page
+    const isInfiniteScroll = options.forceSelenium ||
+                      options.scroll ||
+                      loadedConfig.pagination?.paginationType === 'infinite-scroll' ||
+                      loadedConfig.pagination?.type === 'infinite-scroll';
 
-      case 'config':
-        logger.info('Using config method (v2.0 config-based extraction)...');
-        const ConfigScraper = require('./src/scrapers/config-scraper');
-        const { createScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
+    if (isInfiniteScroll) {
+      // Initialize Selenium for infinite scroll (PAGE_DOWN is the only method)
+      logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
 
-        // Load config file
-        if (!options.config) {
-          // Try to auto-detect config from URL domain
-          const urlObj = new URL(options.url);
-          const domain = urlObj.hostname.replace(/^www\./, '').replace(/\.[^.]+$/, '');
-          options.config = domain;
-          logger.info(`Auto-detecting config: ${options.config}`);
-        }
+      seleniumManager = new SeleniumManager(logger);
+      seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
+      await seleniumManager.launch(headless);
 
-        const configScraperInstance = new ConfigScraper(browserManager, rateLimiter, logger);
-        const loadedConfig = configScraperInstance.loadConfig(options.config);
-        logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
+      // Create Selenium-based InfiniteScrollScraper
+      scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
+        scrollDelay: options.scrollDelay || 400,
+        maxRetries: options.maxRetries || 25,
+        maxScrolls: options.maxScrolls || 1000
+      });
+      scraper.config = loadedConfig;
+      scraper.initializeCardSelector();
 
-        // Determine if this is an infinite scroll page
-        const isInfiniteScroll = options.forceSelenium ||
-                          options.scroll ||
-                          loadedConfig.pagination?.paginationType === 'infinite-scroll' ||
-                          loadedConfig.pagination?.type === 'infinite-scroll';
-
-        if (isInfiniteScroll) {
-          // Initialize Selenium for infinite scroll (PAGE_DOWN is the only method)
-          logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
-
-          seleniumManager = new SeleniumManager(logger);
-          seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
-          await seleniumManager.launch(headless);
-
-          // Create Selenium-based InfiniteScrollScraper
-          scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
-            scrollDelay: options.scrollDelay || 400,
-            maxRetries: options.maxRetries || 25,
-            maxScrolls: options.maxScrolls || 1000
-          });
-          scraper.config = loadedConfig;
-          scraper.initializeCardSelector();
-
-          logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
-        } else {
-          // Use standard Puppeteer-based scraper for non-infinite-scroll pages
-          scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
-        }
-        break;
-
-      default:
-        throw new Error(`Invalid method: ${options.method}. Use html, pdf, hybrid, select, or config.`);
+      logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
+    } else {
+      // Use standard Puppeteer-based scraper for non-infinite-scroll pages
+      scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
     }
 
     // Loop through all pages
@@ -458,19 +368,17 @@ async function main() {
         // Scrape the page
         let pageContacts;
 
-        if (options.method === 'pdf') {
-          pageContacts = await scraper.scrapePdf(pageUrl, options.limit, options.keep, currentPage, pageUrl);
-        } else if (options.method === 'config' && (options.scroll || scraper.config?.pagination?.type === 'infinite-scroll')) {
-          // Use scroll-based scraping for config method with infinite scroll
+        if (isInfiniteScroll) {
+          // Use scroll-based scraping for infinite scroll
           pageContacts = await scraper.scrapeWithScroll(pageUrl, options.limit, options.maxScrolls || 50);
-        } else if (options.method === 'config' && paginationEnabled) {
-          // Use pagination-aware scraping for config method
+        } else if (paginationEnabled) {
+          // Use pagination-aware scraping
           pageContacts = await scraper.scrapeWithPagination(pageUrl, options.limit, maxPages);
           // Skip the rest of the loop since pagination is handled internally
           allContacts = pageContacts;
           break;
         } else {
-          pageContacts = await scraper.scrape(pageUrl, options.limit, options.keep, currentPage, pageUrl);
+          pageContacts = await scraper.scrape(pageUrl, options.limit);
         }
 
         // Add to all contacts FIRST (before any break conditions)

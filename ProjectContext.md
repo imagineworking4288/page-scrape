@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 12, 2025 (Test cleanup: removed outdated tests, added test-navigation.js tool, updated npm scripts)
+**Last Updated**: December 12, 2025 (Major cleanup: removed legacy scrapers simple-scraper/select-scraper/pdf-scraper, removed redundant utilities text-parser/site-tester/test-orchestrator/test-reporter, simplified CLI options)
 
 ---
 
@@ -11,7 +11,7 @@ This document provides comprehensive context for editing this project. It covers
 **Page Scrape** is a universal professional directory scraper that extracts contact information (names, emails, phones, profile URLs) from websites. It supports multiple extraction methods, pagination handling, and exports to JSON/CSV.
 
 ### Key Features
-- **Multi-method extraction**: DOM-based, text selection, and PDF rendering
+- **Config-driven extraction**: Site-specific configs with validated selectors and coordinate-based extraction
 - **v2.3 Visual Config Generator**: Interactive tool with 4-layer detection and multi-method extraction testing
 - **Automatic pagination**: Detects and handles URL-based and offset-based pagination
 - **Infinite scroll**: Selenium PAGE_DOWN simulation for sites with lazy-loading
@@ -90,11 +90,8 @@ page-scrape/
 │   │
 │   ├── scrapers/               # Core scraping implementations
 │   │   ├── index.js            # Scraper exports
-│   │   ├── base-scraper.js     # Abstract base class
-│   │   ├── simple-scraper.js   # HTML DOM-based scraper
-│   │   ├── select-scraper.js   # Text selection scraper
-│   │   ├── pdf-scraper.js      # PDF rendering scraper
-│   │   ├── config-scraper.js   # Config-driven scraper (main)
+│   │   ├── base-scraper.js     # Abstract base class (extended by ConfigScraper)
+│   │   ├── config-scraper.js   # Config-driven scraper (main production scraper)
 │   │   └── config-scrapers/    # Specialized config-based scrapers
 │   │       ├── index.js        # Factory and exports
 │   │       ├── base-config-scraper.js     # Base class for v2.3 configs
@@ -135,7 +132,6 @@ page-scrape/
 │   ├── utils/                  # Active utilities
 │   │   ├── contact-extractor.js # Shared extraction logic
 │   │   ├── domain-extractor.js # Email domain classification
-│   │   ├── text-parser.js      # Text-to-contact parsing
 │   │   ├── profile-visitor.js  # Profile page enrichment
 │   │   ├── google-sheets-exporter.js # Google Sheets export
 │   │   ├── prompt-helper.js    # Terminal prompt utilities (y/n, tables, headers)
@@ -146,7 +142,6 @@ page-scrape/
 │       ├── test-config.js      # v2.3 Config testing tool
 │       ├── validate-config.js  # Quick config validation with N contacts
 │       ├── test-navigation.js  # Ad-hoc navigation testing (scroll/pagination)
-│       ├── site-tester.js      # Site testing utility
 │       ├── assets/             # UI assets for config generator
 │       │   ├── overlay.html    # v2.3 overlay UI HTML/CSS
 │       │   └── overlay-client.js # v2.3 browser-side UI code
@@ -161,8 +156,6 @@ page-scrape/
 │           ├── enhanced-capture.js    # Enhanced element capture
 │           ├── profile-enrichment.js  # Profile page enrichment
 │           ├── config-validator.js    # Config validation
-│           ├── test-orchestrator.js   # Test orchestration
-│           ├── test-reporter.js       # Test result reporting
 │           ├── constants/             # Field requirement constants
 │           │   └── field-requirements.js
 │           └── pagination-diagnostic.js # Pagination diagnosis
@@ -202,13 +195,11 @@ page-scrape/
 **CLI Options**:
 ```bash
 node orchestrator.js --url <url>           # Target URL (required)
-                     --method <method>     # html|pdf|hybrid|select|config (default: hybrid)
-                     --config <name>       # Config file for --method config
+                     --config <name>       # Config file name (e.g., "sullcrom" or "sullcrom.json")
                      --limit <n>           # Max contacts
                      --headless <bool>     # Browser mode (default: true)
                      --delay <ms>          # Request delay range (default: 2000-5000)
-                     --output <format>     # json|csv|sheets|all
-                     --keep                # Keep PDF files
+                     --output <format>     # json|sheets (default: json)
                      --paginate            # Enable pagination
                      --start-page <n>      # Resume from page
                      --max-pages <n>       # Max pages to scrape
@@ -419,31 +410,6 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 - `NAME_REGEX` - Name validation pattern
 - `CARD_SELECTORS` - Array of contact card CSS selectors
 
-#### src/scrapers/simple-scraper.js
-
-**Purpose**: DOM-based scraper that detects contact cards and extracts data.
-
-**Extends**: BaseScraper
-
-**Key Methods**:
-- `scrape(url, limit)` - Main extraction from loaded page
-- `detectCardPattern(page)` - Auto-detect contact card containers
-- `extractContactsFromCards(page, selector, config)` - Extract from detected cards
-- `extractContactFromCard(card)` - Single card extraction
-
-#### src/scrapers/select-scraper.js
-
-**Purpose**: Text selection-based scraper using marker boundaries.
-
-**Extends**: BaseScraper
-
-**Key Methods**:
-- `scrape(url, limit, keepPdf, sourcePage, sourceUrl)` - Main entry
-- `findMarkerPosition(page, marker, markerName)` - Locate text/coordinate markers
-- `extractContactsFromDOM(page, startPos, endPos, config)` - DOM-based extraction
-- `scrollPage(page, scrollConfig)` - Handle lazy-loaded content
-- `detectContainerPattern(page, startPos, endPos)` - Auto-detect containers
-
 #### src/scrapers/config-scraper.js
 
 **Purpose**: Main production scraper that uses site-specific configs.
@@ -462,18 +428,6 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 2. Card pattern detection
 3. Text parsing fallback
 4. Profile enrichment (optional)
-
-#### src/scrapers/pdf-scraper.js
-
-**Purpose**: PDF rendering and text extraction scraper.
-
-**Extends**: BaseScraper
-
-**Uses**: `pdf-parse` library
-
-**Key Methods**:
-- `scrape(url, limit, keepPdf)` - Render page to PDF and parse
-- `parsePdfForContacts(pdfData)` - Extract contacts from PDF text
 
 ---
 
@@ -811,10 +765,6 @@ const {
 
 **Personal Domains Include**: gmail.com, yahoo.com, hotmail.com, outlook.com, icloud.com, etc.
 
-#### src/utils/text-parser.js
-
-**Purpose**: Parses raw text into structured contact records.
-
 #### src/utils/profile-visitor.js
 
 **Purpose**: Visits profile pages to enrich contact data.
@@ -929,7 +879,7 @@ Using Selenium (PAGE_DOWN)
 ============================================================
 ✓ VALIDATION PASSED
 Config is working correctly. Ready for full scrape:
-  node orchestrator.js --url "URL" --method config --scroll
+  node orchestrator.js --url "URL" --scroll
 ```
 
 #### src/tools/enrich-contacts.js
@@ -967,10 +917,6 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 - `--fields <fields>` - Comma-separated list of fields to enrich (e.g., name,email,phone)
 - `--core-fields-only` - Only enrich core fields (name, email, phone, location, title)
 - `-v, --verbose` - Verbose logging (also prints report summary)
-
-#### src/tools/site-tester.js
-
-**Purpose**: Site testing utility for debugging extraction issues.
 
 #### src/tools/assets/overlay.html
 
@@ -1064,8 +1010,6 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 | `enhanced-capture.js` | Enhanced element capture |
 | `profile-enrichment.js` | Profile page data enrichment |
 | `config-validator.js` | Config validation logic |
-| `test-orchestrator.js` | Test orchestration |
-| `test-reporter.js` | Test result formatting |
 | `pagination-diagnostic.js` | Pagination diagnosis utilities |
 | `constants/field-requirements.js` | Field requirement constants |
 
@@ -1239,7 +1183,7 @@ node src/tools/test-config.js sullcrom-com --limit 5 --verbose
 
 ### Scraping with a v2.3 Config
 ```bash
-node orchestrator.js --url "URL" --method config --config example-com
+node orchestrator.js --url "URL" --config example-com
 ```
 
 ### Scraping with Pagination
@@ -1270,11 +1214,11 @@ node src/tools/test-navigation.js --url "URL" --type infinite-scroll --scroll-de
 
 ### Scraping Infinite Scroll with Selenium
 ```bash
-# Use Selenium for sites that don't respond to mouse wheel
-node orchestrator.js --url "URL" --method config --config example-com --force-selenium
+# Use Selenium for infinite scroll sites
+node orchestrator.js --url "URL" --config example-com --scroll
 
 # Customize scroll parameters
-node orchestrator.js --url "URL" --method config --config example-com --force-selenium --scroll-delay 500 --max-retries 30
+node orchestrator.js --url "URL" --config example-com --scroll --scroll-delay 500 --max-retries 30
 
 # Test Selenium infinite scroll directly
 node tests/selenium-infinite-scroll.test.js
@@ -1408,10 +1352,10 @@ The project uses canonical module paths:
 
 **Active Utilities** (`src/utils/`):
 - `contact-extractor.js` - Shared extraction logic (regex patterns, name validation, universal extraction code)
-- `text-parser.js` - Text-to-contact parsing
 - `domain-extractor.js` - Email domain classification
 - `profile-visitor.js` - Profile page enrichment
 - `google-sheets-exporter.js` - Google Sheets export
+- `prompt-helper.js` - Terminal prompt utilities (y/n, tables, headers)
 - `constants.js` - Shared constants
 
 **Features** (`src/features/`):
@@ -1434,7 +1378,6 @@ The project uses canonical module paths:
 | SmartFieldExtractor | `src/extraction/smart-field-extractor` |
 | MultiMethodExtractor | `src/extraction/multi-method-extractor` |
 | contactExtractor | `src/utils/contact-extractor` |
-| TextParser | `src/utils/text-parser` |
 | DomainExtractor | `src/utils/domain-extractor` |
 | Paginator | `src/features/pagination/paginator` |
 
