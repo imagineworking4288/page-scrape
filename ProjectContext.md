@@ -1,8 +1,8 @@
-# Page Scrape - Claude Context Documentation
+# Page Scrape - Project Context Documentation
 
-This document provides comprehensive context for Claude when editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
+This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 11, 2025 (Pagination detection priority fix: URL params now checked BEFORE visual controls, hybrid site support)
+**Last Updated**: December 12, 2025 (Test cleanup: removed outdated tests, added test-navigation.js tool, updated npm scripts)
 
 ---
 
@@ -33,7 +33,7 @@ This document provides comprehensive context for Claude when editing this projec
 | `package.json` | Project dependencies and npm scripts |
 | `package-lock.json` | Locked dependency versions |
 | `README.md` | Project documentation for users |
-| `CLAUDE_CONTEXT.md` | This file - comprehensive documentation for Claude |
+| `ProjectContext.md` | This file - comprehensive project documentation |
 | `.env` | Environment variables (API keys, settings) |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Git ignore patterns |
@@ -46,7 +46,7 @@ This document provides comprehensive context for Claude when editing this projec
 page-scrape/
 ├── orchestrator.js              # Main entry point - CLI orchestration
 ├── package.json                 # Project dependencies and scripts
-├── CLAUDE_CONTEXT.md            # This file - comprehensive project documentation
+├── ProjectContext.md            # This file - comprehensive project documentation
 ├── configs/                     # Configuration files root
 │   ├── _default.json           # System: Default fallback config
 │   ├── _template.json          # System: Template for new configs
@@ -145,6 +145,7 @@ page-scrape/
 │       ├── config-generator.js # Interactive config creator (v2.3)
 │       ├── test-config.js      # v2.3 Config testing tool
 │       ├── validate-config.js  # Quick config validation with N contacts
+│       ├── test-navigation.js  # Ad-hoc navigation testing (scroll/pagination)
 │       ├── site-tester.js      # Site testing utility
 │       ├── assets/             # UI assets for config generator
 │       │   ├── overlay.html    # v2.3 overlay UI HTML/CSS
@@ -167,13 +168,16 @@ page-scrape/
 │           └── pagination-diagnostic.js # Pagination diagnosis
 │
 ├── tests/                      # Test files
-│   ├── scraper-test.js         # SimpleScraper tests
-│   ├── select-scraper-test.js  # SelectScraper tests
-│   ├── pagination-test.js      # Pagination tests
-│   ├── pagination-integration-test.js # Integration tests
-│   ├── pdf-scraper-test.js     # PDF scraper tests
+│   ├── enrichment-test.js      # Enrichment system tests (68 test cases)
+│   ├── post-cleaning-test.js   # Post-cleaning tests (41 test cases)
+│   ├── pagination-priority.test.js # URL parameter detection tests
 │   ├── selenium-infinite-scroll.test.js # Selenium infinite scroll tests
-│   └── test-utils.js           # Test utilities
+│   ├── run-navigation-tests.js # Unified navigation test runner
+│   ├── test-urls.json          # Test URL database
+│   └── navigation/             # Navigation test modules
+│       ├── navigation-test-utils.js     # Shared test utilities
+│       ├── infinite-scroll-navigation.test.js # Scroll tests
+│       └── pagination-navigation.test.js # Pagination tests
 │
 ├── .cache/                     # Tesseract OCR cache (gitignored)
 ├── output/                     # Generated output (gitignored)
@@ -1071,21 +1075,25 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 
 | File | Purpose |
 |------|---------|
-| `scraper-test.js` | SimpleScraper tests - email/phone regex, name validation |
-| `select-scraper-test.js` | SelectScraper tests - text parsing, marker detection |
-| `pagination-test.js` | Pagination tests - pattern detection, URL generation |
-| `pagination-integration-test.js` | Integration tests for pagination |
-| `pdf-scraper-test.js` | PDF scraper tests |
-| `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
 | `enrichment-test.js` | Profile enrichment system tests (68 test cases) |
 | `post-cleaning-test.js` | Post-enrichment cleaning system tests (41 test cases) |
-| `test-utils.js` | Test utilities and helpers |
+| `pagination-priority.test.js` | URL pagination parameter detection tests (16 cases) |
+| `selenium-infinite-scroll.test.js` | Selenium infinite scroll tests (Sullivan & Cromwell) |
+| `run-navigation-tests.js` | Unified CLI test runner for navigation tests |
+| `test-urls.json` | Test URL database for navigation tests |
+| `navigation/navigation-test-utils.js` | Shared navigation test utilities |
+| `navigation/infinite-scroll-navigation.test.js` | Infinite scroll navigation tests |
+| `navigation/pagination-navigation.test.js` | Pagination navigation tests |
 
 **Run Tests**:
-- `npm test` - Run basic scraper tests
-- `node tests/selenium-infinite-scroll.test.js` - Test Selenium infinite scroll
-- `node tests/enrichment-test.js` - Test enrichment cleaners and comparators
-- `node tests/post-cleaning-test.js` - Test post-enrichment cleaning modules (41 tests)
+- `npm test` - Run enrichment and post-cleaning tests
+- `npm run test:enrichment` - Run enrichment tests only
+- `npm run test:post-clean` - Run post-cleaning tests only
+- `npm run test:selenium` - Run Selenium infinite scroll tests
+- `npm run test:nav` - Run all navigation tests
+- `npm run test:nav:scroll` - Run scroll navigation tests only
+- `npm run test:nav:page` - Run pagination navigation tests only
+- `npm run test:all` - Run all tests (enrichment, post-clean, selenium, nav)
 
 ---
 
@@ -1149,9 +1157,16 @@ Named by domain with dots replaced by dashes: `sullcrom.com` → `sullcrom-com.j
 ```json
 {
   "start": "node orchestrator.js",
-  "test": "node tests/scraper-test.js",
-  "test:pdf": "node tests/pdf-scraper-test.js",
-  "test:all": "node tests/scraper-test.js && node tests/pdf-scraper-test.js"
+  "test": "node tests/enrichment-test.js && node tests/post-cleaning-test.js",
+  "test:enrichment": "node tests/enrichment-test.js",
+  "test:post-clean": "node tests/post-cleaning-test.js",
+  "test:selenium": "node tests/selenium-infinite-scroll.test.js",
+  "test:nav": "node tests/run-navigation-tests.js",
+  "test:nav:scroll": "node tests/run-navigation-tests.js --type scroll",
+  "test:nav:page": "node tests/run-navigation-tests.js --type pagination",
+  "test:nav:quick": "node tests/run-navigation-tests.js --quick",
+  "test:nav:verbose": "node tests/run-navigation-tests.js --verbose",
+  "test:all": "npm run test && npm run test:selenium && npm run test:nav"
 }
 ```
 
@@ -1231,6 +1246,27 @@ node orchestrator.js --url "URL" --method config --config example-com
 ```bash
 node orchestrator.js --url "URL" --paginate --max-pages 50
 ```
+
+### Testing Navigation Before Config Generation
+```bash
+# Test infinite scroll navigation on a URL
+node src/tools/test-navigation.js --url "URL" --type infinite-scroll
+
+# Test with visible browser and verbose output
+node src/tools/test-navigation.js --url "URL" --type infinite-scroll --headless false --verbose
+
+# Test pagination pattern detection
+node src/tools/test-navigation.js --url "URL" --type pagination --verbose
+
+# Custom scroll settings
+node src/tools/test-navigation.js --url "URL" --type infinite-scroll --scroll-delay 500 --max-retries 30
+```
+
+**Output includes**:
+- Scroll count, height changes, button clicks
+- Timeline highlights (when content loaded)
+- Stop reason and duration
+- Next steps for config generation
 
 ### Scraping Infinite Scroll with Selenium
 ```bash
