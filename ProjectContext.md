@@ -1357,7 +1357,7 @@ node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 
 ---
 
-## Editing Guidelines for Claude
+## Editing Guidelines
 
 1. **Read files before editing**: Always use the Read tool first
 2. **Maintain patterns**: Follow existing module/class patterns
