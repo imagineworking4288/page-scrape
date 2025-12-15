@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 12, 2025 (Major cleanup: removed legacy scrapers simple-scraper/select-scraper/pdf-scraper, removed redundant utilities text-parser/site-tester/test-orchestrator/test-reporter, simplified CLI options)
+**Last Updated**: December 14, 2025 (Fixed false positive Load More button detection for names containing "more")
 
 ---
 
@@ -1446,7 +1446,7 @@ The Selenium infinite scroll system now includes automatic "Load More" button de
 2. **ARIA label patterns** - aria-label attributes containing "load" or "more"
 3. **CSS class patterns** - .load-more, .show-more, [class*="load-more"], etc.
 4. **Data attribute patterns** - [data-action*="load"], [data-load-more], etc.
-5. **Generic fallback** - Any button/link with "more" in text
+5. **Generic fallback** - Any button/link with "more" as a word boundary (excludes names like "Dellamore")
 
 **Configuration Options** (in pagination.scrollConfig):
 ```javascript
