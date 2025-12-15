@@ -8,5 +8,19 @@
       "maxPage": 55
     },
     "cachedAt": "2025-11-27T06:42:41.968Z"
+  },
+  "paulweiss.com": {
+    "pattern": {
+      "type": "parameter",
+      "paginationType": "parameter",
+      "paramName": "pagingNumber",
+      "currentPage": 1,
+      "confidence": 1,
+      "source": "url-parameter",
+      "baseUrl": "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%20York&schools=All&lastname=All&searchText=All",
+      "originalUrl": "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%20York&schools=All&lastname=All&searchText=All",
+      "detectionMethod": "url-parameter"
+    },
+    "cachedAt": "2025-12-15T21:39:29.874Z"
   }
 }

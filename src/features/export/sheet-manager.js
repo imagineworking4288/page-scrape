@@ -187,11 +187,23 @@ class SheetManager {
   /**
    * Create a new sheet/tab in the spreadsheet
    * @param {string} sheetName - Name for the new sheet
+   * @param {Object} options - Optional settings
+   * @param {number} options.rowCount - Number of rows (default: 1000, expands automatically for larger datasets)
+   * @param {number} options.columnCount - Number of columns (default: 26)
    * @returns {Promise<{sheetId: number, sheetName: string}>} - The new sheet's info
    */
-  async createSheet(sheetName) {
+  async createSheet(sheetName, options = {}) {
     try {
       const uniqueName = await this.getUniqueSheetName(sheetName);
+
+      // Calculate row count: default 1000, or expand for larger datasets
+      // Add 100 row buffer for safety
+      const rowCount = options.rowCount ? Math.max(options.rowCount + 100, 1000) : 1000;
+      const columnCount = options.columnCount || 26;
+
+      if (options.rowCount && options.rowCount > 1000) {
+        this._log('info', `[SheetManager] Creating sheet with ${rowCount} rows (expanded for ${options.rowCount} data rows)`);
+      }
 
       const response = await this.sheets.spreadsheets.batchUpdate({
         spreadsheetId: this.spreadsheetId,
@@ -200,7 +212,11 @@ class SheetManager {
             {
               addSheet: {
                 properties: {
-                  title: uniqueName
+                  title: uniqueName,
+                  gridProperties: {
+                    rowCount: rowCount,
+                    columnCount: columnCount
+                  }
                 }
               }
             }
@@ -210,7 +226,7 @@ class SheetManager {
 
       const sheetId = response.data.replies[0].addSheet.properties.sheetId;
 
-      this._log('info', `[SheetManager] Created sheet: "${uniqueName}" (ID: ${sheetId})`);
+      this._log('info', `[SheetManager] Created sheet: "${uniqueName}" (ID: ${sheetId}, rows: ${rowCount})`);
 
       return {
         sheetId,

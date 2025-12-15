@@ -1739,23 +1739,24 @@ class InteractiveSession {
       this.logger.info(`[Validation] Using config: ${config.name || this.domain}`);
       this.logger.info(`[Validation] Testing with ${VALIDATION_LIMIT} contacts`);
 
-      // Determine scraper type based on config
-      const isInfiniteScroll = config.pagination?.paginationType === 'infinite-scroll' ||
-                               config.version === '2.3' ||
-                               config.selectionMethod === 'manual-validated';
+      // Determine scraper type based on config's pagination type (not config version)
+      // This ensures validation uses the SAME scraper type that production will use
+      const paginationType = config.pagination?.paginationType || 'single-page';
+      const isInfiniteScroll = paginationType === 'infinite-scroll';
+      const isPagination = paginationType === 'pagination' || paginationType === 'parameter';
 
-      this.logger.info(`[Validation] Scraper type: ${isInfiniteScroll ? 'infinite-scroll (Selenium)' : 'standard (Puppeteer)'}`);
+      this.logger.info(`[Validation] Pagination type from config: ${paginationType}`);
+      this.logger.info(`[Validation] Scraper type: ${isInfiniteScroll ? 'infinite-scroll (Selenium)' : isPagination ? 'pagination (Puppeteer)' : 'single-page (Puppeteer)'}`);
 
-      // Step 1: Scrape contacts
+      // Step 1: Scrape contacts using the SAME scraper type that production will use
       let scrapedContacts = [];
+      const RateLimiter = require('../../core/rate-limiter');
+      const rateLimiter = new RateLimiter(this.logger, { minDelay: 1000, maxDelay: 2000 });
 
       if (isInfiniteScroll) {
         // Use Selenium for infinite scroll pages
         const seleniumManager = new SeleniumManager(this.logger);
         await seleniumManager.launch(true); // headless
-
-        const RateLimiter = require('../../core/rate-limiter');
-        const rateLimiter = new RateLimiter(this.logger, { minDelay: 1000, maxDelay: 2000 });
 
         const { InfiniteScrollScraper } = require('../../scrapers/config-scrapers');
         const scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, this.logger, {
@@ -1772,15 +1773,26 @@ class InteractiveSession {
         scrapedContacts = scrapeResult.contacts || scrapeResult || [];
 
         await seleniumManager.close();
-      } else {
-        // Use Puppeteer for standard pages
-        const ConfigScraper = require('../../scrapers/config-scraper');
-        const RateLimiter = require('../../core/rate-limiter');
-        const rateLimiter = new RateLimiter(this.logger, { minDelay: 1000, maxDelay: 2000 });
+      } else if (isPagination) {
+        // Use PaginationScraper for paginated pages (matches production behavior)
+        const { PaginationScraper } = require('../../scrapers/config-scrapers');
+        const scraper = new PaginationScraper(this.browserManager, rateLimiter, this.logger, this.configLoader, {
+          maxPages: 1,  // Only scrape first page for validation
+          pageDelay: 2000
+        });
 
+        scraper.config = config;
+        scraper.initializeCardSelector();
+
+        this.logger.info('[Validation] Scraping with PaginationScraper...');
+        const scrapeResult = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        scrapedContacts = scrapeResult.contacts || scrapeResult || [];
+      } else {
+        // Use ConfigScraper for single-page sites
+        const ConfigScraper = require('../../scrapers/config-scraper');
         const scraper = new ConfigScraper(this.browserManager, rateLimiter, this.logger, config);
 
-        this.logger.info('[Validation] Scraping with ConfigScraper...');
+        this.logger.info('[Validation] Scraping with ConfigScraper (single-page)...');
         scrapedContacts = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
       }
 

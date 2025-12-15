@@ -471,7 +471,7 @@ echo   STEP 4 - FULL SCRAPE WITH PAGINATION:
 echo   node orchestrator.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --config paulweiss-com --paginate --max-pages 50
 echo.
 echo   STEP 5 - OR USE FULL PIPELINE (after config exists):
-echo   node orchestrator.js --full-pipeline --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --skip-config-gen --paginate --core-only --auto
+echo   https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%20York&schools=All&lastname=All&searchText=All
 echo.
 color 0A
 echo ================================================================================

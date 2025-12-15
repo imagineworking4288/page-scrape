@@ -314,6 +314,10 @@ class BaseConfigScraper extends BaseScraper {
       }
     }
 
+    // Fallback extraction for fields without configured methods
+    // Use generic DOM selectors similar to InfiniteScrollScraper
+    await this.extractFallbackFields(cardElement, contact);
+
     // Track field statistics for summary
     const trackedFields = ['name', 'email', 'phone', 'title', 'location', 'profileUrl'];
     for (const fieldName of trackedFields) {
@@ -321,6 +325,9 @@ class BaseConfigScraper extends BaseScraper {
         this.fieldStats[fieldName].total++;
         if (contact[fieldName]) {
           this.fieldStats[fieldName].extracted++;
+          if (!contact._extractionMethods[fieldName]) {
+            successCount++; // Count fallback extractions
+          }
         }
       }
     }
@@ -334,6 +341,78 @@ class BaseConfigScraper extends BaseScraper {
     }
 
     return null;
+  }
+
+  /**
+   * Extract fields using fallback DOM selectors when config doesn't specify a method
+   * Uses generic CSS selectors similar to InfiniteScrollScraper
+   * @param {Object} cardElement - Puppeteer ElementHandle
+   * @param {Object} contact - Contact object to populate
+   */
+  async extractFallbackFields(cardElement, contact) {
+    try {
+      const fallbackData = await cardElement.evaluate((card) => {
+        const result = {};
+
+        // ProfileUrl - find first valid link that's not mailto/tel
+        if (!card._hasProfileUrl) {
+          const links = card.querySelectorAll('a[href]');
+          for (const link of links) {
+            const href = link.getAttribute('href');
+            if (href && !href.startsWith('mailto:') && !href.startsWith('tel:') &&
+                !href.startsWith('#') && !href.endsWith('.vcf')) {
+              // Make absolute URL if relative
+              if (href.startsWith('/')) {
+                result.profileUrl = window.location.origin + href;
+              } else if (href.startsWith('http')) {
+                result.profileUrl = href;
+              }
+              break;
+            }
+          }
+        }
+
+        // Title - try common selectors
+        if (!card._hasTitle) {
+          const titleEl = card.querySelector('.title, [class*="title"], .position, [class*="position"], .role, [class*="role"]');
+          if (titleEl) {
+            result.title = titleEl.textContent.trim();
+          }
+        }
+
+        // Location - try common selectors
+        if (!card._hasLocation) {
+          const locEl = card.querySelector('.location, [class*="location"], .office, [class*="office"], .city, [class*="city"]');
+          if (locEl) {
+            result.location = locEl.textContent.trim();
+          }
+        }
+
+        return result;
+      });
+
+      // Apply fallback values for missing fields
+      if (fallbackData.profileUrl && !contact.profileUrl) {
+        contact.profileUrl = this.normalizeFieldValue('profileUrl', fallbackData.profileUrl);
+        contact._extractionMethods.profileUrl = { method: 'fallback-dom', confidence: 70 };
+        this.logger.debug(`[BaseConfigScraper] profileUrl (fallback): ${contact.profileUrl}`);
+      }
+
+      if (fallbackData.title && !contact.title) {
+        contact.title = this.normalizeFieldValue('title', fallbackData.title);
+        contact._extractionMethods.title = { method: 'fallback-dom', confidence: 70 };
+        this.logger.debug(`[BaseConfigScraper] title (fallback): ${contact.title}`);
+      }
+
+      if (fallbackData.location && !contact.location) {
+        contact.location = this.normalizeFieldValue('location', fallbackData.location);
+        contact._extractionMethods.location = { method: 'fallback-dom', confidence: 70 };
+        this.logger.debug(`[BaseConfigScraper] location (fallback): ${contact.location}`);
+      }
+
+    } catch (error) {
+      this.logger.debug(`[BaseConfigScraper] Fallback extraction error: ${error.message}`);
+    }
   }
 
   /**

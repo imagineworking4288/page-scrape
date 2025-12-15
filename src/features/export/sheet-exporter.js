@@ -127,8 +127,13 @@ class SheetExporter {
 
     this._log('debug', `[SheetExporter] Using columns: ${columns.join(', ')}`);
 
-    // Create the sheet
-    const sheetInfo = await this.sheetManager.createSheet(sheetName);
+    // Create the sheet with sufficient rows for the data
+    // (contacts + 1 header row, with buffer handled by createSheet)
+    const rowsNeeded = contacts.length + 1;
+    const sheetInfo = await this.sheetManager.createSheet(sheetName, {
+      rowCount: rowsNeeded,
+      columnCount: Math.max(columns.length + 2, 26) // columns + buffer, minimum 26
+    });
 
     // Build header row
     const headers = this.columnDetector.getColumnHeaders(columns);

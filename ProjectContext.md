@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 15, 2025 (Fixed full-pipeline redundant scrape bug; scrape results now correctly saved to output/ directory)
+**Last Updated**: December 15, 2025 (Fixed validation scraper mismatch, PaginationScraper field extraction fallback, Google Sheets 1000+ row support)
 
 ---
 
@@ -464,11 +464,19 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 - `findCardElements(page)` - Find all cards on page
 - `extractContactFromCard(card, index)` - Extract fields from single card
 - `extractField(method, card, fieldConfig)` - Extract single field
+- `extractFallbackFields(card, contact)` - Fallback DOM extraction for unconfigured fields
 - `normalizeFieldValue(fieldName, value)` - Normalize field values
 - `addContact(contact)` - Add contact with buffering
 - `flushContactBuffer()` - Write buffered contacts to file
 - `reportProgress(phase, stats)` - Send progress updates
 - `printTerminalSummary()` - Print extraction results summary
+
+**Fallback Field Extraction** (December 2025):
+When config doesn't specify methods for fields (e.g., title, location), `extractFallbackFields()` uses generic DOM selectors:
+- `profileUrl`: First valid `<a href>` link (not mailto/tel)
+- `title`: `.title, [class*="title"], .position, [class*="position"]`
+- `location`: `.location, [class*="location"], .office, [class*="office"]`
+This ensures PaginationScraper extracts the same fields as InfiniteScrollScraper.
 
 #### src/scrapers/config-scrapers/infinite-scroll-scraper.js
 
@@ -842,14 +850,17 @@ node src/tools/validate-config.js --url "URL" --show
 
 **Validation Steps**:
 1. **Config Check**: Locates and validates the config file for the URL's domain
-2. **Scraping Test**: Tests extraction on first N contacts using appropriate scraper (auto-detects infinite scroll)
+2. **Scraping Test**: Tests extraction on first N contacts using appropriate scraper based on config's pagination type
 3. **Enrichment Test**: Tests profile enrichment on contacts with profile URLs
 4. **Validation Summary**: Reports issues and recommendations
 
-**Auto-Detection Features**:
-- Automatically detects infinite scroll pages based on config version (v2.3) and selectionMethod
-- Uses Selenium PAGE_DOWN for infinite scroll, Puppeteer for traditional pages
-- Identifies data quality issues (contaminated names, phones in locations)
+**Scraper Selection** (December 2025):
+Validation now uses the SAME scraper type that production will use, based on `config.pagination.paginationType`:
+- `infinite-scroll` → InfiniteScrollScraper (Selenium)
+- `pagination` or `parameter` → PaginationScraper (Puppeteer)
+- `single-page` or unspecified → ConfigScraper (Puppeteer)
+
+This ensures validation results accurately predict production behavior.
 
 **Output Example**:
 ```
@@ -1907,10 +1918,12 @@ src/features/export/
 
 1. **SheetManager** - Handles Google Sheets API:
    - `authenticate()` - OAuth2 with service account
-   - `createSheet(name)` - Create new sheet tab
+   - `createSheet(name, options)` - Create new sheet tab with optional row/column count
    - `writeRows(spreadsheetId, range, values)` - Write data
    - `formatHeaders(sheetId, columnCount)` - Bold, freeze headers
    - `autoResizeColumns(sheetId, columnCount)` - Auto-fit columns
+
+   **Large Dataset Support** (December 2025): `createSheet()` accepts `options.rowCount` to automatically expand sheets beyond the default 1000 rows. SheetExporter passes contact count + header row to ensure sheets can hold 1000+ contacts.
 
 2. **ColumnDetector** - Auto-detect and order columns:
    - `detectColumns(contacts)` - Scan contacts for available fields
