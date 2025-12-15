@@ -2153,8 +2153,9 @@ class InteractiveSession {
       scraper.initializeCardSelector();
       this.logger.info('[Scraping] Scraper created and configured');
 
-      // Set output path (real scraper will use this)
-      scraper.setOutputPath(this.options.outputDir || 'output');
+      // Set output path for scrape results - ALWAYS use 'output/' directory
+      // (this.options.outputDir is for config files, not scrape results)
+      scraper.setOutputPath('output');
 
       // Note: The real scraper.scrape() will:
       // 1. Navigate to the URL (page is already there, but this ensures proper state)

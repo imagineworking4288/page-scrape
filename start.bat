@@ -453,6 +453,26 @@ echo.
 echo   New Implementation PARAMETERS:
 echo   node orchestrator.js --full-pipeline --core-only --auto --url "new url"
 echo.
+echo --------------------------------------------------------------------------------
+echo [PAUL WEISS - URL PARAMETER PAGINATION EXAMPLE]
+echo --------------------------------------------------------------------------------
+echo   Site uses pagingNumber parameter. All filter params preserved across pages.
+echo.
+echo   STEP 1 - TEST PAGINATION PATTERN:
+echo   node src/tools/test-navigation.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --type pagination --verbose
+echo.
+echo   STEP 2 - GENERATE CONFIG (visual tool):
+echo   node src/tools/config-generator.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All"
+echo.
+echo   STEP 3 - VALIDATE CONFIG (test 5 contacts):
+echo   node src/tools/validate-config.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --limit 5 --verbose
+echo.
+echo   STEP 4 - FULL SCRAPE WITH PAGINATION:
+echo   node orchestrator.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --config paulweiss-com --paginate --max-pages 50
+echo.
+echo   STEP 5 - OR USE FULL PIPELINE (after config exists):
+echo   node orchestrator.js --full-pipeline --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --skip-config-gen --paginate --core-only --auto
+echo.
 color 0A
 echo ================================================================================
 echo.

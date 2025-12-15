@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 14, 2025 (Fixed false positive Load More button detection for names containing "more")
+**Last Updated**: December 15, 2025 (Fixed full-pipeline redundant scrape bug; scrape results now correctly saved to output/ directory)
 
 ---
 
@@ -2208,13 +2208,20 @@ src/workflows/
 - Interactive confirmation prompts between stages (skippable with `--auto`)
 - Graceful error handling with partial result saving
 - Progress tracking with stage headers and summaries
-- Auto-detection of infinite scroll from config characteristics
+- **Smart scrape reuse**: Config generator performs full scrape; pipeline reuses results instead of redundant second scrape
+- Scrape results always saved to `output/` directory (not `configs/`)
 
 **Workflow Stages**:
-1. **Config Check**: Locate existing config or generate new one
-2. **Scraping**: Extract contacts using appropriate scraper
+1. **Config Check**: Locate existing config or generate new one (config generator includes full scrape)
+2. **Scraping**: Uses config generator results if available, or runs new scrape if `--skip-config-gen`
 3. **Enrichment**: Visit profile pages to validate/fill data
 4. **Export**: Save to JSON, CSV, or Google Sheets
+
+**Scrape Result Reuse** (December 2025):
+- After `runConfigGenerator()` completes, pipeline checks `output/` for recent scrape files
+- If a scrape file for the same domain was created in the last 10 minutes, it's used
+- Stage 2 displays "USING CONFIG GENERATOR RESULTS" and loads existing contacts
+- This eliminates redundant scraping that doubled processing time
 
 **CLI Usage**:
 ```bash
@@ -2265,7 +2272,9 @@ class FullPipelineOrchestrator {
 
 **Key Methods**:
 - `stageConfigCheck()` - Check/generate config, display config summary
-- `stageScraping()` - Run appropriate scraper based on config
+- `runConfigGenerator()` - Spawn config generator subprocess, capture scrape results
+- `findRecentScrapeResults()` - Find scrape files in output/ created in last 10 minutes
+- `stageScraping()` - Use config gen results or run appropriate scraper
 - `stageEnrichment()` - Enrich contacts with profile data
 - `stageExport()` - Export to configured format(s)
 - `confirmProceedTo*()` - Interactive y/n prompts (skipped in auto mode)

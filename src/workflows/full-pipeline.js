@@ -68,6 +68,9 @@ class FullPipelineOrchestrator {
     this.sheetUrl = null;
     this.startTime = Date.now();
 
+    // Track if config generator already produced scrape results
+    this.configGenScrapeResults = null;
+
     // Extract domain from URL
     this.domain = this.extractDomain(this.options.url);
   }
@@ -261,10 +264,63 @@ class FullPipelineOrchestrator {
   }
 
   /**
+   * Find recent scrape files for this domain in output/ directory
+   * Returns the most recent file created within the last 10 minutes
+   * @returns {Object|null} - { path, contacts, contactCount } or null
+   */
+  findRecentScrapeResults() {
+    const outputDir = path.join(__dirname, '..', '..', 'output');
+
+    if (!fs.existsSync(outputDir)) {
+      return null;
+    }
+
+    // Look for scrape files matching domain pattern
+    const domainDashed = this.domain.replace(/\./g, '-');
+    const files = fs.readdirSync(outputDir)
+      .filter(f => f.startsWith(`scrape-${domainDashed}`) && f.endsWith('.json'))
+      .map(f => ({
+        name: f,
+        path: path.join(outputDir, f),
+        mtime: fs.statSync(path.join(outputDir, f)).mtime.getTime()
+      }))
+      .sort((a, b) => b.mtime - a.mtime); // Sort by most recent first
+
+    if (files.length === 0) {
+      return null;
+    }
+
+    // Check if most recent file was created in last 10 minutes (config gen just ran)
+    const mostRecent = files[0];
+    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+
+    if (mostRecent.mtime < tenMinutesAgo) {
+      return null; // File is too old, not from this config gen run
+    }
+
+    try {
+      const content = fs.readFileSync(mostRecent.path, 'utf8');
+      const data = JSON.parse(content);
+      const contacts = data.contacts || data;
+
+      return {
+        path: mostRecent.path,
+        contacts: Array.isArray(contacts) ? contacts : [],
+        contactCount: Array.isArray(contacts) ? contacts.length : 0
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
    * Run the config generator as a subprocess
    */
   async runConfigGenerator() {
-    return new Promise((resolve, reject) => {
+    // Record time before running config gen
+    const startTime = Date.now();
+
+    await new Promise((resolve, reject) => {
       const configGenPath = path.join(__dirname, '..', 'tools', 'config-generator.js');
 
       displayInfo('Starting config generator...');
@@ -293,12 +349,25 @@ class FullPipelineOrchestrator {
         reject(new Error(`Failed to start config generator: ${err.message}`));
       });
     });
+
+    // After config gen completes, check for scrape results
+    const scrapeResults = this.findRecentScrapeResults();
+    if (scrapeResults && scrapeResults.contactCount > 0) {
+      this.configGenScrapeResults = scrapeResults;
+      displaySuccess(`Config generator produced ${scrapeResults.contactCount} contacts`);
+      displayInfo(`Scrape output: ${path.basename(scrapeResults.path)}`);
+    }
   }
 
   /**
    * Confirmation point before scraping
    */
   async confirmProceedToScraping() {
+    // If config generator already produced results, skip confirmation
+    if (this.configGenScrapeResults && this.configGenScrapeResults.contactCount > 0) {
+      return true;
+    }
+
     if (this.options.autoMode) {
       displayInfo('Auto mode: Proceeding to scraping...');
       await countdown(3, 'Starting in');
@@ -313,6 +382,35 @@ class FullPipelineOrchestrator {
    * Stage 2: Scraping
    */
   async stageScraping() {
+    // Check if config generator already produced scrape results
+    if (this.configGenScrapeResults && this.configGenScrapeResults.contactCount > 0) {
+      displayStageHeader('STAGE 2: SCRAPING (USING CONFIG GENERATOR RESULTS)');
+
+      displaySuccess(`Using scrape results from config generation`);
+      displayInfo(`Contacts: ${this.configGenScrapeResults.contactCount}`);
+      displayInfo(`Output: ${path.basename(this.configGenScrapeResults.path)}`);
+      console.log('');
+
+      // Load contacts from config generator's output
+      this.contacts = this.configGenScrapeResults.contacts;
+      this.scrapedDataPath = this.configGenScrapeResults.path;
+
+      // Display sample contacts
+      displayContactsTable(this.contacts, 5);
+
+      const scrapingStats = {
+        'Total contacts': this.contacts.length,
+        'With email': this.contacts.filter(c => c.email).length,
+        'With phone': this.contacts.filter(c => c.phone).length,
+        'With profile URL': this.contacts.filter(c => c.profileUrl).length,
+        'Output file': path.basename(this.scrapedDataPath)
+      };
+
+      console.log('');
+      displayStageSummary(scrapingStats, 'Config Generator Scrape Results:');
+      return;
+    }
+
     displayStageHeader('STAGE 2: SCRAPING');
 
     const rateLimiter = new RateLimiter(logger, {
@@ -320,27 +418,25 @@ class FullPipelineOrchestrator {
       maxDelay: 5000
     });
 
-    // Determine pagination type
-    // Check explicit pagination config first
+    // Determine pagination type from config
     let paginationType = this.config.pagination?.paginationType ||
                           this.config.pagination?.type ||
                           null;
 
-    // Detect infinite scroll based on config characteristics
-    // V2.3 configs with manual-validated selection and no explicit pagination are often infinite scroll
-    const looksLikeInfiniteScroll = !paginationType && (
-      this.config.version === '2.3' ||
-      this.config.selectionMethod === 'manual-validated' ||
-      this.config.selectionMethod === 'manual'
-    );
-
+    // Only auto-detect if not explicitly specified in config
     if (!paginationType) {
-      paginationType = looksLikeInfiniteScroll ? 'infinite-scroll' : 'single-page';
+      // For --skip-config-gen with --paginate, use pagination
+      if (this.options.paginate) {
+        paginationType = 'parameter';
+      } else {
+        // Default to single-page for existing configs without explicit type
+        paginationType = 'single-page';
+      }
     }
 
     const isInfiniteScroll = paginationType === 'infinite-scroll';
 
-    displayInfo(`Pagination type: ${paginationType}${looksLikeInfiniteScroll ? ' (auto-detected)' : ''}`);
+    displayInfo(`Pagination type: ${paginationType}${this.options.paginate ? ' (from --paginate flag)' : ''}`);
     displayInfo(`Using ${isInfiniteScroll ? 'Selenium (PAGE_DOWN)' : 'Puppeteer'}`);
     console.log('');
 

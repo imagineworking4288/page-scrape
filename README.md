@@ -67,13 +67,13 @@ node src/tools/config-generator.js --url "https://example.com/directory"
 
 ```bash
 # Single page
-node orchestrator.js --url "https://example.com/directory" --method config
+node orchestrator.js --url "https://example.com/directory"
 
 # With pagination
-node orchestrator.js --url "https://example.com/directory" --method config --paginate --max-pages 10
+node orchestrator.js --url "https://example.com/directory" --paginate --max-pages 10
 
 # Infinite scroll sites
-node orchestrator.js --url "https://example.com/directory" --method config --scroll
+node orchestrator.js --url "https://example.com/directory" --scroll
 ```
 
 ---
@@ -144,10 +144,12 @@ node orchestrator.js --full-pipeline --url "URL" --core-only --auto
 
 **Workflow Stages:**
 
-1. **Config Check**: Verifies config exists or runs config generator
-2. **Scraping**: Extracts contacts using the appropriate method (auto-detects infinite scroll)
+1. **Config Check**: Verifies config exists or runs config generator (includes scraping)
+2. **Scraping**: Uses config generator results or runs new scrape if `--skip-config-gen`
 3. **Enrichment**: Visits profile pages to validate/fill missing data
 4. **Export**: Saves to JSON, CSV, or Google Sheets
+
+**Note:** When the config generator runs, it also performs a full scrape. The pipeline automatically uses these results, avoiding a redundant second scrape.
 
 ### Config Validation
 
@@ -201,19 +203,19 @@ Extract contacts using a saved config:
 
 ```bash
 # Single page extraction
-node orchestrator.js --url "URL" --method config
+node orchestrator.js --url "URL"
 
 # With traditional pagination
-node orchestrator.js --url "URL" --method config --paginate --max-pages 20
+node orchestrator.js --url "URL" --paginate --max-pages 20
 
 # Infinite scroll sites (Selenium PAGE_DOWN)
-node orchestrator.js --url "URL" --method config --scroll
+node orchestrator.js --url "URL" --scroll
 
 # With contact limit
-node orchestrator.js --url "URL" --method config --limit 100
+node orchestrator.js --url "URL" --limit 100
 
 # Visible browser (for debugging)
-node orchestrator.js --url "URL" --method config --headless false
+node orchestrator.js --url "URL" --headless false
 ```
 
 ### Enrichment
@@ -274,14 +276,13 @@ node orchestrator.js [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-u, --url <url>` | Target URL (required) | - |
-| `-m, --method <type>` | Extraction method: `html\|pdf\|hybrid\|select\|config` | `hybrid` |
-| `-c, --config <name>` | Config name for `--method config` | auto-detect |
+| `-c, --config <name>` | Config name (auto-detected from URL domain) | auto-detect |
 | `-l, --limit <n>` | Maximum contacts to extract | unlimited |
 | `--headless <bool>` | Browser visibility | `true` |
 | `--paginate` | Enable pagination handling | `false` |
 | `--max-pages <n>` | Maximum pages to scrape | unlimited |
 | `--scroll` | Enable infinite scroll handling | `false` |
-| `--output <format>` | Output format: `json\|csv\|sheets\|all` | `json` |
+| `--output <format>` | Output format: `json\|sheets` | `json` |
 
 **Full Pipeline Options:**
 
