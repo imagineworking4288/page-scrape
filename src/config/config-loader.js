@@ -390,6 +390,60 @@ class ConfigLoader {
     this.savePaginationCache();
     this.logger.info('Cleared all pagination cache');
   }
+
+  /**
+   * Load config by name (v2.3 style)
+   * Config names are typically domain-based with hyphens (e.g., "paulweiss-com")
+   * @param {string} name - Config name (without .json extension)
+   * @returns {object|null} - Config object or null if not found
+   */
+  loadConfigByName(name) {
+    // Normalize name: remove .json if present
+    const cleanName = name.replace(/\.json$/, '');
+
+    // Primary path: website-configs subdirectory
+    const primaryPath = path.join(this.websiteConfigDir, `${cleanName}.json`);
+
+    // Also try with domain format (dots instead of hyphens)
+    const domainFormat = cleanName.replace(/-/g, '.');
+    const domainPath = path.join(this.websiteConfigDir, `${domainFormat}.json`);
+
+    // Legacy path: configs root
+    const legacyPath = path.join(this.configDir, `${cleanName}.json`);
+
+    // Check paths in order of preference
+    const paths = [primaryPath, domainPath, legacyPath];
+
+    for (const configPath of paths) {
+      if (fs.existsSync(configPath)) {
+        try {
+          const configData = fs.readFileSync(configPath, 'utf8');
+          const config = JSON.parse(configData);
+
+          // For v2.3 configs, skip validation (different structure)
+          if (config.version === '2.3' || config.version === '2.2' || config.version === '2.1') {
+            this.logger.info(`Loaded v${config.version} config by name: ${name}`);
+            return config;
+          }
+
+          // For older configs, try validation but don't fail on v2.x structure
+          try {
+            this.validateConfig(config, config.domain || cleanName);
+            return this.resolveWithDefaults(config);
+          } catch (validationError) {
+            // Config might be v2.x format which has different structure
+            this.logger.debug(`Config validation skipped (likely v2.x format): ${validationError.message}`);
+            return config;
+          }
+        } catch (error) {
+          this.logger.error(`Failed to load config ${configPath}: ${error.message}`);
+        }
+      }
+    }
+
+    this.logger.debug(`No config found by name: ${name}`);
+    return null;
+  }
 }
 
 module.exports = ConfigLoader;

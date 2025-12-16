@@ -18,7 +18,6 @@ const ConfigLoader = require('./src/config/config-loader');
 const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 
 // Import scrapers from src/
-const ConfigScraper = require('./src/scrapers/config-scraper');
 const { createScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
 
 // CLI setup
@@ -309,17 +308,28 @@ async function main() {
     // Create scraper instance (config-based only)
     let scraper;
 
-    // Load config file
-    if (!options.config) {
-      // Try to auto-detect config from URL domain
-      const urlObj = new URL(options.url);
-      const domain = urlObj.hostname.replace(/^www\./, '').replace(/\.[^.]+$/, '');
-      options.config = domain;
-      logger.info(`Auto-detecting config: ${options.config}`);
+    // Load config file using ConfigLoader (handles v2.3 configs in configs/website-configs/)
+    let loadedConfig = null;
+
+    if (options.config) {
+      // Try to load by config name first (v2.3 style)
+      loadedConfig = configLoader.loadConfigByName(options.config);
+
+      if (!loadedConfig) {
+        // Fallback: try URL-based loading
+        loadedConfig = configLoader.loadConfig(options.url);
+      }
+    } else {
+      // Auto-detect config from URL
+      loadedConfig = configLoader.loadConfig(options.url);
     }
 
-    const configScraperInstance = new ConfigScraper(browserManager, rateLimiter, logger);
-    const loadedConfig = configScraperInstance.loadConfig(options.config);
+    if (!loadedConfig) {
+      logger.error(`No config found. Run config generator first:`);
+      logger.error(`  node src/tools/config-generator.js --url "${options.url}"`);
+      process.exit(1);
+    }
+
     logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
 
     // Determine if this is an infinite scroll page
@@ -347,80 +357,125 @@ async function main() {
 
       logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
     } else {
-      // Use standard Puppeteer-based scraper for non-infinite-scroll pages
-      scraper = new ConfigScraper(browserManager, rateLimiter, logger, loadedConfig);
-    }
+      // Use v2.3 scraper system for non-infinite-scroll pages
+      // Determine pagination type from config or CLI flags
+      let paginationType = loadedConfig.pagination?.paginationType || null;
 
-    // Loop through all pages
-    for (let i = 0; i < pageUrls.length; i++) {
-      const pageUrl = pageUrls[i];
-      const currentPage = pageNumber + i;
-
-      if (pageUrls.length > 1) {
-        logger.info('');
-        logger.info(`${'='.repeat(50)}`);
-        logger.info(`Scraping page ${currentPage} of ${pageUrls.length}`);
-        logger.info(`URL: ${pageUrl}`);
-        logger.info(`${'='.repeat(50)}`);
+      if (!paginationType) {
+        if (paginationEnabled) {
+          paginationType = 'pagination';
+        } else {
+          paginationType = 'single-page';
+        }
       }
 
-      try {
-        // Scrape the page
-        let pageContacts;
+      logger.info(`[Orchestrator] Using scraper type: ${paginationType}`);
 
-        if (isInfiniteScroll) {
-          // Use scroll-based scraping for infinite scroll
-          pageContacts = await scraper.scrapeWithScroll(pageUrl, options.limit, options.maxScrolls || 50);
-        } else if (paginationEnabled) {
-          // Use pagination-aware scraping
-          pageContacts = await scraper.scrapeWithPagination(pageUrl, options.limit, maxPages);
-          // Skip the rest of the loop since pagination is handled internally
-          allContacts = pageContacts;
-          break;
-        } else {
-          pageContacts = await scraper.scrape(pageUrl, options.limit);
+      // Import PaginationScraper for paginated pages
+      const { PaginationScraper, SinglePageScraper } = require('./src/scrapers/config-scrapers');
+
+      if (paginationType === 'pagination' || paginationType === 'parameter') {
+        // Use PaginationScraper for paginated pages
+        // PaginationScraper handles all pages internally, so we pass the discovery results
+        scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, {
+          maxPages: maxPages,
+          pageDelay: 2000
+        });
+        scraper.config = loadedConfig;
+        scraper.initializeCardSelector();  // Required when setting config directly
+        logger.info('[Orchestrator] Created PaginationScraper');
+
+        // PaginationScraper handles pagination internally
+        // Pass discovery results to avoid re-discovery
+        logger.info('[Orchestrator] PaginationScraper will handle all pages internally');
+        const result = await scraper.scrape(options.url, options.limit, paginationResult);
+        allContacts = Array.isArray(result) ? result : (result.contacts || []);
+
+        // Skip the page loop since PaginationScraper handled everything
+        // Jump to post-processing
+      } else {
+        // Use SinglePageScraper for single-page sites
+        scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
+        scraper.config = loadedConfig;
+        scraper.initializeCardSelector();  // Required when setting config directly
+        logger.info('[Orchestrator] Created SinglePageScraper');
+      }
+    }
+
+    // Loop through all pages (only for infinite scroll or single-page)
+    // PaginationScraper already processed all pages above
+    const skipPageLoop = !isInfiniteScroll && (loadedConfig.pagination?.paginationType === 'pagination' ||
+                                                loadedConfig.pagination?.paginationType === 'parameter' ||
+                                                paginationEnabled);
+
+    if (!skipPageLoop) {
+      for (let i = 0; i < pageUrls.length; i++) {
+        const pageUrl = pageUrls[i];
+        const currentPage = pageNumber + i;
+
+        if (pageUrls.length > 1) {
+          logger.info('');
+          logger.info(`${'='.repeat(50)}`);
+          logger.info(`Scraping page ${currentPage} of ${pageUrls.length}`);
+          logger.info(`URL: ${pageUrl}`);
+          logger.info(`${'='.repeat(50)}`);
         }
 
-        // Add to all contacts FIRST (before any break conditions)
-        allContacts = allContacts.concat(pageContacts);
+        try {
+          // Scrape the page
+          let pageContacts;
 
-        // Validate page content if paginating (for pagination continuation decision)
-        if (paginationEnabled && pageUrls.length > 1) {
-          const page = await browserManager.getPage();
-          const validation = await paginator.validatePage(page);
-
-          // Skip duplicate check for first page (already validated during discovery)
-          if (i > 0 && paginator.isDuplicateContent(validation.contentHash)) {
-            logger.warn(`Page ${currentPage} has duplicate content - stopping pagination`);
-            break;
+          if (isInfiniteScroll) {
+            // Use scroll-based scraping for infinite scroll
+            pageContacts = await scraper.scrapeWithScroll(pageUrl, options.limit, options.maxScrolls || 50);
+          } else {
+            // Use scrape() for single-page
+            const result = await scraper.scrape(pageUrl, options.limit);
+            // scrape() returns { contacts, ... } object, extract contacts array
+            pageContacts = Array.isArray(result) ? result : (result.contacts || []);
           }
 
-          // Mark content as seen
-          paginator.markContentAsSeen(validation.contentHash);
+          // Add to all contacts FIRST (before any break conditions)
+          allContacts = allContacts.concat(pageContacts);
 
-          // Check minimum contacts threshold
-          if (pageContacts.length < minContacts) {
-            logger.warn(`Page ${currentPage} has only ${pageContacts.length} contacts (minimum: ${minContacts}) - stopping pagination`);
-            break;
+          // Validate page content if paginating (for pagination continuation decision)
+          if (paginationEnabled && pageUrls.length > 1) {
+            const page = await browserManager.getPage();
+            const validation = await paginator.validatePage(page);
+
+            // Skip duplicate check for first page (already validated during discovery)
+            if (i > 0 && paginator.isDuplicateContent(validation.contentHash)) {
+              logger.warn(`Page ${currentPage} has duplicate content - stopping pagination`);
+              break;
+            }
+
+            // Mark content as seen
+            paginator.markContentAsSeen(validation.contentHash);
+
+            // Check minimum contacts threshold
+            if (pageContacts.length < minContacts) {
+              logger.warn(`Page ${currentPage} has only ${pageContacts.length} contacts (minimum: ${minContacts}) - stopping pagination`);
+              break;
+            }
+
+            logger.info(`Page ${currentPage}: Found ${pageContacts.length} contacts`);
           }
 
-          logger.info(`Page ${currentPage}: Found ${pageContacts.length} contacts`);
-        }
+          // Respect rate limiting between pages
+          if (i < pageUrls.length - 1) {
+            await rateLimiter.waitBeforeRequest();
+          }
 
-        // Respect rate limiting between pages
-        if (i < pageUrls.length - 1) {
-          await rateLimiter.waitBeforeRequest();
-        }
+        } catch (error) {
+          logger.error(`Error scraping page ${currentPage}: ${error.message}`);
 
-      } catch (error) {
-        logger.error(`Error scraping page ${currentPage}: ${error.message}`);
-
-        // For pagination, decide whether to continue or stop
-        if (paginationEnabled && pageUrls.length > 1) {
-          logger.warn(`Skipping page ${currentPage} and continuing with next page`);
-          continue;
-        } else {
-          throw error;
+          // For pagination, decide whether to continue or stop
+          if (paginationEnabled && pageUrls.length > 1) {
+            logger.warn(`Skipping page ${currentPage} and continuing with next page`);
+            continue;
+          } else {
+            throw error;
+          }
         }
       }
     }

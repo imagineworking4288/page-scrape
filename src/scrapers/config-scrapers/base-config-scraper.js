@@ -460,6 +460,11 @@ class BaseConfigScraper extends BaseScraper {
   normalizeFieldValue(fieldName, value) {
     if (!value) return null;
 
+    // Ensure value is a string
+    if (typeof value !== 'string') {
+      value = String(value);
+    }
+
     switch (fieldName) {
       case 'email':
         return value.toLowerCase().trim();

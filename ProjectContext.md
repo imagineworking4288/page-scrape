@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 15, 2025 (Fixed validation scraper mismatch, PaginationScraper field extraction fallback, Google Sheets 1000+ row support)
+**Last Updated**: December 15, 2025 (Fixed orchestrator routing to v2.3 scraper system, ConfigLoader.loadConfigByName() for named configs)
 
 ---
 
@@ -188,9 +188,28 @@ page-scrape/
 **Key Responsibilities**:
 - Parse command-line arguments using `commander`
 - Initialize browser, rate limiter, and scrapers
+- Load configs using `ConfigLoader` (supports v2.3 configs in `configs/website-configs/`)
+- Route to appropriate scraper based on pagination type
 - Run the scraping workflow
 - Handle pagination
 - Export results to files
+
+**Scraper Routing** (December 2025):
+The orchestrator now routes to the v2.3 scraper system exclusively:
+
+1. **Config Loading**: Uses `ConfigLoader.loadConfigByName()` for `--config` flag, which checks:
+   - `configs/website-configs/{name}.json` (primary)
+   - `configs/website-configs/{name-with-dots}.json` (domain format)
+   - `configs/{name}.json` (legacy)
+
+2. **Scraper Selection** based on pagination type:
+   - `--scroll` or `infinite-scroll` → `InfiniteScrollScraper` (Selenium)
+   - `--paginate` or `pagination`/`parameter` → `PaginationScraper` (Puppeteer)
+   - Single page → `SinglePageScraper` (Puppeteer)
+
+3. **PaginationScraper** handles all pages internally - the orchestrator passes pre-discovered pagination results to avoid redundant discovery.
+
+**IMPORTANT**: When setting `scraper.config` directly (not via `loadConfig()`), you MUST call `scraper.initializeCardSelector()` to initialize the card selector.
 
 **CLI Options**:
 ```bash
@@ -366,6 +385,7 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 **Key Methods**:
 - `isSystemConfig(filename)` - Check if filename is system config (prefixed with `_`)
 - `loadConfig(url)` - Load config for URL's domain (checks website-configs/ first)
+- `loadConfigByName(name)` - Load config by name (e.g., "paulweiss-com") - **NEW December 2025**
 - `extractDomain(url)` - Get domain from URL
 - `validateConfig(config, domain)` - Validate config structure
 - `getDefaultConfig(domain)` - Fallback config
@@ -373,11 +393,17 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 - `getCachedPattern(domain)` - Get cached pagination pattern
 - `saveCachedPattern(domain, pattern)` - Cache pagination pattern
 
-**Config Loading Order**:
+**Config Loading Order** (for `loadConfig(url)`):
 1. Primary: `configs/website-configs/{domain}.json`
 2. Legacy fallback: `configs/{domain}.json` (with warning)
 3. Default: `configs/_default.json`
 4. Hardcoded fallback
+
+**Config Loading Order** (for `loadConfigByName(name)`):
+1. Primary: `configs/website-configs/{name}.json`
+2. Domain format: `configs/website-configs/{name-with-dots}.json` (e.g., "paulweiss-com" → "paulweiss.com")
+3. Legacy: `configs/{name}.json`
+4. Returns `null` if not found (no default fallback)
 
 #### src/config/schemas.js
 
@@ -412,22 +438,28 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 
 #### src/scrapers/config-scraper.js
 
-**Purpose**: Main production scraper that uses site-specific configs.
+**⚠️ DEPRECATED** (December 2025): Use v2.3 scrapers from `src/scrapers/config-scrapers/` instead.
+
+**Purpose**: Legacy scraper that uses site-specific configs. Kept for backwards compatibility.
 
 **Extends**: BaseScraper
 
-**Key Methods**:
+**Why Deprecated**:
+- Looks for configs in wrong location (`configs/` instead of `configs/website-configs/`)
+- Doesn't support v2.3 config format properly
+- All CLI paths now route through v2.3 system via `createScraper()` factory
+
+**Use Instead**:
+```javascript
+const { PaginationScraper, SinglePageScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
+```
+
+**Key Methods** (legacy):
 - `scrape(url, limit, keepPdf, sourcePage, sourceUrl)` - Orchestrated extraction
 - `extractWithMultipleMethods(page, config)` - Priority-based extraction
 - `extractWithDOMContainers(page, config)` - Container-based extraction
 - `extractWithCardPattern(page, config)` - Card pattern extraction
 - `extractWithProfile(page, contact, config)` - Profile enrichment
-
-**Extraction Priority**:
-1. DOM containers (config selectors)
-2. Card pattern detection
-3. Text parsing fallback
-4. Profile enrichment (optional)
 
 ---
 
@@ -855,12 +887,12 @@ node src/tools/validate-config.js --url "URL" --show
 4. **Validation Summary**: Reports issues and recommendations
 
 **Scraper Selection** (December 2025):
-Validation now uses the SAME scraper type that production will use, based on `config.pagination.paginationType`:
+Both validation and production now use the SAME scraper routing based on `config.pagination.paginationType`:
 - `infinite-scroll` → InfiniteScrollScraper (Selenium)
 - `pagination` or `parameter` → PaginationScraper (Puppeteer)
-- `single-page` or unspecified → ConfigScraper (Puppeteer)
+- `single-page` or unspecified → SinglePageScraper (Puppeteer)
 
-This ensures validation results accurately predict production behavior.
+The orchestrator and validation tool share the same routing logic, ensuring validation results accurately predict production behavior.
 
 **Output Example**:
 ```
@@ -1337,6 +1369,7 @@ node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 2. **AJAX pagination**: May not detect if URL doesn't change
 3. **CSP restrictions**: Bypassed but may affect some sites
 4. **Memory leaks**: Mitigated by page recycling every 50 navigations
+5. **Config not found**: If using `--config name`, ensure config is in `configs/website-configs/` directory. The old `ConfigScraper` looked in `configs/` which is the wrong location for v2.3 configs.
 
 ---
 
