@@ -4,474 +4,61 @@ color 0A
 
 echo.
 echo ================================================================================
-echo                    UNIVERSAL PROFESSIONAL DIRECTORY SCRAPER v1.0
+echo                    PAGE SCRAPE - UNIVERSAL DIRECTORY SCRAPER
 echo ================================================================================
 echo.
-echo [CORE CAPABILITIES]
-echo   - Multi-method extraction: HTML, PDF, Hybrid, and Config-driven scraping
-echo   - Smart pagination: Auto-detection, binary search boundary finding, resume support
-echo   - Domain intelligence: Business vs personal classification, statistics, filtering
-echo   - Anti-detection: Stealth browser, randomized delays, human-like behavior
-echo   - Cross-page deduplication: Email-based and name+phone matching
-echo   - Dual output: JSON files + automatic Google Sheets export
+echo ================================================================================
+echo [QUICK REFERENCE]
+echo ================================================================================
 echo.
-echo --------------------------------------------------------------------------------
-echo [SCRAPING METHODS]
-echo --------------------------------------------------------------------------------
-echo   1. HTML   (--method html)   - Fast DOM extraction, ~60%% accuracy, 10-15s/page
-echo   2. PDF    (--method pdf)    - Coordinate-based, ^>85%% accuracy, 15-30s/page
-echo   3. HYBRID (--method hybrid) - HTML + PDF fallback for missing names [DEFAULT]
-echo   4. SELECT (--method select) - Config-driven, site-specific markers, highest accuracy
+echo   ORCHESTRATOR FLAGS:
+echo     --url ^<url^>           Target URL (required)
+echo     --config ^<name^>       Config name (e.g., "domain-com")
+echo     --limit ^<n^>           Max contacts to extract
+echo     --paginate            Enable pagination (traditional pages)
+echo     --scroll              Enable infinite scroll (Selenium)
+echo     --full-pipeline       Run: config -^> scrape -^> enrich -^> export
+echo     --auto                Skip confirmation prompts
+echo     --core-only           Export only 6 core fields
+echo     --headless ^<bool^>     Browser visibility (default: true)
 echo.
-echo --------------------------------------------------------------------------------
-echo [PAGINATION FEATURES]
-echo --------------------------------------------------------------------------------
-echo   - Auto-detection: URL parameters (?page=N), path segments (/page/N), offsets
-echo   - Binary search: Finds true max page in 8-12 tests instead of 200 sequential
-echo   - Boundary confirmation: Verifies 2 consecutive empty pages before stopping
-echo   - Resume support: Use --start-page N to continue interrupted scrapes
-echo   - Pattern caching: Saves discovered patterns for instant reuse
-echo.
-echo --------------------------------------------------------------------------------
-echo [DOMAIN ANALYSIS]
-echo --------------------------------------------------------------------------------
-echo   - Classification: Automatically tags business vs personal email domains
-echo   - Statistics: Top domains, unique counts, business email percentage
-echo   - 50+ known personal providers: Gmail, Yahoo, Hotmail, iCloud, etc.
-echo.
-echo --------------------------------------------------------------------------------
-echo [OUTPUT FORMATS]
-echo --------------------------------------------------------------------------------
-echo   JSON Structure:
-echo     - metadata: URL, timestamp, domain stats, pagination info
-echo     - contacts: name, email, phone, domain, domainType, confidence, source
-echo   Google Sheets:
-echo     - Auto-export after each scrape (disable with --no-export)
-echo     - Configurable columns in utils/google-sheets-exporter.js
-echo     - Unique sheet names from URL, formatted headers
-echo.
-echo --------------------------------------------------------------------------------
-echo [COMMAND-LINE OPTIONS]
-echo --------------------------------------------------------------------------------
-echo   REQUIRED:
-echo     -u, --url ^<url^>              Target URL to scrape
-echo.
-echo   SCRAPING:
-echo     -m, --method ^<type^>          html ^| pdf ^| hybrid ^| select (default: hybrid)
-echo     -l, --limit ^<number^>         Max contacts to extract per page
-echo     --headless ^<bool^>            Show browser: true ^| false (default: true)
-echo     --delay ^<ms^>                 Request delay range (default: 2000-5000)
-echo     --keep                       Keep PDF files in output/pdfs/
-echo     --completeness ^<0-1^>         Min PDF completeness threshold (default: 0.7)
-echo     --use-python                 Use Python PDF scraper for better accuracy
-echo.
-echo   PAGINATION:
-echo     --paginate                   Enable multi-page scraping
-echo     --max-pages ^<number^>         Maximum pages to scrape
-echo     --start-page ^<number^>        Resume from specific page (default: 1)
-echo     --min-contacts ^<number^>      Min contacts per page to continue
-echo     --discover-only              Detect pagination pattern without scraping
-echo.
-echo   OUTPUT:
-echo     -o, --output ^<format^>        json ^| csv ^| sqlite ^| all (default: json)
-echo     --no-export                  Skip Google Sheets export
-echo.
-echo --------------------------------------------------------------------------------
-echo [USAGE EXAMPLES]
-echo --------------------------------------------------------------------------------
+echo ================================================================================
+echo [BASIC COMMANDS]
+echo ================================================================================
 color 0E
-echo   # Quick test (5 contacts, visible browser)
-echo   node orchestrator.js --url "URL" --method select --limit 5 --headless false
 echo.
-echo   # Full site scrape with pagination
-echo   node orchestrator.js --url "URL" --method select --paginate --max-pages 10
+echo node orchestrator.js --limit 5 --headless false --url "URL"
+echo node orchestrator.js --paginate --core-only --config domain-com --url "URL"
+echo node orchestrator.js --scroll --core-only --config domain-com --url "URL"
+echo node orchestrator.js --full-pipeline --auto --core-only --url "URL"
 echo.
-echo   # Resume interrupted scrape from page 15
-echo   node orchestrator.js --url "URL" --method select --paginate --start-page 15
-echo.
-echo   # Discover pagination pattern only (no scraping)
-echo   node orchestrator.js --url "URL" --discover-only
-echo.
-echo   # High-accuracy PDF extraction with Python
-echo   node orchestrator.js --url "URL" --method pdf --use-python --keep
-echo.
-echo   # Skip Google Sheets export (JSON only)
-echo   node orchestrator.js --url "URL" --method select --no-export
-echo.
-echo   # Pagination test with validation
-echo   node tests/pagination-test.js --url "URL" --validate-sample 5 --save-cache
-echo.
-echo   # Integration test (discover + scrape + validate)
-echo   node tests/pagination-integration-test.js --url "URL" --max-pages 3
-echo.
-echo   # Compass.com example (full workflow)
-echo   node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 5
-echo.
-echo   # Debug mode (visible browser, keep files)
-echo   node orchestrator.js --url "URL" --method hybrid --headless false --keepe
-echo.  
 color 0A
-echo --------------------------------------------------------------------------------
-echo [SITE CONFIGURATION]
-echo --------------------------------------------------------------------------------
-echo   Create configs/^<domain^>.json with:
-echo     - name: Display name for the site
-echo     - selectors: Contact container, email, phone, name CSS selectors
-echo     - markers: Start/end text or coordinates for extraction region
-echo     - pagination: Manual pattern override (type, paramName, baseUrl)
-echo   Example: configs/compass.com.json
-echo.
-echo --------------------------------------------------------------------------------
-echo [GOOGLE SHEETS SETUP]
-echo --------------------------------------------------------------------------------
-echo   1. Create Google Cloud project at console.cloud.google.com
-echo   2. Enable Google Sheets API
-echo   3. Create service account, download JSON credentials
-echo   4. Share your spreadsheet with the service account email
-echo   5. Add to .env: GOOGLE_SHEETS_CLIENT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, SPREADSHEET_ID
-echo.
-echo --------------------------------------------------------------------------------
-echo [PERFORMANCE COMPARISON]
-echo --------------------------------------------------------------------------------
-echo   Method    Speed       Accuracy    Best For
-echo   ------    -----       --------    --------
-echo   html      10-15s      ~60%%        Quick scans, well-structured sites
-echo   pdf       15-30s      ^>85%%        Complex layouts, PDF-based directories
-echo   hybrid    15-25s      ~75%%        General purpose, unknown sites
-echo   select    8-12s       ^>90%%        Configured sites, production scraping
-echo.
-echo --------------------------------------------------------------------------------
-echo [TROUBLESHOOTING]
-echo --------------------------------------------------------------------------------
-echo   CAPTCHA detected        - Use --headless false, solve manually, increase --delay
-echo   No contacts found       - Check selectors, try --method html first, inspect page
-echo   Pagination stops early  - Check --min-contacts, verify pattern in cache
-echo   PDF extraction fails    - Try --use-python, check --completeness threshold
-echo   Google Sheets error     - Verify .env credentials, check service account permissions
-echo   Rate limited            - Increase --delay, reduce --max-pages
-echo   Empty pages detected    - Normal at end; binary search confirms boundaries
-echo.
-echo --------------------------------------------------------------------------------
-echo [SITE TESTER - DIAGNOSTIC TOOL]
-echo --------------------------------------------------------------------------------
-echo   Tests a URL to determine scraping feasibility before full scrape.
-echo   Identifies pagination, tests all methods, recommends best approach.
-echo.
-echo   USAGE:
-echo     node tools/site-tester.js --url "URL"                  Test all methods
-echo     node tools/site-tester.js --url "URL" --methods html   Test HTML only
-echo     node tools/site-tester.js --url "URL" --skip pdf       Skip PDF method
-echo     node tools/site-tester.js --url "URL" --no-pagination  Skip pagination
-echo.
-echo   OPTIONS:
-echo     -u, --url ^<url^>           Target URL to test (required)
-echo     -m, --methods ^<list^>      Methods to test: html,pdf,select
-echo     -s, --skip ^<list^>         Methods to skip
-echo     --no-pagination           Skip pagination detection
-echo     --headless ^<bool^>         Show browser (default: true)
-echo     --verbose                 Detailed output
-echo.
-echo   OUTPUT: Terminal report + JSON file in output/diagnostics/
-echo.
-echo --------------------------------------------------------------------------------
-echo [CONFIG GENERATOR - VISUAL TOOL]
-echo --------------------------------------------------------------------------------
-echo   Interactive tool to generate site-specific configs by clicking on elements.
-echo   Creates configs for the SELECT scraping method.
-echo.
-echo   USAGE:
-echo     node tools/config-generator.js --url "URL"               Generate config
-echo     node tools/config-generator.js --url "URL" --no-test     Skip validation
-echo     node tools/config-generator.js --url "URL" --verbose     Detailed logs
-echo.
-echo   OPTIONS:
-echo     -u, --url ^<url^>           Target URL to configure (required)
-echo     -o, --output ^<dir^>        Config output directory (default: configs)
-echo     -t, --timeout ^<ms^>        Page load timeout (default: 30000)
-echo     --no-test                 Skip testing config after generation
-echo     --verbose                 Show detailed logs
-echo.
-echo   WORKFLOW:
-echo     1. Browser opens in visible mode with control panel
-echo     2. Click on a contact card (the repeating container)
-echo     3. Click on name, email, phone fields within a card
-echo     4. Config saved to configs/^<domain^>.json
-echo.
-echo   OUTPUT: JSON config file ready for --method select scraping
-echo.
-echo --------------------------------------------------------------------------------
-echo [ENRICH CONTACTS - POST-SCRAPE ENHANCEMENT]
-echo --------------------------------------------------------------------------------
-echo   Visits profile pages to validate, clean, and enrich scraped contacts.
-echo   Fixes contaminated names, fills missing emails, removes noise from fields.
-echo.
-echo   USAGE:
-echo     node src/tools/enrich-contacts.js --input output/scrape.json
-echo     node src/tools/enrich-contacts.js --input output/scrape.json --limit 10 --verbose
-echo     node src/tools/enrich-contacts.js --input output/scrape.json --core-fields-only
-echo.
-echo   OPTIONS:
-echo     -i, --input ^<file^>        Input JSON file from scrape (required)
-echo     -o, --output ^<file^>       Output file (default: adds -enriched suffix)
-echo     -l, --limit ^<n^>           Limit contacts to process
-echo     --delay ^<ms^>              Delay between profile visits (default: 3000)
-echo     --headless/--no-headless  Browser visibility mode
-echo     --resume-from ^<n^>         Resume from contact index
-echo     --fields ^<list^>           Comma-separated fields to enrich (name,email,phone)
-echo     --core-fields-only        Only enrich core fields (skip bio, education, etc.)
-echo     --report ^<file^>           Generate enrichment report
-echo     --report-format ^<fmt^>     Report format: json or text
-echo     -v, --verbose             Verbose logging with field transformations
-echo.
-echo   FIELD ACTIONS:
-echo     ENRICHED  - Added missing data from profile
-echo     VALIDATED - Confirmed original data matches profile
-echo     CLEANED   - Removed noise (e.g., "John DoePartner" -^> "John Doe")
-echo     REPLACED  - Original differed, using profile value (flagged for review)
-echo.
-echo   OUTPUT: Enriched JSON with _original audit trail and enrichment metadata
-echo.
-echo --------------------------------------------------------------------------------
-echo [EXPORT TO GOOGLE SHEETS]
-echo --------------------------------------------------------------------------------
-echo   Exports scraped or enriched contacts to Google Sheets.
-echo   Creates new sheet tabs with formatted headers and auto-sized columns.
-echo.
-echo   USAGE:
-echo     node src/tools/export-to-sheets.js --input output/scrape-enriched.json
-echo     node src/tools/export-to-sheets.js --input output/scrape.json --name "My Contacts"
-echo     node src/tools/export-to-sheets.js --input output/scrape.json --include-enrichment
-echo.
-echo   OPTIONS:
-echo     -i, --input ^<file^>        Input JSON file (required)
-echo     -n, --name ^<name^>         Sheet name (auto-generated if not provided)
-echo     --mode ^<mode^>             create ^| append (default: create)
-echo     --columns ^<list^>          Comma-separated columns to include
-echo     --exclude ^<list^>          Columns to exclude
-echo     --include-enrichment      Include enrichment metadata columns
-echo     --core-only               Only 6 core fields (Name, Email, Phone, Title, Location, Profile URL)
-echo     --batch-size ^<n^>          Rows per batch (default: 100)
-echo     -v, --verbose             Verbose logging
-echo.
-echo   INTEGRATION WITH ENRICHMENT:
-echo     node src/tools/enrich-contacts.js --input output/scrape.json --export-sheets "My Sheet"
-echo.
-echo   SETUP: Add to .env:
-echo     GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
-echo     GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-echo     GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
-echo.
-echo --------------------------------------------------------------------------------
-echo [PROJECT STRUCTURE]
-echo --------------------------------------------------------------------------------
-echo   orchestrator.js             - Main CLI entry point
-echo   src/
-echo     scrapers/                 - Extraction methods
-echo       base-scraper.js         - Base class with shared utilities
-echo       simple-scraper.js       - HTML/DOM-based extraction
-echo       pdf-scraper.js          - PDF parsing with coordinate detection
-echo       select-scraper.js       - Config-driven marker-based extraction
-echo     features/
-echo       pagination/             - Pagination detection and URL generation
-echo         paginator.js          - Main pagination orchestrator
-echo         pattern-detector.js   - Visual pagination control detection
-echo         binary-searcher.js    - Binary search for max page
-echo         url-generator.js      - URL generation from patterns
-echo       workflows/              - Complete scraping workflows
-echo         scraping-workflow.js  - Multi-page scraping orchestration
-echo         export-workflow.js    - Output formatting and export
-echo     utils/                    - Core utilities
-echo       browser-manager.js      - Puppeteer with stealth/CSP bypass
-echo       domain-extractor.js     - Email domain classification
-echo       google-sheets-exporter.js - Sheets API integration
-echo       config-loader.js        - Site configuration management
-echo       constants.js            - Centralized configuration values
-echo     tools/                    - Developer tools
-echo       site-tester.js          - Diagnostic tool for URL testing
-echo       config-generator.js     - Visual config generation tool
-echo       enrich-contacts.js      - Profile enrichment with validation
-echo       export-to-sheets.js     - Google Sheets export tool
-echo   configs/                     - Site-specific JSON configurations
-echo   tests/                       - Test suites (pagination)
-echo   output/                      - JSON output files
-echo.
-echo --------------------------------------------------------------------------------
-echo [FULL PIPELINE WORKFLOW] (NEW)
-echo --------------------------------------------------------------------------------
-echo   End-to-end workflow: config generation -^> scraping -^> enrichment -^> export
-echo.
-echo   # Full pipeline with prompts at each stage
-echo   node orchestrator.js --full-pipeline --url "https://example.com/directory"
-echo.
-echo   # Auto mode (skip prompts after config generation)
-echo   node orchestrator.js --full-pipeline --url "https://example.com/directory" --auto
-echo.
-echo   # With limit for testing
-echo   node orchestrator.js --full-pipeline --url "URL" --limit 10 --auto
-echo.
-echo   # Skip config generation (use existing config)
-echo   node orchestrator.js --full-pipeline --url "URL" --skip-config-gen --auto
-echo.
-echo   # Stop after scraping (no enrichment)
-echo   node orchestrator.js --full-pipeline --url "URL" --no-enrich --auto
-echo.
-echo   # Stop after enrichment (no export)
-echo   node orchestrator.js --full-pipeline --url "URL" --no-export --auto
-echo.
-echo   # Export only core fields (exclude enrichment metadata columns)
-echo   node orchestrator.js --full-pipeline --url "URL" --core-only --auto
-echo.
-echo   WORKFLOW STAGES:
-echo     1. Config Check/Generation: Verifies or creates site-specific config
-echo     2. Scraping: Extracts contacts from all pages
-echo     3. Enrichment: Visits profiles to clean and enrich data
-echo     4. Export: Sends to Google Sheets with formatting
-echo.
-echo   CONFIRMATION POINTS (skipped in --auto mode):
-echo     - After config generation: "Proceed to scraping?"
-echo     - After scraping: "Proceed to enrichment?"
-echo     - After enrichment: "Export to Google Sheets?"
-echo.
-echo --------------------------------------------------------------------------------
-echo [NAVIGATION TESTING] (NEW)
-echo --------------------------------------------------------------------------------
-echo   Test infinite scroll and pagination behavior before config generation.
-echo   Verifies scrolling mechanics, button detection, and URL pattern recognition.
-echo.
-echo   # Test single URL for infinite scroll
-echo   node tests/run-navigation-tests.js --url "URL" --type scroll
-echo.
-echo   # Test with verbose output
-echo   node tests/run-navigation-tests.js --url "URL" --type scroll --verbose
-echo.
-echo   # Quick test mode (reduced limits)
-echo   node tests/run-navigation-tests.js --url "URL" --quick
-echo.
-echo   # Test pagination pattern detection
-echo   node tests/run-navigation-tests.js --url "URL" --type pagination --verbose
-echo.
-echo   # Run all navigation tests from test-urls.json
-echo   node tests/run-navigation-tests.js
-echo.
-echo   # Save results to JSON file
-echo   node tests/run-navigation-tests.js --url "URL" --save results.json
-echo.
-echo   NPM SHORTCUTS:
-echo     npm run test:nav           - Run all navigation tests
-echo     npm run test:nav:scroll    - Infinite scroll tests only
-echo     npm run test:nav:page      - Pagination tests only
-echo     npm run test:nav:quick     - Quick test suite
-echo     npm run test:nav:verbose   - Verbose output
-echo.
-echo   SCROLL TEST OUTPUT:
-echo     - Height changes: How many times page grew during scroll
-echo     - Button clicks: Load More button detections and clicks
-echo     - Timeline: Detailed scroll/click event log
-echo     - Duration: Total time to fully load page
-echo.
-echo   PAGINATION TEST OUTPUT:
-echo     - Pattern type: parameter, path, offset, or infinite-scroll
-echo     - Parameter name: e.g., page, pagingNumber, offset
-echo     - URL generation: Verifies page URLs are correct
-echo     - Filter preservation: Confirms query params preserved
-echo.
-echo --------------------------------------------------------------------------------
-echo [CONFIG VALIDATION TOOL] (NEW)
-echo --------------------------------------------------------------------------------
-echo   Quick test to validate a config works before full scrape.
-echo   Tests first N contacts end-to-end (scraping + enrichment).
-echo.
-echo   # Test first 2 contacts (default)
-echo   node orchestrator.js --validate --url "https://example.com/directory"
-echo.
-echo   # Or use the tool directly
-echo   node src/tools/validate-config.js --url "https://example.com/directory"
-echo.
-echo   # Custom test size
-echo   node src/tools/validate-config.js --url "URL" --limit 5
-echo.
-echo   # Verbose output with field details
-echo   node src/tools/validate-config.js --url "URL" --limit 2 --verbose
-echo.
-echo   # Skip enrichment (just test scraping)
-echo   node src/tools/validate-config.js --url "URL" --no-enrich
-echo.
-echo   # Test with visible browser
-echo   node src/tools/validate-config.js --url "URL" --show
-echo.
-echo   VALIDATION OUTPUT:
-echo     - Config summary: version, fields, pagination type
-echo     - Scraped contacts table: shows data quality
-echo     - Enrichment comparison: before/after for each field
-echo     - Overall status: PASSED or ISSUES DETECTED
-echo     - Recommendations: next steps or fixes needed
-echo.
 echo ================================================================================
-echo [QUICK START]
+echo [TEST PIPELINE]
 echo ================================================================================
+echo.
+echo   STEP 1: Test Navigation (scroll OR pagination)
+echo   STEP 2: Generate Config
+echo   STEP 3: Run Orchestrator
+echo.
 color 0E
+echo [STEP 1A - TEST INFINITE SCROLL]
+echo node src/tools/test-navigation.js --type scroll --verbose --url "URL"
 echo.
-echo   TEST NAVIGATION FIRST (verify scroll/pagination works):
-echo     node tests/run-navigation-tests.js --url "URL" --type scroll --verbose
+echo [STEP 1B - TEST PAGINATION]
+echo node src/tools/test-navigation.js --type pagination --verbose --url "URL"
 echo.
-echo   TEST PAGINATION PATTERN (verify page parameter detected):
-echo     node tests/run-navigation-tests.js --url "URL" --type pagination --verbose
+echo [STEP 2 - GENERATE CONFIG]
+echo node src/tools/config-generator.js --url "URL"
 echo.
-echo   VALIDATE CONFIG (before full scrape):
-echo     node orchestrator.js --validate --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --limit 2
+echo [STEP 3A - ORCHESTRATOR WITH PAGINATION]
+echo node orchestrator.js --paginate --core-only --config domain-com --url "URL"
 echo.
-echo   FULL PIPELINE (complete workflow):
-echo     node orchestrator.js --full-pipeline --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --auto
+echo [STEP 3B - ORCHESTRATOR WITH INFINITE SCROLL]
+echo node orchestrator.js --scroll --core-only --config domain-com --url "URL"
 echo.
-echo   GENERATE CONFIG (visual):
-echo     node src/tools/config-generator.js --url "https://www.sullcrom.com/lawyers"
-echo.
-echo   DIAGNOSE SITE:
-echo     node tools/site-tester.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/"
-echo.
-echo   TEST SCRAPE:
-echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --limit 5
-echo.
-echo   FULL SCRAPE:
-echo     node orchestrator.js --url "https://www.compass.com/agents/locations/manhattan-ny/21425/" --method select --paginate --max-pages 55
-echo.
-echo   ENRICH CONTACTS:
-echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --verbose --limit 10
-echo.
-echo   EXPORT TO SHEETS:
-echo     node src/tools/export-to-sheets.js --input output/scrape-sullcrom-com-1765260032682-enriched.json --name "S and C Lawyers"
-echo.
-echo   ENRICH + EXPORT (combined):
-echo     node src/tools/enrich-contacts.js --input output/scrape-sullcrom-com-1765260032682.json --limit 10 --export-sheets "S and C Lawyers"
-echo.
-echo   # Debug mode (visible browser, keep files)
-echo   node orchestrator.js --full-pipeline --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --limit 5 --auto --core-only
-echo.
-echo   CONFIG GENERATOR PARAMETERS:
-echo   node src/tools/config-generator.js --url "https://www.sullcrom.com/LawyerListing?custom_is_office=27567" --verbose
-echo.
-echo   New Implementation PARAMETERS:
-echo   node orchestrator.js --full-pipeline --core-only --auto --url "new url"
-echo.
-echo --------------------------------------------------------------------------------
-echo [PAUL WEISS - URL PARAMETER PAGINATION EXAMPLE]
-echo --------------------------------------------------------------------------------
-echo   Site uses pagingNumber parameter. All filter params preserved across pages.
-echo.
-echo   STEP 1 - TEST PAGINATION PATTERN:
-echo   node src/tools/test-navigation.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --type pagination --verbose
-echo.
-echo   STEP 2 - GENERATE CONFIG (visual tool):
-echo   node src/tools/config-generator.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All"
-echo.
-echo   STEP 3 - VALIDATE CONFIG (test 5 contacts):
-echo   node src/tools/validate-config.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --limit 5 --verbose
-echo.
-echo   STEP 4 - FULL SCRAPE WITH PAGINATION:
-echo   node orchestrator.js --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --config paulweiss-com --paginate --max-pages 50
-echo.
-echo   STEP 5 - OR USE FULL PIPELINE (after config exists):
-echo  node orchestrator.js --full-pipeline --url "https://www.paulweiss.com/professionals?pageId=1492&pageSize=48&pagingNumber=1&position=All&practices=All&industries=All&offices=New%%20York&schools=All&lastname=All&searchText=All" --auto
+echo [STEP 3C - FULL PIPELINE]
+echo node orchestrator.js --full-pipeline --auto --core-only --url "URL"
 echo.
 color 0A
 echo ================================================================================

@@ -21,6 +21,38 @@ This document provides comprehensive context for editing this project. It covers
 - **Multiple output formats**: JSON, CSV, Google Sheets export
 - **Profile enrichment**: Post-scrape validation and enrichment using profile pages
 
+### Quick Start - Test Pipeline
+
+The recommended workflow for scraping a new site (also documented in `start.bat`):
+
+**Step 1: Test Navigation** - Verify scroll or pagination works
+```bash
+# For infinite scroll sites
+node src/tools/test-navigation.js --url "URL" --type scroll --verbose
+
+# For paginated sites
+node src/tools/test-navigation.js --url "URL" --type pagination --verbose
+```
+
+**Step 2: Generate Config** - Visual tool to select elements
+```bash
+node src/tools/config-generator.js --url "URL"
+```
+
+**Step 3: Run Orchestrator** - Scrape with appropriate mode
+```bash
+# For pagination
+node orchestrator.js --paginate --core-only --config domain-com --url "URL"
+
+# For infinite scroll
+node orchestrator.js --scroll --core-only --config domain-com --url "URL"
+
+# Full pipeline (config + scrape + enrich + export)
+node orchestrator.js --full-pipeline --auto --core-only --url "URL"
+```
+
+Run `start.bat` for copy-paste ready commands.
+
 ---
 
 ## Complete File Reference
@@ -37,7 +69,7 @@ This document provides comprehensive context for editing this project. It covers
 | `.env` | Environment variables (API keys, settings) |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Git ignore patterns |
-| `start.bat` | Windows batch script for quick startup |
+| `start.bat` | Windows batch script with test pipeline and copy-paste commands |
 | `eng.traineddata` | Tesseract OCR English language data |
 
 ### Directory Structure
@@ -180,6 +212,41 @@ page-scrape/
 ---
 
 ## Core Files Detailed Reference
+
+### start.bat (Windows Quick Start)
+
+**Purpose**: Windows batch script providing copy-paste ready commands for the test pipeline workflow.
+
+**Sections**:
+1. **Quick Reference** - Command overview with all orchestrator flags
+2. **Basic Commands** - Simple examples for common tasks
+3. **Test Pipeline** - Step-by-step workflow with URL placeholder
+
+**Test Pipeline Workflow**:
+```
+STEP 1: Test Navigation (scroll OR pagination)
+STEP 2: Generate Config (visual element selection)
+STEP 3: Run Orchestrator (with --core-only for clean export)
+```
+
+**Key Commands** (replace "URL" with target):
+```bash
+# Test navigation
+node src/tools/test-navigation.js --type scroll --verbose --url "URL"
+node src/tools/test-navigation.js --type pagination --verbose --url "URL"
+
+# Generate config
+node src/tools/config-generator.js --url "URL"
+
+# Orchestrator
+node orchestrator.js --paginate --core-only --config domain-com --url "URL"
+node orchestrator.js --scroll --core-only --config domain-com --url "URL"
+node orchestrator.js --full-pipeline --auto --core-only --url "URL"
+```
+
+**Usage**: Double-click `start.bat` to see all commands, then copy/paste into terminal.
+
+---
 
 ### orchestrator.js (Entry Point)
 
