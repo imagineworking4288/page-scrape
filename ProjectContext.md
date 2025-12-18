@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 17, 2025 (Fixed validation navigation issue - overlay now stays visible during validation with skipNavigation option)
+**Last Updated**: December 18, 2025 (Added dependency analyzer for v3.0 cleanup planning)
 
 ---
 
@@ -66,6 +66,7 @@ Run `start.bat` for copy-paste ready commands.
 | `package-lock.json` | Locked dependency versions |
 | `README.md` | Project documentation for users |
 | `ProjectContext.md` | This file - comprehensive project documentation |
+| `analyze-dependencies.js` | Dependency analyzer - finds dead code, deprecated patterns, class usage |
 | `.env` | Environment variables (API keys, settings) |
 | `.env.example` | Template for environment variables |
 | `.gitignore` | Git ignore patterns |
@@ -1576,6 +1577,39 @@ const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT, { skipNaviga
 3. Extraction runs against current DOM
 4. Validation results display in overlay modal
 5. User can continue interacting with overlay
+
+### December 2025 Dependency Analyzer
+
+**Tool**: `analyze-dependencies.js`
+
+Scans the project to identify dead code, deprecated patterns, and class usage for v3.0 cleanup planning.
+
+**Usage**:
+```bash
+# Text report with verbose output
+node analyze-dependencies.js --verbose
+
+# JSON output for programmatic use
+node analyze-dependencies.js --json > dependency-analysis.json
+```
+
+**Features**:
+- Traces imports from all entry points (orchestrator, tools, tests, workflows)
+- Identifies dead code (files never imported)
+- Detects deprecated patterns:
+  - `ConfigScraper` class usage
+  - `config-scraper.js` imports
+  - `loadConfig(url)` pattern
+  - `networkidle0` wait strategy
+- Tracks class definitions and instantiations
+- Finds circular dependencies
+- Generates recommendations with severity levels
+
+**Latest Analysis Results** (December 2025):
+- ConfigScraper is NOT being instantiated (good!)
+- v2.3 scrapers (SinglePageScraper, PaginationScraper, InfiniteScrollScraper) are active
+- ~20 unused index/barrel files identified for cleanup
+- 4 remaining `networkidle0` usages in pagination code (low priority)
 
 ---
 

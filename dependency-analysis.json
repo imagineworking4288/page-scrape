@@ -1,0 +1,713 @@
+{
+  "totalFiles": 93,
+  "activeFiles": [
+    "orchestrator.js",
+    "src/core/logger.js",
+    "src/core/browser-manager.js",
+    "src/core/index.js",
+    "src/core/selenium-manager.js",
+    "src/core/rate-limiter.js",
+    "src/utils/domain-extractor.js",
+    "src/features/pagination/paginator.js",
+    "src/features/pagination/pattern-detector.js",
+    "src/constants/pagination-patterns.js",
+    "src/features/pagination/binary-searcher.js",
+    "src/features/pagination/url-generator.js",
+    "src/config/config-loader.js",
+    "src/utils/google-sheets-exporter.js",
+    "src/scrapers/config-scrapers/index.js",
+    "src/scrapers/config-scrapers/base-config-scraper.js",
+    "src/scrapers/base-scraper.js",
+    "src/utils/contact-extractor.js",
+    "src/utils/profile-visitor.js",
+    "src/extraction/extractors/index.js",
+    "src/extraction/extractors/email-extractor.js",
+    "src/extraction/extractors/phone-extractor.js",
+    "src/extraction/extractors/link-extractor.js",
+    "src/extraction/extractors/label-extractor.js",
+    "src/extraction/extractors/screenshot-extractor.js",
+    "src/extraction/extractors/coordinate-extractor.js",
+    "src/scrapers/config-scrapers/infinite-scroll-scraper.js",
+    "src/scrapers/config-scrapers/pagination-scraper.js",
+    "src/scrapers/config-scrapers/single-page-scraper.js",
+    "src/workflows/full-pipeline.js",
+    "src/features/enrichment/profile-enricher.js",
+    "src/features/enrichment/profile-extractor.js",
+    "src/features/enrichment/field-comparator.js",
+    "src/features/enrichment/cleaners/index.js",
+    "src/features/enrichment/cleaners/name-cleaner.js",
+    "src/features/enrichment/cleaners/location-cleaner.js",
+    "src/features/enrichment/cleaners/title-extractor.js",
+    "src/features/enrichment/cleaners/noise-detector.js",
+    "src/features/enrichment/post-cleaners/index.js",
+    "src/features/enrichment/post-cleaners/field-cleaner.js",
+    "src/features/enrichment/post-cleaners/multi-location-handler.js",
+    "src/features/enrichment/post-cleaners/phone-location-correlator.js",
+    "src/features/enrichment/post-cleaners/location-normalizer.js",
+    "src/features/enrichment/post-cleaners/domain-classifier.js",
+    "src/features/enrichment/post-cleaners/confidence-scorer.js",
+    "src/features/export/index.js",
+    "src/features/export/sheet-exporter.js",
+    "src/features/export/sheet-manager.js",
+    "src/features/export/column-detector.js",
+    "src/features/export/data-formatter.js",
+    "src/features/export/batch-writer.js",
+    "src/utils/prompt-helper.js",
+    "src/tools/config-generator.js",
+    "src/tools/lib/interactive-session.js",
+    "src/tools/lib/config-builder.js",
+    "src/tools/lib/config-validator.js",
+    "src/tools/lib/card-matcher.js",
+    "src/extraction/smart-field-extractor.js",
+    "src/tools/lib/enhanced-capture.js",
+    "src/tools/lib/element-capture.js",
+    "src/tools/lib/constants/field-requirements.js",
+    "src/tools/lib/extraction-tester.js",
+    "src/tools/lib/config-schemas.js",
+    "src/tools/test-config.js",
+    "src/tools/validate-config.js",
+    "src/tools/enrich-contacts.js",
+    "src/features/enrichment/report-generator.js",
+    "src/tools/test-navigation.js",
+    "src/tools/export-to-sheets.js",
+    "tests/enrichment-test.js",
+    "tests/post-cleaning-test.js",
+    "tests/selenium-infinite-scroll.test.js",
+    "tests/run-navigation-tests.js"
+  ],
+  "deadCode": [
+    "src/config/index.js",
+    "src/config/schemas.js",
+    "src/constants/index.js",
+    "src/extraction/index.js",
+    "src/extraction/multi-method-extractor.js",
+    "src/features/enrichment/index.js",
+    "src/features/index.js",
+    "src/features/pagination/index.js",
+    "src/index.js",
+    "src/scrapers/config-scraper.js",
+    "src/scrapers/index.js",
+    "src/tools/assets/overlay-client.js",
+    "src/tools/lib/index.js",
+    "src/tools/lib/pagination-diagnostic.js",
+    "src/tools/lib/profile-enrichment.js",
+    "src/utils/constants.js",
+    "tests/navigation/infinite-scroll-navigation.test.js",
+    "tests/navigation/navigation-test-utils.js",
+    "tests/navigation/pagination-navigation.test.js",
+    "tests/pagination-priority.test.js"
+  ],
+  "deprecatedPatterns": [
+    {
+      "name": "networkidle0 wait strategy",
+      "file": "src/features/pagination/paginator.js",
+      "lines": [
+        60,
+        463,
+        486,
+        1033
+      ],
+      "replacement": "domcontentloaded",
+      "severity": "LOW"
+    },
+    {
+      "name": "networkidle0 wait strategy",
+      "file": "src/features/pagination/pattern-detector.js",
+      "lines": [
+        563,
+        584
+      ],
+      "replacement": "domcontentloaded",
+      "severity": "LOW"
+    },
+    {
+      "name": "networkidle0 wait strategy",
+      "file": "src/features/pagination/binary-searcher.js",
+      "lines": [
+        248
+      ],
+      "replacement": "domcontentloaded",
+      "severity": "LOW"
+    },
+    {
+      "name": "config-scraper.js import",
+      "file": "src/scrapers/config-scrapers/index.js",
+      "lines": [
+        18
+      ],
+      "replacement": "config-scrapers/ modules",
+      "severity": "HIGH"
+    },
+    {
+      "name": "config-scraper.js import",
+      "file": "src/scrapers/config-scrapers/infinite-scroll-scraper.js",
+      "lines": [
+        37
+      ],
+      "replacement": "config-scrapers/ modules",
+      "severity": "HIGH"
+    },
+    {
+      "name": "config-scraper.js import",
+      "file": "src/scrapers/config-scrapers/pagination-scraper.js",
+      "lines": [
+        14
+      ],
+      "replacement": "config-scrapers/ modules",
+      "severity": "HIGH"
+    },
+    {
+      "name": "config-scraper.js import",
+      "file": "src/scrapers/config-scrapers/single-page-scraper.js",
+      "lines": [
+        10
+      ],
+      "replacement": "config-scrapers/ modules",
+      "severity": "HIGH"
+    },
+    {
+      "name": "networkidle0 wait strategy",
+      "file": "src/tools/test-navigation.js",
+      "lines": [
+        262
+      ],
+      "replacement": "domcontentloaded",
+      "severity": "LOW"
+    }
+  ],
+  "classUsage": {
+    "SinglePageScraper": {
+      "definedIn": "src/scrapers/config-scrapers/single-page-scraper.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            398
+          ]
+        },
+        {
+          "file": "src/scrapers/config-scrapers/index.js",
+          "lines": [
+            65,
+            70
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            486
+          ]
+        },
+        {
+          "file": "src/tools/lib/interactive-session.js",
+          "lines": [
+            1806
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            239
+          ]
+        }
+      ]
+    },
+    "PaginationScraper": {
+      "definedIn": "src/scrapers/config-scrapers/pagination-scraper.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            380
+          ]
+        },
+        {
+          "file": "src/scrapers/config-scrapers/index.js",
+          "lines": [
+            58
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            484
+          ]
+        },
+        {
+          "file": "src/tools/lib/interactive-session.js",
+          "lines": [
+            1791
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            237
+          ]
+        }
+      ]
+    },
+    "InfiniteScrollScraper": {
+      "definedIn": "src/scrapers/config-scrapers/infinite-scroll-scraper.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            350
+          ]
+        },
+        {
+          "file": "src/scrapers/config-scrapers/index.js",
+          "lines": [
+            48
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            451
+          ]
+        },
+        {
+          "file": "src/tools/lib/interactive-session.js",
+          "lines": [
+            1773
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            212
+          ]
+        },
+        {
+          "file": "tests/selenium-infinite-scroll.test.js",
+          "lines": [
+            158
+          ]
+        }
+      ]
+    },
+    "BrowserManager": {
+      "definedIn": "src/core/browser-manager.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            188
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            473,
+            573
+          ]
+        },
+        {
+          "file": "src/tools/config-generator.js",
+          "lines": [
+            92
+          ]
+        },
+        {
+          "file": "src/tools/lib/interactive-session.js",
+          "lines": [
+            1834
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            229,
+            319
+          ]
+        },
+        {
+          "file": "src/tools/enrich-contacts.js",
+          "lines": [
+            97
+          ]
+        },
+        {
+          "file": "src/tools/test-navigation.js",
+          "lines": [
+            245
+          ]
+        }
+      ]
+    },
+    "SeleniumManager": {
+      "definedIn": "src/core/selenium-manager.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            345
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            448
+          ]
+        },
+        {
+          "file": "src/tools/lib/interactive-session.js",
+          "lines": [
+            1769,
+            2155
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            209
+          ]
+        },
+        {
+          "file": "src/tools/test-navigation.js",
+          "lines": [
+            95
+          ]
+        },
+        {
+          "file": "tests/selenium-infinite-scroll.test.js",
+          "lines": [
+            49,
+            150
+          ]
+        }
+      ]
+    },
+    "ConfigLoader": {
+      "definedIn": "src/config/config-loader.js",
+      "importedIn": [],
+      "instantiatedIn": [
+        {
+          "file": "orchestrator.js",
+          "lines": [
+            191
+          ]
+        },
+        {
+          "file": "src/workflows/full-pipeline.js",
+          "lines": [
+            176,
+            483
+          ]
+        },
+        {
+          "file": "src/tools/config-generator.js",
+          "lines": [
+            99
+          ]
+        },
+        {
+          "file": "src/tools/validate-config.js",
+          "lines": [
+            117,
+            236
+          ]
+        }
+      ]
+    },
+    "BaseConfigScraper": {
+      "definedIn": "src/scrapers/config-scrapers/base-config-scraper.js",
+      "importedIn": [],
+      "instantiatedIn": []
+    },
+    "BaseScraper": {
+      "definedIn": "src/scrapers/base-scraper.js",
+      "importedIn": [],
+      "instantiatedIn": []
+    }
+  },
+  "circularDeps": [],
+  "importGraph": {
+    "orchestrator.js": [
+      "src/core/logger.js",
+      "src/core/browser-manager.js",
+      "src/core/index.js",
+      "src/core/rate-limiter.js",
+      "src/utils/domain-extractor.js",
+      "src/features/pagination/paginator.js",
+      "src/config/config-loader.js",
+      "src/utils/google-sheets-exporter.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/workflows/full-pipeline.js",
+      "src/scrapers/config-scrapers/index.js"
+    ],
+    "src/core/logger.js": [],
+    "src/core/browser-manager.js": [],
+    "src/core/index.js": [
+      "src/core/browser-manager.js",
+      "src/core/selenium-manager.js",
+      "src/core/rate-limiter.js",
+      "src/core/logger.js"
+    ],
+    "src/core/selenium-manager.js": [],
+    "src/core/rate-limiter.js": [],
+    "src/utils/domain-extractor.js": [],
+    "src/features/pagination/paginator.js": [
+      "src/features/pagination/pattern-detector.js",
+      "src/features/pagination/binary-searcher.js",
+      "src/features/pagination/url-generator.js"
+    ],
+    "src/features/pagination/pattern-detector.js": [
+      "src/constants/pagination-patterns.js"
+    ],
+    "src/constants/pagination-patterns.js": [],
+    "src/features/pagination/binary-searcher.js": [],
+    "src/features/pagination/url-generator.js": [],
+    "src/config/config-loader.js": [],
+    "src/utils/google-sheets-exporter.js": [],
+    "src/scrapers/config-scrapers/index.js": [
+      "src/scrapers/config-scrapers/base-config-scraper.js",
+      "src/scrapers/config-scrapers/infinite-scroll-scraper.js",
+      "src/scrapers/config-scrapers/pagination-scraper.js",
+      "src/scrapers/config-scrapers/single-page-scraper.js",
+      "src/features/pagination/paginator.js"
+    ],
+    "src/scrapers/config-scrapers/base-config-scraper.js": [
+      "src/scrapers/base-scraper.js",
+      "src/extraction/extractors/index.js"
+    ],
+    "src/scrapers/base-scraper.js": [
+      "src/utils/domain-extractor.js",
+      "src/utils/contact-extractor.js",
+      "src/utils/profile-visitor.js"
+    ],
+    "src/utils/contact-extractor.js": [],
+    "src/utils/profile-visitor.js": [
+      "src/utils/contact-extractor.js"
+    ],
+    "src/extraction/extractors/index.js": [
+      "src/extraction/extractors/email-extractor.js",
+      "src/extraction/extractors/phone-extractor.js",
+      "src/extraction/extractors/link-extractor.js",
+      "src/extraction/extractors/label-extractor.js",
+      "src/extraction/extractors/screenshot-extractor.js",
+      "src/extraction/extractors/coordinate-extractor.js"
+    ],
+    "src/extraction/extractors/email-extractor.js": [],
+    "src/extraction/extractors/phone-extractor.js": [],
+    "src/extraction/extractors/link-extractor.js": [],
+    "src/extraction/extractors/label-extractor.js": [],
+    "src/extraction/extractors/screenshot-extractor.js": [],
+    "src/extraction/extractors/coordinate-extractor.js": [],
+    "src/scrapers/config-scrapers/infinite-scroll-scraper.js": [
+      "src/scrapers/config-scrapers/base-config-scraper.js"
+    ],
+    "src/scrapers/config-scrapers/pagination-scraper.js": [
+      "src/scrapers/config-scrapers/base-config-scraper.js",
+      "src/features/pagination/paginator.js"
+    ],
+    "src/scrapers/config-scrapers/single-page-scraper.js": [
+      "src/scrapers/config-scrapers/base-config-scraper.js"
+    ],
+    "src/workflows/full-pipeline.js": [
+      "src/core/logger.js",
+      "src/core/browser-manager.js",
+      "src/core/index.js",
+      "src/core/rate-limiter.js",
+      "src/config/config-loader.js",
+      "src/features/enrichment/profile-enricher.js",
+      "src/features/enrichment/post-cleaners/index.js",
+      "src/features/export/index.js",
+      "src/utils/prompt-helper.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/config/config-loader.js"
+    ],
+    "src/features/enrichment/profile-enricher.js": [
+      "src/features/enrichment/profile-extractor.js",
+      "src/features/enrichment/field-comparator.js",
+      "src/features/enrichment/cleaners/index.js"
+    ],
+    "src/features/enrichment/profile-extractor.js": [],
+    "src/features/enrichment/field-comparator.js": [
+      "src/features/enrichment/cleaners/index.js"
+    ],
+    "src/features/enrichment/cleaners/index.js": [
+      "src/features/enrichment/cleaners/name-cleaner.js",
+      "src/features/enrichment/cleaners/location-cleaner.js",
+      "src/features/enrichment/cleaners/title-extractor.js",
+      "src/features/enrichment/cleaners/noise-detector.js"
+    ],
+    "src/features/enrichment/cleaners/name-cleaner.js": [],
+    "src/features/enrichment/cleaners/location-cleaner.js": [],
+    "src/features/enrichment/cleaners/title-extractor.js": [
+      "src/features/enrichment/cleaners/name-cleaner.js"
+    ],
+    "src/features/enrichment/cleaners/noise-detector.js": [],
+    "src/features/enrichment/post-cleaners/index.js": [
+      "src/features/enrichment/post-cleaners/field-cleaner.js",
+      "src/features/enrichment/post-cleaners/multi-location-handler.js",
+      "src/features/enrichment/post-cleaners/phone-location-correlator.js",
+      "src/features/enrichment/post-cleaners/location-normalizer.js",
+      "src/features/enrichment/post-cleaners/domain-classifier.js",
+      "src/features/enrichment/post-cleaners/confidence-scorer.js"
+    ],
+    "src/features/enrichment/post-cleaners/field-cleaner.js": [
+      "src/features/enrichment/post-cleaners/multi-location-handler.js",
+      "src/features/enrichment/post-cleaners/phone-location-correlator.js",
+      "src/features/enrichment/post-cleaners/location-normalizer.js",
+      "src/features/enrichment/post-cleaners/domain-classifier.js",
+      "src/features/enrichment/post-cleaners/confidence-scorer.js"
+    ],
+    "src/features/enrichment/post-cleaners/multi-location-handler.js": [],
+    "src/features/enrichment/post-cleaners/phone-location-correlator.js": [],
+    "src/features/enrichment/post-cleaners/location-normalizer.js": [],
+    "src/features/enrichment/post-cleaners/domain-classifier.js": [
+      "src/utils/domain-extractor.js"
+    ],
+    "src/features/enrichment/post-cleaners/confidence-scorer.js": [],
+    "src/features/export/index.js": [
+      "src/features/export/sheet-exporter.js",
+      "src/features/export/sheet-manager.js",
+      "src/features/export/column-detector.js",
+      "src/features/export/data-formatter.js",
+      "src/features/export/batch-writer.js"
+    ],
+    "src/features/export/sheet-exporter.js": [
+      "src/features/export/sheet-manager.js",
+      "src/features/export/column-detector.js",
+      "src/features/export/data-formatter.js",
+      "src/features/export/batch-writer.js"
+    ],
+    "src/features/export/sheet-manager.js": [],
+    "src/features/export/column-detector.js": [],
+    "src/features/export/data-formatter.js": [],
+    "src/features/export/batch-writer.js": [],
+    "src/utils/prompt-helper.js": [],
+    "src/tools/config-generator.js": [
+      "src/core/logger.js",
+      "src/core/browser-manager.js",
+      "src/core/rate-limiter.js",
+      "src/config/config-loader.js",
+      "src/tools/lib/interactive-session.js"
+    ],
+    "src/tools/lib/interactive-session.js": [
+      "src/tools/lib/config-builder.js",
+      "src/tools/lib/config-validator.js",
+      "src/tools/lib/card-matcher.js",
+      "src/extraction/smart-field-extractor.js",
+      "src/tools/lib/enhanced-capture.js",
+      "src/tools/lib/element-capture.js",
+      "src/tools/lib/extraction-tester.js",
+      "src/core/selenium-manager.js",
+      "src/utils/contact-extractor.js",
+      "src/tools/lib/config-schemas.js",
+      "src/core/rate-limiter.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/core/browser-manager.js",
+      "src/core/rate-limiter.js",
+      "src/features/enrichment/profile-enricher.js",
+      "src/scrapers/config-scrapers/index.js"
+    ],
+    "src/tools/lib/config-builder.js": [],
+    "src/tools/lib/config-validator.js": [],
+    "src/tools/lib/card-matcher.js": [],
+    "src/extraction/smart-field-extractor.js": [],
+    "src/tools/lib/enhanced-capture.js": [],
+    "src/tools/lib/element-capture.js": [
+      "src/tools/lib/constants/field-requirements.js"
+    ],
+    "src/tools/lib/constants/field-requirements.js": [],
+    "src/tools/lib/extraction-tester.js": [
+      "src/extraction/extractors/screenshot-extractor.js",
+      "src/extraction/extractors/coordinate-extractor.js",
+      "src/extraction/extractors/email-extractor.js",
+      "src/extraction/extractors/phone-extractor.js",
+      "src/extraction/extractors/link-extractor.js",
+      "src/extraction/extractors/label-extractor.js",
+      "src/tools/lib/config-schemas.js"
+    ],
+    "src/tools/lib/config-schemas.js": [],
+    "src/tools/test-config.js": [
+      "src/extraction/extractors/screenshot-extractor.js",
+      "src/extraction/extractors/coordinate-extractor.js",
+      "src/extraction/extractors/email-extractor.js",
+      "src/extraction/extractors/phone-extractor.js",
+      "src/extraction/extractors/link-extractor.js",
+      "src/extraction/extractors/label-extractor.js"
+    ],
+    "src/tools/validate-config.js": [
+      "src/core/logger.js",
+      "src/core/browser-manager.js",
+      "src/core/index.js",
+      "src/core/rate-limiter.js",
+      "src/config/config-loader.js",
+      "src/features/enrichment/profile-enricher.js",
+      "src/features/enrichment/post-cleaners/index.js",
+      "src/utils/prompt-helper.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/config/config-loader.js"
+    ],
+    "src/tools/enrich-contacts.js": [
+      "src/core/logger.js",
+      "src/core/browser-manager.js",
+      "src/core/rate-limiter.js",
+      "src/features/enrichment/profile-enricher.js",
+      "src/features/enrichment/report-generator.js",
+      "src/features/enrichment/post-cleaners/index.js",
+      "src/features/export/index.js"
+    ],
+    "src/features/enrichment/report-generator.js": [],
+    "src/tools/test-navigation.js": [
+      "src/core/logger.js",
+      "src/core/index.js",
+      "src/core/browser-manager.js",
+      "src/features/pagination/pattern-detector.js",
+      "src/features/pagination/url-generator.js",
+      "src/utils/prompt-helper.js"
+    ],
+    "src/tools/export-to-sheets.js": [
+      "src/core/logger.js",
+      "src/features/export/index.js"
+    ],
+    "tests/enrichment-test.js": [
+      "src/features/enrichment/cleaners/index.js",
+      "src/features/enrichment/field-comparator.js"
+    ],
+    "tests/post-cleaning-test.js": [
+      "src/features/enrichment/post-cleaners/index.js"
+    ],
+    "tests/selenium-infinite-scroll.test.js": [
+      "src/core/index.js",
+      "src/scrapers/config-scrapers/index.js",
+      "src/core/logger.js"
+    ],
+    "tests/run-navigation-tests.js": []
+  },
+  "recommendations": [
+    {
+      "severity": "OK",
+      "message": "ConfigScraper is not being instantiated (good!)"
+    },
+    {
+      "severity": "OK",
+      "message": "v2.3 scrapers are being used: SinglePageScraper, PaginationScraper, InfiniteScrollScraper"
+    },
+    {
+      "severity": "MEDIUM",
+      "message": "20 files are never imported - review for deletion",
+      "details": "src/config/index.js, src/config/schemas.js, src/constants/index.js, src/extraction/index.js, src/extraction/multi-method-extractor.js, src/features/enrichment/index.js, src/features/index.js, src/features/pagination/index.js, src/index.js, src/scrapers/config-scraper.js..."
+    },
+    {
+      "severity": "HIGH",
+      "message": "4 high-severity deprecated patterns found",
+      "details": "config-scraper.js import in src/scrapers/config-scrapers/index.js, config-scraper.js import in src/scrapers/config-scrapers/infinite-scroll-scraper.js, config-scraper.js import in src/scrapers/config-scrapers/pagination-scraper.js, config-scraper.js import in src/scrapers/config-scrapers/single-page-scraper.js"
+    }
+  ],
+  "timestamp": "2025-12-18T05:26:26.743Z"
+}
