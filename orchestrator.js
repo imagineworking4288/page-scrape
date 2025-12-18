@@ -1,24 +1,28 @@
 #!/usr/bin/env node
 
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 
 const { Command } = require('commander');
-const Table = require('cli-table3');
 const fs = require('fs');
 const path = require('path');
 
-// Import utilities from src/
+// Core imports
 const logger = require('./src/core/logger');
 const BrowserManager = require('./src/core/browser-manager');
 const { SeleniumManager } = require('./src/core');
 const RateLimiter = require('./src/core/rate-limiter');
-const DomainExtractor = require('./src/utils/domain-extractor');
-const Paginator = require('./src/features/pagination/paginator');
 const ConfigLoader = require('./src/config/config-loader');
-const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 
-// Import scrapers from src/
-const { createScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
+// Utilities
+const DomainExtractor = require('./src/utils/domain-extractor');
+const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
+const { logScrapingStats, logDomainStats, logSampleContacts } = require('./src/utils/stats-reporter');
+
+// Scraper factory
+const { createScraperFromConfig } = require('./src/scrapers/config-scrapers');
+
+// Pagination
+const Paginator = require('./src/features/pagination/paginator');
 
 // CLI setup
 const program = new Command();
@@ -43,43 +47,61 @@ program
   .option('--force-selenium', 'Force Selenium browser for infinite scroll (PAGE_DOWN simulation)')
   .option('--scroll-delay <ms>', 'Selenium scroll delay in ms', parseInt, 400)
   .option('--max-retries <number>', 'Max consecutive no-change attempts for Selenium scroll', parseInt, 25)
-  // Full pipeline options
-  .option('--full-pipeline', 'Run full pipeline: config → scrape → enrich → export')
+  .option('--full-pipeline', 'Run full pipeline: config -> scrape -> enrich -> export')
   .option('--auto', 'Skip confirmation prompts in full-pipeline mode')
   .option('--skip-config-gen', 'Skip config generation, use existing config (requires --full-pipeline)')
   .option('--no-enrich', 'Skip enrichment stage in full-pipeline mode')
-  // Validation tool shortcut
   .option('--validate', 'Run validation tool (quick test with first N contacts)')
-  // Export options
   .option('--core-only', 'Export only core contact fields (exclude enrichment metadata)')
   .option('-v, --verbose', 'Verbose logging')
   .parse(process.argv);
 
 const options = program.opts();
 
-// Validate URL
+// Utility functions
 function validateUrl(url) {
   try {
     new URL(url);
     return true;
-  } catch (error) {
+  } catch {
     logger.error(`Invalid URL: ${url}`);
     return false;
   }
 }
 
-// Convert headless string to boolean
 function parseHeadless(value) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
     const lower = value.toLowerCase();
-    if (lower === 'false' || lower === '0' || lower === 'no') {
-      return false;
-    }
+    if (lower === 'false' || lower === '0' || lower === 'no') return false;
   }
   return true;
 }
 
+// Graceful shutdown handlers
+let browserManagerGlobal = null;
+let seleniumManagerGlobal = null;
+
+async function cleanup() {
+  if (browserManagerGlobal) {
+    try { await browserManagerGlobal.close(); } catch (e) { /* ignore */ }
+  }
+  if (seleniumManagerGlobal) {
+    try { await seleniumManagerGlobal.close(); } catch (e) { /* ignore */ }
+  }
+}
+
+process.on('SIGINT', async () => {
+  logger.warn('Received SIGINT, shutting down gracefully...');
+  await cleanup();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  logger.warn('Received SIGTERM, shutting down gracefully...');
+  await cleanup();
+  process.exit(0);
+});
 
 // Main execution
 async function main() {
@@ -87,666 +109,234 @@ async function main() {
   let seleniumManager = null;
 
   try {
-    // Validate URL first
-    if (!validateUrl(options.url)) {
-      process.exit(1);
-    }
+    if (!validateUrl(options.url)) process.exit(1);
 
-    // ===========================================================================
-    // ROUTE: Validation Tool (--validate)
-    // ===========================================================================
+    // Route: Validation tool
     if (options.validate) {
       const { spawn } = require('child_process');
-      const validatePath = path.join(__dirname, 'src', 'tools', 'validate-config.js');
-
       const args = ['--url', options.url];
       if (options.limit) args.push('--limit', options.limit.toString());
       if (options.verbose) args.push('--verbose');
       if (!parseHeadless(options.headless)) args.push('--show');
-
-      const validateProcess = spawn('node', [validatePath, ...args], {
-        stdio: 'inherit',
-        cwd: __dirname
-      });
-
-      validateProcess.on('close', (code) => {
-        process.exit(code);
-      });
-
-      return; // Exit main function, let subprocess handle everything
+      const proc = spawn('node', [path.join(__dirname, 'src', 'tools', 'validate-config.js'), ...args], { stdio: 'inherit', cwd: __dirname });
+      proc.on('close', (code) => process.exit(code));
+      return;
     }
 
-    // ===========================================================================
-    // ROUTE: Full Pipeline (--full-pipeline)
-    // ===========================================================================
+    // Route: Full pipeline
     if (options.fullPipeline) {
       const FullPipelineOrchestrator = require('./src/workflows/full-pipeline');
-
       const orchestrator = new FullPipelineOrchestrator({
-        url: options.url,
-        limit: options.limit,
-        auto: options.auto,
-        autoMode: options.auto,
-        skipConfigGen: options.skipConfigGen,
-        noEnrich: options.enrich === false,
-        noExport: options.export === false,
-        coreOnly: options.coreOnly || false,
-        headless: parseHeadless(options.headless),
-        verbose: options.verbose
+        url: options.url, limit: options.limit, auto: options.auto, autoMode: options.auto,
+        skipConfigGen: options.skipConfigGen, noEnrich: options.enrich === false,
+        noExport: options.export === false, coreOnly: options.coreOnly || false,
+        headless: parseHeadless(options.headless), verbose: options.verbose
       });
-
       const result = await orchestrator.run();
-
-      if (result.success) {
-        logger.info('[Orchestrator] Full pipeline completed successfully');
-        process.exit(0);
-      } else {
-        logger.error(`[Orchestrator] Full pipeline failed: ${result.message}`);
-        process.exit(1);
-      }
-
-      return; // Exit main function
+      process.exit(result.success ? 0 : 1);
+      return;
     }
 
-    // ===========================================================================
-    // STANDARD SCRAPING WORKFLOW (existing behavior)
-    // ===========================================================================
-    logger.info('═══════════════════════════════════════');
-    logger.info('  UNIVERSAL PROFESSIONAL SCRAPER v1.0');
-    logger.info('═══════════════════════════════════════');
-    logger.info('');
-
-    // Parse headless option
+    // Standard scraping workflow
     const headless = parseHeadless(options.headless);
-
-    logger.info(`Target URL: ${options.url}`);
-    if (options.limit) {
-      logger.info(`Limit: ${options.limit} contacts`);
-    }
-    logger.info(`Output: ${options.output}`);
-    logger.info(`Headless: ${headless}`);
-
-    // Pagination settings
     const paginationEnabled = options.paginate || (process.env.PAGINATION_ENABLED === 'true');
     const maxPages = options.maxPages || parseInt(process.env.PAGINATION_MAX_PAGES) || 200;
     const minContacts = options.minContacts || parseInt(process.env.PAGINATION_MIN_CONTACTS) || 1;
     const startPage = options.startPage || 1;
 
-    if (paginationEnabled) {
-      logger.info(`Pagination: enabled`);
-      logger.info(`  Max pages: ${maxPages}`);
-      logger.info(`  Start page: ${startPage}`);
-      logger.info(`  Min contacts/page: ${minContacts}`);
-      if (options.discoverOnly) {
-        logger.info(`  Mode: discovery only`);
-      }
-    }
+    logger.info('═══════════════════════════════════════');
+    logger.info('  UNIVERSAL PROFESSIONAL SCRAPER v1.0');
+    logger.info('═══════════════════════════════════════');
+    logger.info(`Target URL: ${options.url}`);
+    if (options.limit) logger.info(`Limit: ${options.limit} contacts`);
+    logger.info(`Headless: ${headless}`);
+    if (paginationEnabled) logger.info(`Pagination: enabled (max ${maxPages} pages)`);
     logger.info('');
 
     // Initialize components
-    logger.info('Initializing components...');
     browserManager = new BrowserManager(logger);
-    browserManagerGlobal = browserManager; // Assign to global for signal handlers
-    const domainExtractor = new DomainExtractor(logger);
+    browserManagerGlobal = browserManager;
     const configLoader = new ConfigLoader(logger);
+    const domainExtractor = new DomainExtractor(logger);
 
-    // Parse delay range
     const [minDelay, maxDelay] = options.delay.split('-').map(d => parseInt(d));
-    const rateLimiter = new RateLimiter(logger, {
-      minDelay: minDelay || 2000,
-      maxDelay: maxDelay || 5000
-    });
+    const rateLimiter = new RateLimiter(logger, { minDelay: minDelay || 2000, maxDelay: maxDelay || 5000 });
 
-    // Launch browser
     await browserManager.launch(headless);
 
-    // Initialize paginator if pagination enabled
-    let paginator = null;
-    let pageUrls = [options.url];
-    let siteConfig = null;
+    // Load config ONCE
+    const config = options.config
+      ? configLoader.loadConfigByName(options.config) || configLoader.loadConfig(options.url)
+      : configLoader.loadConfig(options.url);
+
+    if (!config) {
+      logger.error('No config found. Run config generator first:');
+      logger.error(`  node src/tools/config-generator.js --url "${options.url}"`);
+      process.exit(1);
+    }
+    logger.info(`Loaded config: ${config.name || config.domain} (v${config.version || '1.0'})`);
+
+    // Pagination discovery
     let paginationResult = null;
+    let pageUrls = [options.url];
 
     if (paginationEnabled) {
-      paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
+      const paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
+      if (startPage > 1) paginator.setStartPage(startPage);
 
-      // Set start page if resuming
-      if (startPage > 1) {
-        paginator.setStartPage(startPage);
-      }
-
-      // Load site config for pagination settings
-      siteConfig = configLoader.loadConfig(options.url);
-
-      // Discover pagination
       logger.info('');
       logger.info('═══════════════════════════════════════════════════════════════');
       logger.info('  PAGINATION DISCOVERY');
       logger.info('═══════════════════════════════════════════════════════════════');
-      logger.info('');
 
-      const discoveryStart = Date.now();
       paginationResult = await paginator.paginate(options.url, {
-        maxPages: maxPages,
-        minContacts: minContacts,
+        maxPages, minContacts,
         timeout: parseInt(process.env.PAGINATION_DISCOVERY_TIMEOUT) || 30000,
         discoverOnly: options.discoverOnly,
-        siteConfig: siteConfig
+        siteConfig: config
       });
-      const discoveryTime = ((Date.now() - discoveryStart) / 1000).toFixed(1);
 
-      logger.info('');
-      logger.info('─────────────────────────────────────────────────────────────────');
-      logger.info('  DISCOVERY RESULTS');
-      logger.info('─────────────────────────────────────────────────────────────────');
-      logger.info('');
-
-      if (paginationResult.success && paginationResult.urls.length > 1) {
+      if (paginationResult.success && paginationResult.urls?.length > 1) {
         pageUrls = paginationResult.urls;
+        logger.info(`✓ Found ${pageUrls.length} pages (${paginationResult.paginationType})`);
 
-        logger.info('✓ Pagination discovered successfully');
-        logger.info('');
-        logger.logStats({
-          'Pattern Type': paginationResult.paginationType || 'N/A',
-          'Detection Method': paginationResult.detectionMethod || 'N/A',
-          'Total Pages': paginationResult.totalPages,
-          'Visual Max': paginationResult.visualMaxPage || 'N/A',
-          'True Max': paginationResult.trueMaxPage || 'N/A',
-          'Boundary Confirmed': paginationResult.boundaryConfirmed ? 'YES' : 'NO',
-          'Confidence': `${paginationResult.confidence || 0}/100`,
-          'Discovery Time': `${discoveryTime}s`
-        });
-        logger.info('');
-
-        // Auto-cache high confidence patterns
         if (paginationResult.pattern && paginationResult.confidence >= 70) {
           const domain = new URL(options.url).hostname.replace(/^www\./, '');
-          try {
-            configLoader.saveCachedPattern(domain, paginationResult.pattern);
-            logger.info('✓ Pattern cached for future use');
-            logger.info('');
-          } catch (e) {
-            logger.warn(`Failed to cache pattern: ${e.message}`);
-          }
+          try { configLoader.saveCachedPattern(domain, paginationResult.pattern); } catch (e) { /* ignore */ }
         }
 
         if (options.discoverOnly) {
-          logger.info('═══════════════════════════════════════════════════════════════');
           logger.info('Discovery complete. Exiting (--discover-only mode)');
-          logger.info('═══════════════════════════════════════════════════════════════');
           await browserManager.close();
           process.exit(0);
         }
-      } else if (!paginationResult.success) {
-        logger.warn('✗ Pagination discovery failed');
-        logger.warn(`Error: ${paginationResult.error || 'Unknown error'}`);
-        logger.warn('Falling back to single page scraping');
-        logger.info('');
-        pageUrls = [options.url];
       } else {
-        logger.info('ℹ No pagination detected');
-        logger.info('Site appears to be a single page');
-        logger.info('');
-        pageUrls = [options.url];
+        logger.info('ℹ No pagination detected, using single page');
       }
-    }
 
-    // Reset paginator state before scraping
-    if (paginationEnabled && paginator) {
       paginator.resetSeenContent();
-      logger.info('✓ Paginator state reset for scraping');
     }
 
-    // Load site config if not already loaded (for non-paginated scraping)
-    if (!siteConfig) {
-      siteConfig = configLoader.loadConfig(options.url);
-    }
+    // Determine if infinite scroll is needed
+    const needsSelenium = options.forceSelenium || options.scroll ||
+      config.pagination?.paginationType === 'infinite-scroll' ||
+      config.pagination?.type === 'infinite-scroll';
 
-    // Scrape all pages
-    let allContacts = [];
-    let pageNumber = startPage;
-
-    // Create scraper instance (config-based only)
-    let scraper;
-
-    // Load config file using ConfigLoader (handles v2.3 configs in configs/website-configs/)
-    let loadedConfig = null;
-
-    if (options.config) {
-      // Try to load by config name first (v2.3 style)
-      loadedConfig = configLoader.loadConfigByName(options.config);
-
-      if (!loadedConfig) {
-        // Fallback: try URL-based loading
-        loadedConfig = configLoader.loadConfig(options.url);
-      }
-    } else {
-      // Auto-detect config from URL
-      loadedConfig = configLoader.loadConfig(options.url);
-    }
-
-    if (!loadedConfig) {
-      logger.error(`No config found. Run config generator first:`);
-      logger.error(`  node src/tools/config-generator.js --url "${options.url}"`);
-      process.exit(1);
-    }
-
-    logger.info(`Loaded config: ${loadedConfig.name} (v${loadedConfig.version})`);
-
-    // Determine if this is an infinite scroll page
-    const isInfiniteScroll = options.forceSelenium ||
-                      options.scroll ||
-                      loadedConfig.pagination?.paginationType === 'infinite-scroll' ||
-                      loadedConfig.pagination?.type === 'infinite-scroll';
-
-    if (isInfiniteScroll) {
-      // Initialize Selenium for infinite scroll (PAGE_DOWN is the only method)
-      logger.info('[Orchestrator] Using Selenium for infinite scroll (PAGE_DOWN simulation)');
-
+    if (needsSelenium) {
       seleniumManager = new SeleniumManager(logger);
-      seleniumManagerGlobal = seleniumManager; // Assign to global for signal handlers
+      seleniumManagerGlobal = seleniumManager;
       await seleniumManager.launch(headless);
+      logger.info(`[Orchestrator] Selenium initialized (scrollDelay=${options.scrollDelay || 400}ms)`);
+    }
 
-      // Create Selenium-based InfiniteScrollScraper
-      scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
-        scrollDelay: options.scrollDelay || 400,
-        maxRetries: options.maxRetries || 25,
-        maxScrolls: options.maxScrolls || 1000
-      });
-      scraper.config = loadedConfig;
-      scraper.initializeCardSelector();
+    // Create scraper using factory
+    const { scraper, isInfiniteScroll } = createScraperFromConfig(config, {
+      browserManager, seleniumManager, rateLimiter, logger, configLoader
+    }, {
+      scroll: options.scroll, forceSelenium: options.forceSelenium,
+      scrollDelay: options.scrollDelay, maxRetries: options.maxRetries,
+      maxScrolls: options.maxScrolls, paginate: paginationEnabled, maxPages
+    });
 
-      logger.info(`Selenium scroll config: delay=${options.scrollDelay || 400}ms, maxRetries=${options.maxRetries || 25}`);
+    // Determine scraper type for execution strategy
+    const scraperType = isInfiniteScroll ? 'infinite-scroll' :
+      (config.pagination?.paginationType === 'pagination' ||
+       config.pagination?.paginationType === 'parameter' ||
+       paginationEnabled) ? 'pagination' : 'single-page';
+
+    logger.info(`[Orchestrator] Using scraper type: ${scraperType}`);
+
+    // Execute scraping based on type
+    let allContacts = [];
+
+    if (scraperType === 'pagination') {
+      logger.info('[Orchestrator] PaginationScraper handling all pages internally');
+      const result = await scraper.scrape(options.url, options.limit, paginationResult);
+      allContacts = Array.isArray(result) ? result : (result.contacts || []);
+
+    } else if (scraperType === 'infinite-scroll') {
+      logger.info('[Orchestrator] Using infinite scroll');
+      allContacts = await scraper.scrapeWithScroll(options.url, options.limit, options.maxScrolls || 50);
+
     } else {
-      // Use v2.3 scraper system for non-infinite-scroll pages
-      // Determine pagination type from config or CLI flags
-      let paginationType = loadedConfig.pagination?.paginationType || null;
-
-      if (!paginationType) {
-        if (paginationEnabled) {
-          paginationType = 'pagination';
-        } else {
-          paginationType = 'single-page';
-        }
-      }
-
-      logger.info(`[Orchestrator] Using scraper type: ${paginationType}`);
-
-      // Import PaginationScraper for paginated pages
-      const { PaginationScraper, SinglePageScraper } = require('./src/scrapers/config-scrapers');
-
-      if (paginationType === 'pagination' || paginationType === 'parameter') {
-        // Use PaginationScraper for paginated pages
-        // PaginationScraper handles all pages internally, so we pass the discovery results
-        scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, {
-          maxPages: maxPages,
-          pageDelay: 2000
-        });
-        scraper.config = loadedConfig;
-        scraper.initializeCardSelector();  // Required when setting config directly
-        logger.info('[Orchestrator] Created PaginationScraper');
-
-        // PaginationScraper handles pagination internally
-        // Pass discovery results to avoid re-discovery
-        logger.info('[Orchestrator] PaginationScraper will handle all pages internally');
-        const result = await scraper.scrape(options.url, options.limit, paginationResult);
-        allContacts = Array.isArray(result) ? result : (result.contacts || []);
-
-        // Skip the page loop since PaginationScraper handled everything
-        // Jump to post-processing
-      } else {
-        // Use SinglePageScraper for single-page sites
-        scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
-        scraper.config = loadedConfig;
-        scraper.initializeCardSelector();  // Required when setting config directly
-        logger.info('[Orchestrator] Created SinglePageScraper');
-      }
+      logger.info('[Orchestrator] Single page scrape');
+      const result = await scraper.scrape(options.url, options.limit);
+      allContacts = Array.isArray(result) ? result : (result.contacts || []);
     }
 
-    // Loop through all pages (only for infinite scroll or single-page)
-    // PaginationScraper already processed all pages above
-    const skipPageLoop = !isInfiniteScroll && (loadedConfig.pagination?.paginationType === 'pagination' ||
-                                                loadedConfig.pagination?.paginationType === 'parameter' ||
-                                                paginationEnabled);
-
-    if (!skipPageLoop) {
-      for (let i = 0; i < pageUrls.length; i++) {
-        const pageUrl = pageUrls[i];
-        const currentPage = pageNumber + i;
-
-        if (pageUrls.length > 1) {
-          logger.info('');
-          logger.info(`${'='.repeat(50)}`);
-          logger.info(`Scraping page ${currentPage} of ${pageUrls.length}`);
-          logger.info(`URL: ${pageUrl}`);
-          logger.info(`${'='.repeat(50)}`);
-        }
-
-        try {
-          // Scrape the page
-          let pageContacts;
-
-          if (isInfiniteScroll) {
-            // Use scroll-based scraping for infinite scroll
-            pageContacts = await scraper.scrapeWithScroll(pageUrl, options.limit, options.maxScrolls || 50);
-          } else {
-            // Use scrape() for single-page
-            const result = await scraper.scrape(pageUrl, options.limit);
-            // scrape() returns { contacts, ... } object, extract contacts array
-            pageContacts = Array.isArray(result) ? result : (result.contacts || []);
-          }
-
-          // Add to all contacts FIRST (before any break conditions)
-          allContacts = allContacts.concat(pageContacts);
-
-          // Validate page content if paginating (for pagination continuation decision)
-          if (paginationEnabled && pageUrls.length > 1) {
-            const page = await browserManager.getPage();
-            const validation = await paginator.validatePage(page);
-
-            // Skip duplicate check for first page (already validated during discovery)
-            if (i > 0 && paginator.isDuplicateContent(validation.contentHash)) {
-              logger.warn(`Page ${currentPage} has duplicate content - stopping pagination`);
-              break;
-            }
-
-            // Mark content as seen
-            paginator.markContentAsSeen(validation.contentHash);
-
-            // Check minimum contacts threshold
-            if (pageContacts.length < minContacts) {
-              logger.warn(`Page ${currentPage} has only ${pageContacts.length} contacts (minimum: ${minContacts}) - stopping pagination`);
-              break;
-            }
-
-            logger.info(`Page ${currentPage}: Found ${pageContacts.length} contacts`);
-          }
-
-          // Respect rate limiting between pages
-          if (i < pageUrls.length - 1) {
-            await rateLimiter.waitBeforeRequest();
-          }
-
-        } catch (error) {
-          logger.error(`Error scraping page ${currentPage}: ${error.message}`);
-
-          // For pagination, decide whether to continue or stop
-          if (paginationEnabled && pageUrls.length > 1) {
-            logger.warn(`Skipping page ${currentPage} and continuing with next page`);
-            continue;
-          } else {
-            throw error;
-          }
-        }
-      }
-    }
-
-    // Deduplicate contacts across all pages (by email)
-    const uniqueContactsMap = new Map();
+    // Deduplicate contacts
+    const uniqueMap = new Map();
     for (const contact of allContacts) {
       const key = contact.email || `${contact.name}_${contact.phone}`;
-      if (!uniqueContactsMap.has(key)) {
-        uniqueContactsMap.set(key, contact);
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, contact);
       } else {
-        // Keep the one with more complete information
-        const existing = uniqueContactsMap.get(key);
-        const existingComplete = (existing.name ? 1 : 0) + (existing.email ? 1 : 0) + (existing.phone ? 1 : 0);
-        const newComplete = (contact.name ? 1 : 0) + (contact.email ? 1 : 0) + (contact.phone ? 1 : 0);
-        if (newComplete > existingComplete) {
-          uniqueContactsMap.set(key, contact);
-        }
+        const existing = uniqueMap.get(key);
+        const existingScore = (existing.name ? 1 : 0) + (existing.email ? 1 : 0) + (existing.phone ? 1 : 0);
+        const newScore = (contact.name ? 1 : 0) + (contact.email ? 1 : 0) + (contact.phone ? 1 : 0);
+        if (newScore > existingScore) uniqueMap.set(key, contact);
       }
     }
+    const contacts = Array.from(uniqueMap.values());
 
-    const contacts = Array.from(uniqueContactsMap.values());
+    // Log results using stats reporter
+    logScrapingStats(contacts, logger, { paginationEnabled, pageUrls, allContacts });
+    const domainStats = logDomainStats(contacts, domainExtractor, logger);
+    logSampleContacts(contacts, logger, 5);
 
-    // Post-process contacts
-    const processedContacts = contacts;
-    
-    // NEW: Generate domain statistics
-    logger.info('Analyzing domain distribution...');
-    const domainStats = domainExtractor.getDomainStats(processedContacts);
-    
-    // Log statistics
-    logger.info('');
-    logger.info('═══════════════════════════════════════');
-    logger.info('  SCRAPING COMPLETE');
-    logger.info('═══════════════════════════════════════');
-
-    const stats = {
-      'Total Contacts': processedContacts.length,
-      'With Email': processedContacts.filter(c => c.email).length,
-      'With Phone': processedContacts.filter(c => c.phone).length,
-      'With Both': processedContacts.filter(c => c.email && c.phone).length,
-      'Complete (Name+Email+Phone)': processedContacts.filter(c => c.name && c.email && c.phone).length,
-      'High Confidence': processedContacts.filter(c => c.confidence === 'high').length,
-      'Medium Confidence': processedContacts.filter(c => c.confidence === 'medium').length,
-      'Low Confidence': processedContacts.filter(c => c.confidence === 'low').length,
-      'From HTML': processedContacts.filter(c => c.source === 'html').length,
-      'From PDF': processedContacts.filter(c => c.source === 'pdf').length,
-      'Merged': processedContacts.filter(c => c.source === 'merged').length
-    };
-
-    // Add pagination stats if applicable
-    if (paginationEnabled && pageUrls.length > 1) {
-      stats['Pages Scraped'] = pageUrls.length;
-      stats['Total Extracted'] = allContacts.length;
-      stats['Duplicates Removed'] = allContacts.length - processedContacts.length;
-    }
-
-    logger.logStats(stats);
-    logger.info('');
-    
-    // NEW: Log domain statistics
-    logger.info('═══════════════════════════════════════');
-    logger.info('  DOMAIN ANALYSIS');
-    logger.info('═══════════════════════════════════════');
-    logger.logStats({
-      'Unique Domains': domainStats.uniqueDomains,
-      'Business Domains': domainStats.businessDomains,
-      'Business Emails': domainStats.businessEmailCount,
-      'Personal Emails': domainStats.personalEmailCount,
-      'Business Email %': domainStats.withEmail > 0 
-        ? `${((domainStats.businessEmailCount / domainStats.withEmail) * 100).toFixed(1)}%` 
-        : '0.0%'
-    });
-    logger.info('');
-    
-    // NEW: Display top domains table
-    if (domainStats.topDomains.length > 0) {
-      logger.info('Top Domains (all):');
-      const domainTable = new Table({
-        head: ['Domain', 'Count', '%', 'Type'],
-        colWidths: [35, 10, 10, 12],
-        wordWrap: true
-      });
-      
-      domainStats.topDomains.slice(0, 5).forEach(item => {
-        const isBusiness = domainExtractor.isBusinessDomain(item.domain);
-        domainTable.push([
-          item.domain,
-          item.count,
-          item.percentage + '%',
-          isBusiness ? 'Business' : 'Personal'
-        ]);
-      });
-      
-      console.log(domainTable.toString());
-      logger.info('');
-    }
-    
-    // NEW: Display top business domains table
-    if (domainStats.topBusinessDomains.length > 0) {
-      logger.info('Top Business Domains:');
-      const businessDomainTable = new Table({
-        head: ['Domain', 'Count', '% of Business'],
-        colWidths: [40, 10, 18],
-        wordWrap: true
-      });
-      
-      domainStats.topBusinessDomains.slice(0, 5).forEach(item => {
-        businessDomainTable.push([
-          item.domain,
-          item.count,
-          item.percentage + '%'
-        ]);
-      });
-      
-      console.log(businessDomainTable.toString());
-      logger.info('');
-    }
-    
-    // Display sample contacts in table
-    if (processedContacts.length > 0) {
-      logger.info('Sample Contacts (first 5):');
-      const table = new Table({
-        head: ['Name', 'Email', 'Phone', 'Domain', 'Type'],
-        colWidths: [20, 25, 18, 20, 10],
-        wordWrap: true
-      });
-      
-      processedContacts.slice(0, 5).forEach(contact => {
-        table.push([
-          contact.name || 'N/A',
-          contact.email || 'N/A',
-          contact.phone || 'N/A',
-          contact.domain || 'N/A',
-          contact.domainType || 'N/A'
-        ]);
-      });
-      
-      console.log(table.toString());
-      logger.info('');
-    }
-    
     // Save to JSON
     const outputDir = path.join(process.cwd(), 'output');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-    
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outputFile = path.join(outputDir, `contacts-${timestamp}.json`);
-    
-    // NEW: Include domain statistics in output file
+
     const outputData = {
       metadata: {
         scrapedAt: new Date().toISOString(),
         url: options.url,
-        totalContacts: processedContacts.length,
+        totalContacts: contacts.length,
         domainStats: {
           uniqueDomains: domainStats.uniqueDomains,
           businessDomains: domainStats.businessDomains,
-          personalDomains: domainStats.personalEmailCount,
           businessEmailCount: domainStats.businessEmailCount,
           personalEmailCount: domainStats.personalEmailCount,
           topDomains: domainStats.topDomains.slice(0, 10),
           topBusinessDomains: domainStats.topBusinessDomains.slice(0, 10)
         }
       },
-      contacts: processedContacts
+      contacts
     };
-    
-    fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2));
 
+    fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2));
     logger.info(`Contacts saved to: ${outputFile}`);
-    logger.info('');
 
     // Google Sheets export
     if (options.export !== false) {
       const sheetsExporter = new GoogleSheetsExporter(logger);
-
       if (sheetsExporter.isConfigured()) {
         try {
-          logger.info('Exporting to Google Sheets...');
           const sheetName = await sheetsExporter.exportFromJson(outputFile);
-          if (sheetName) {
-            logger.info(`Exported to Google Sheets: "${sheetName}"`);
-          }
+          if (sheetName) logger.info(`Exported to Google Sheets: "${sheetName}"`);
         } catch (error) {
           logger.warn(`Google Sheets export failed: ${error.message}`);
-          logger.warn('Continuing without export. JSON file was saved successfully.');
         }
-      } else {
-        logger.debug('Google Sheets not configured. Skipping export.');
-        logger.debug('Set GOOGLE_SHEETS_CLIENT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, and GOOGLE_SHEETS_SPREADSHEET_ID in .env to enable.');
       }
     }
 
-    // Close browsers
-    if (browserManager) {
-      await browserManager.close();
-    }
-    if (seleniumManager) {
-      await seleniumManager.close();
-    }
-
+    await cleanup();
     logger.info('Scraping completed successfully');
     process.exit(0);
 
   } catch (error) {
     if (error.message === 'CAPTCHA_DETECTED') {
-      logger.error('CAPTCHA detected! The site is blocking automated access.');
-      logger.error(`URL: ${options.url}`);
-      logger.info('Suggestions:');
-      logger.info('  1. Try running with --headless false to solve CAPTCHA manually');
-      logger.info('  2. Increase delays with --delay option');
-      logger.info('  3. Try a different URL or subdomain');
+      logger.error('CAPTCHA detected! Try --headless false to solve manually.');
     } else {
       logger.error('Fatal error:', error);
     }
-
-    if (browserManager) {
-      await browserManager.close();
-    }
-    if (seleniumManager) {
-      await seleniumManager.close();
-    }
-
+    await cleanup();
     process.exit(1);
   }
 }
 
-// Handle graceful shutdown with proper browser cleanup
-let browserManagerGlobal = null;
-let seleniumManagerGlobal = null;
-
-process.on('SIGINT', async () => {
-  logger.warn('Received SIGINT, shutting down gracefully...');
-  if (browserManagerGlobal) {
-    try {
-      await browserManagerGlobal.close();
-    } catch (error) {
-      logger.error(`Error closing browser during SIGINT: ${error.message}`);
-    }
-  }
-  if (seleniumManagerGlobal) {
-    try {
-      await seleniumManagerGlobal.close();
-    } catch (error) {
-      logger.error(`Error closing Selenium during SIGINT: ${error.message}`);
-    }
-  }
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  logger.warn('Received SIGTERM, shutting down gracefully...');
-  if (browserManagerGlobal) {
-    try {
-      await browserManagerGlobal.close();
-    } catch (error) {
-      logger.error(`Error closing browser during SIGTERM: ${error.message}`);
-    }
-  }
-  if (seleniumManagerGlobal) {
-    try {
-      await seleniumManagerGlobal.close();
-    } catch (error) {
-      logger.error(`Error closing Selenium during SIGTERM: ${error.message}`);
-    }
-  }
-  process.exit(0);
-});
-
-// Run main
 main();

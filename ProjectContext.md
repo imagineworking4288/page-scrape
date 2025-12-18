@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 18, 2025 (v3.0 cleanup - removed 8 dead code files)
+**Last Updated**: December 18, 2025 (orchestrator refactoring - 55% line reduction)
 
 ---
 
@@ -159,6 +159,7 @@ page-scrape/
 │   │   ├── profile-visitor.js  # Profile page enrichment
 │   │   ├── google-sheets-exporter.js # Google Sheets export
 │   │   ├── prompt-helper.js    # Terminal prompt utilities (y/n, tables, headers)
+│   │   ├── stats-reporter.js   # Scraping stats and table formatting
 │   │   └── constants.js        # Shared constants
 │   │
 │   └── tools/                  # Development/utility tools
@@ -1591,6 +1592,39 @@ node analyze-dependencies.js --json > dependency-analysis.json
 
 **Verification**: All CLI tools, module imports, and test suites pass after cleanup.
 
+### Orchestrator Refactoring (December 2025)
+
+**Summary**: Reduced `orchestrator.js` from 752 lines to 342 lines (55% reduction) by extracting utilities and eliminating code smells.
+
+**Code Smells Eliminated**:
+| Problem | Solution |
+|---------|----------|
+| Dual config variables (`siteConfig` AND `loadedConfig`) | Single `config` variable loaded once |
+| Scattered scraper selection logic (~50 lines) | `createScraperFromConfig()` factory in config-scrapers/index.js |
+| Confusing `skipPageLoop` variable | Clear `scraperType` switch/case (`pagination`, `infinite-scroll`, `single-page`) |
+| 70 lines inline stats/table formatting | Extracted to `src/utils/stats-reporter.js` |
+| Duplicate signal handler code | Single `cleanup()` function |
+
+**Files Created**:
+- `src/utils/stats-reporter.js` - Exports `logScrapingStats()`, `logDomainStats()`, `logSampleContacts()`
+
+**Files Modified**:
+- `src/scrapers/config-scrapers/index.js` - Added `createScraperFromConfig(config, managers, options)`
+- `orchestrator.js` - Refactored to use new utilities
+
+**New Factory Function**:
+```javascript
+const { createScraperFromConfig } = require('./src/scrapers/config-scrapers');
+
+const { scraper, isInfiniteScroll } = createScraperFromConfig(config, {
+  browserManager, seleniumManager, rateLimiter, logger, configLoader
+}, {
+  scroll, forceSelenium, scrollDelay, maxRetries, maxScrolls, paginate, maxPages
+});
+```
+
+**Verification**: All 109 unit tests pass, CLI tools work correctly.
+
 ### Module Organization (December 2025 Cleanup)
 
 The project uses canonical module paths:
@@ -1615,6 +1649,7 @@ The project uses canonical module paths:
 - `profile-visitor.js` - Profile page enrichment
 - `google-sheets-exporter.js` - Google Sheets export
 - `prompt-helper.js` - Terminal prompt utilities (y/n, tables, headers)
+- `stats-reporter.js` - Scraping stats and domain analysis table formatting
 - `constants.js` - Shared constants
 
 **Features** (`src/features/`):

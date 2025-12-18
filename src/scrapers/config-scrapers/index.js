@@ -248,11 +248,55 @@ async function diagnosePagination(page, browserManager, rateLimiter, logger, con
   return diagnosis;
 }
 
+/**
+ * Create appropriate scraper based on config and CLI options
+ * @param {Object} config - Loaded site config
+ * @param {Object} managers - { browserManager, seleniumManager, rateLimiter, logger, configLoader }
+ * @param {Object} options - { scroll, forceSelenium, scrollDelay, maxRetries, maxScrolls, paginate, maxPages }
+ * @returns {Object} { scraper, isInfiniteScroll }
+ */
+function createScraperFromConfig(config, managers, options = {}) {
+  const { browserManager, seleniumManager, rateLimiter, logger, configLoader } = managers;
+
+  const isInfiniteScroll = options.forceSelenium ||
+    options.scroll ||
+    config.pagination?.paginationType === 'infinite-scroll' ||
+    config.pagination?.type === 'infinite-scroll';
+
+  let scraper;
+
+  if (isInfiniteScroll) {
+    if (!seleniumManager) {
+      throw new Error('SeleniumManager is required for infinite-scroll scraping');
+    }
+    scraper = new InfiniteScrollScraper(seleniumManager, rateLimiter, logger, {
+      scrollDelay: options.scrollDelay || 400,
+      maxRetries: options.maxRetries || 25,
+      maxScrolls: options.maxScrolls || 1000
+    });
+  } else if (config.pagination?.paginationType === 'pagination' ||
+             config.pagination?.paginationType === 'parameter' ||
+             options.paginate) {
+    scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, {
+      maxPages: options.maxPages || 200,
+      pageDelay: 2000
+    });
+  } else {
+    scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
+  }
+
+  scraper.config = config;
+  scraper.initializeCardSelector();
+
+  return { scraper, isInfiniteScroll };
+}
+
 module.exports = {
   BaseConfigScraper,
   InfiniteScrollScraper,
   PaginationScraper,
   SinglePageScraper,
   createScraper,
+  createScraperFromConfig,
   diagnosePagination
 };
