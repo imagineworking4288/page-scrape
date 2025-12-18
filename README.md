@@ -383,9 +383,8 @@ page-scrape/
 │   ├── workflows/              # High-level orchestrators
 │   │   └── full-pipeline.js    # Full pipeline workflow
 │   │
-│   ├── scrapers/               # Scraping implementations
-│   │   ├── config-scraper.js   # Main config-based scraper
-│   │   └── config-scrapers/    # Specialized scrapers
+│   ├── scrapers/               # Scraping implementations (v2.3)
+│   │   └── config-scrapers/    # v2.3 config-based scrapers
 │   │       ├── infinite-scroll-scraper.js
 │   │       ├── pagination-scraper.js
 │   │       └── single-page-scraper.js

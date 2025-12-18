@@ -259,7 +259,7 @@ async function testPagination(url, opts) {
 
     // Navigate to URL
     displayInfo('Navigating to URL...');
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Create pattern detector
     const patternDetector = new PatternDetector(opts.verbose ? logger : {

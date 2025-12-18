@@ -245,7 +245,7 @@ class BinarySearcher {
       this.logger.debug(`[BinarySearcher] Testing page ${pageNum}: ${pageUrl}`);
 
       await page.goto(pageUrl, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'domcontentloaded',
         timeout: 30000
       });
 

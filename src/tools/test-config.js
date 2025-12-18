@@ -117,7 +117,7 @@ async function testConfig(configPath, options = {}) {
 
   console.log(`\n${colors.bright}Navigating to: ${url}${colors.reset}`);
   try {
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   } catch (error) {
     console.error(`${colors.red}Navigation failed: ${error.message}${colors.reset}`);
     await browser.close();

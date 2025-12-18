@@ -127,7 +127,7 @@ class ProfileVisitor {
       try {
         // Navigate to profile page
         await page.goto(url, {
-          waitUntil: 'networkidle2',
+          waitUntil: 'domcontentloaded',
           timeout: this.settings.navigationTimeout
         });
 

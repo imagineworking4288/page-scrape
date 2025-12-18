@@ -495,33 +495,6 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
 - `NAME_REGEX` - Name validation pattern
 - `CARD_SELECTORS` - Array of contact card CSS selectors
 
-#### src/scrapers/config-scraper.js
-
-**⚠️ DEPRECATED** (December 2025): Use v2.3 scrapers from `src/scrapers/config-scrapers/` instead.
-
-**Purpose**: Legacy scraper that uses site-specific configs. Kept for backwards compatibility.
-
-**Extends**: BaseScraper
-
-**Why Deprecated**:
-- Looks for configs in wrong location (`configs/` instead of `configs/website-configs/`)
-- Doesn't support v2.3 config format properly
-- All CLI paths now route through v2.3 system via `createScraper()` factory
-
-**Use Instead**:
-```javascript
-const { PaginationScraper, SinglePageScraper, InfiniteScrollScraper } = require('./src/scrapers/config-scrapers');
-```
-
-**Key Methods** (legacy):
-- `scrape(url, limit, keepPdf, sourcePage, sourceUrl)` - Orchestrated extraction
-- `extractWithMultipleMethods(page, config)` - Priority-based extraction
-- `extractWithDOMContainers(page, config)` - Container-based extraction
-- `extractWithCardPattern(page, config)` - Card pattern extraction
-- `extractWithProfile(page, contact, config)` - Profile enrichment
-
----
-
 ### src/scrapers/config-scrapers/ (v2.3 Config-Based Scrapers)
 
 #### src/scrapers/config-scrapers/index.js
@@ -1493,27 +1466,27 @@ node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 4. **Memory leaks**: Mitigated by page recycling every 50 navigations
 5. **Config not found**: Ensure config is in `configs/website-configs/` directory with hyphenated domain name (e.g., `domain-com.json`)
 
-### December 2025 v2.3 Modernization
+### December 2025 v2.3 Modernization (COMPLETE)
 
 All code paths now use v2.3 scrapers exclusively:
 - `SinglePageScraper` for single-page sites
 - `PaginationScraper` for paginated sites
 - `InfiniteScrollScraper` for infinite scroll sites
 
-The legacy `ConfigScraper` is deprecated and kept only for backward compatibility.
+**v3.0 Status**: Legacy `ConfigScraper` has been removed. See "V3.0 Cleanup" in Architecture Notes.
 
 **Files Updated**:
-- `src/scrapers/index.js` - Now exports v2.3 scrapers as primary
+- `src/scrapers/index.js` - v2.3 scrapers only (ConfigScraper removed)
 - `src/tools/validate-config.js` - Uses SinglePageScraper/PaginationScraper
 - `src/workflows/full-pipeline.js` - Uses SinglePageScraper/PaginationScraper
 
-### December 2025 Config Generator Browser Fix
+### December 2025 Config Generator Browser Fix (FIXED)
+
+**Status**: RESOLVED
 
 **Issue**: Browser was closing immediately after config save/validation instead of staying open.
 
-**Cause**: Multiple handlers (`handleSaveRequested`, `handleConfirmAndGenerate`, `handleStartScraping`) were calling `resolveSession()` which ended the session and closed the browser.
-
-**Fix**: Removed `resolveSession()` calls from these handlers. Now only `handleFinalSaveAndClose()` (triggered by "Save & Close" button) resolves the session.
+**Fix Applied**: Removed `resolveSession()` calls from handlers. Now only `handleFinalSaveAndClose()` (triggered by "Save & Close" button) resolves the session.
 
 **Expected Flow**:
 1. User creates config, clicks "Save"
@@ -1521,53 +1494,34 @@ The legacy `ConfigScraper` is deprecated and kept only for backward compatibilit
 3. Config Preview Panel shown with results
 4. **Browser stays open**
 5. User clicks "Save & Close"
-6. `handleFinalSaveAndClose()` resolves session
-7. Browser closes
+6. Browser closes
 
-**Files Updated**:
-- `src/tools/lib/interactive-session.js` - Removed early `resolveSession()` calls, uses SinglePageScraper
+**File**: `src/tools/lib/interactive-session.js`
 
-### December 2025 Validation Navigation Fix
+### December 2025 Validation Navigation Fix (FIXED)
+
+**Status**: RESOLVED
 
 **Issue**: Clicking "Validate Data" in the config generator overlay caused the page to navigate/reload, destroying the overlay UI.
 
-**Cause**: Both `SinglePageScraper.scrape()` and `PaginationScraper.scrape()` called `page.goto()` which navigated away from the current page, destroying all injected DOM elements including the overlay.
-
-**Fix**: Added `skipNavigation` option to scrapers to extract from current DOM without navigating:
+**Fix Applied**: Added `skipNavigation` option to scrapers to extract from current DOM without navigating:
 
 ```javascript
 // SinglePageScraper and PaginationScraper now support:
 async scrape(url, limit = 0, options = {}) {
   const { skipNavigation = false } = options;
-
   if (skipNavigation) {
     // Extract from current page DOM without navigating
-    await page.evaluate(() => window.scrollTo(0, 0));
-    // ... continue with extraction
   } else {
-    // Normal behavior: navigate to URL first
-    await page.goto(url, { waitUntil: 'networkidle2' });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
   }
 }
 ```
 
-**Usage in Validation Handler**:
-```javascript
-// interactive-session.js - handleValidateData()
-const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT, { skipNavigation: true });
-```
-
-**Files Updated**:
-- `src/scrapers/config-scrapers/single-page-scraper.js` - Added `skipNavigation` option
-- `src/scrapers/config-scrapers/pagination-scraper.js` - Added `skipNavigation` option (backward compatible)
-- `src/tools/lib/interactive-session.js` - Validation uses `skipNavigation: true`
-
-**Expected Behavior**:
-1. User clicks "Validate Data" button
-2. Overlay UI stays visible (no page reload)
-3. Extraction runs against current DOM
-4. Validation results display in overlay modal
-5. User can continue interacting with overlay
+**Files**:
+- `src/scrapers/config-scrapers/single-page-scraper.js`
+- `src/scrapers/config-scrapers/pagination-scraper.js`
+- `src/tools/lib/interactive-session.js`
 
 ### December 2025 Dependency Analyzer
 
@@ -1587,20 +1541,16 @@ node analyze-dependencies.js --json > dependency-analysis.json
 **Features**:
 - Traces imports from all entry points (orchestrator, tools, tests, workflows)
 - Identifies dead code (files never imported)
-- Detects deprecated patterns:
-  - `ConfigScraper` class usage
-  - `config-scraper.js` imports
-  - `loadConfig(url)` pattern
-  - `networkidle0` wait strategy
+- Detects deprecated patterns
 - Tracks class definitions and instantiations
 - Finds circular dependencies
 - Generates recommendations with severity levels
 
-**Latest Analysis Results** (December 2025):
-- ConfigScraper is NOT being instantiated (good!)
+**Latest Analysis Results** (December 2025 - Post v3.0 Cleanup):
+- ConfigScraper has been REMOVED (v3.0 cleanup complete)
 - v2.3 scrapers (SinglePageScraper, PaginationScraper, InfiniteScrollScraper) are active
-- ~20 unused index/barrel files identified for cleanup
-- 4 remaining `networkidle0` usages in pagination code (low priority)
+- 8 dead code files removed
+- All `networkidle0`/`networkidle2` replaced with `domcontentloaded`
 
 ---
 
@@ -1608,7 +1558,7 @@ node analyze-dependencies.js --json > dependency-analysis.json
 
 ### V3.0 Cleanup (December 2025)
 
-**Summary**: Removed 8 dead code files identified by dependency analysis. All functionality preserved.
+**Summary**: Removed 8 dead code files identified by dependency analysis. Replaced all `networkidle0`/`networkidle2` with `domcontentloaded`. All functionality preserved.
 
 **Removed Files (8)**:
 
@@ -1623,8 +1573,9 @@ node analyze-dependencies.js --json > dependency-analysis.json
 | `src/extraction/multi-method-extractor.js` | Only used by deprecated ConfigScraper |
 | `src/scrapers/config-scraper.js` | Deprecated v2.2 scraper - replaced by v2.3 scrapers |
 
-**Updated Files (1)**:
+**Updated Files**:
 - `src/scrapers/index.js` - Removed ConfigScraper require and export
+- All navigation files - Replaced `networkidle0`/`networkidle2` with `domcontentloaded` (14 occurrences in 10 files)
 
 **Verified KEEP (not dead code)**:
 - `src/core/index.js` - Used by full-pipeline.js, validate-config.js, test-navigation.js

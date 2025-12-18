@@ -560,7 +560,7 @@ class PatternDetector {
       // Wait for navigation
       try {
         await Promise.race([
-          page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }),
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
           page.waitForTimeout(5000)
         ]);
       } catch (e) {
@@ -581,7 +581,7 @@ class PatternDetector {
 
       // Navigate back to page 1
       try {
-        await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+        await page.goto(url1, { waitUntil: 'domcontentloaded', timeout: 10000 });
       } catch (e) {
         this.logger.warn('[PatternDetector] Failed to navigate back to first page');
       }

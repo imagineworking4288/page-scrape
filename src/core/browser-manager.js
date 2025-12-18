@@ -132,7 +132,7 @@ class BrowserManager {
       this._log('info', `Navigating to: ${url}`);
 
       await this.page.goto(url, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded',
         timeout: timeout
       });
 

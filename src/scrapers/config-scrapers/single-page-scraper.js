@@ -46,7 +46,7 @@ class SinglePageScraper extends BaseConfigScraper {
         // Navigate to URL
         this.logger.info('[SinglePageScraper] Navigating to page...');
         await page.goto(url, {
-          waitUntil: 'networkidle2',
+          waitUntil: 'domcontentloaded',
           timeout: 30000
         });
 

@@ -57,7 +57,7 @@ class Paginator {
       const page = await this.browserManager.getPage();
       await this.rateLimiter.waitBeforeRequest();
 
-      await page.goto(url, { waitUntil: 'networkidle0', timeout });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
 
       // NEW: Validate we're on the correct starting URL
       const currentUrl = page.url();
@@ -460,7 +460,7 @@ class Paginator {
       // Wait for navigation with timeout handling
       try {
         await Promise.race([
-          page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }),
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
           page.waitForTimeout(5000) // Fallback for AJAX pagination
         ]);
       } catch (e) {
@@ -483,7 +483,7 @@ class Paginator {
 
       // Navigate back to page 1
       try {
-        await page.goto(url1, { waitUntil: 'networkidle0', timeout: 10000 });
+        await page.goto(url1, { waitUntil: 'domcontentloaded', timeout: 10000 });
       } catch (e) {
         this.logger.warn('[Paginator] Failed to navigate back to first page');
       }
@@ -1030,7 +1030,7 @@ class Paginator {
 
       // Navigate to page
       await page.goto(pageUrl, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'domcontentloaded',
         timeout: 30000
       });
 

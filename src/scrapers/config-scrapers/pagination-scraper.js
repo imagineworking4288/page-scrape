@@ -96,7 +96,7 @@ class PaginationScraper extends BaseConfigScraper {
       const currentUrl = page.url();
       if (currentUrl !== url) {
         await page.goto(url, {
-          waitUntil: 'networkidle2',
+          waitUntil: 'domcontentloaded',
           timeout: 30000
         });
       }
@@ -121,7 +121,7 @@ class PaginationScraper extends BaseConfigScraper {
         if (i > 0) {
           try {
             await page.goto(pageUrl, {
-              waitUntil: 'networkidle2',
+              waitUntil: 'domcontentloaded',
               timeout: 30000
             });
           } catch (error) {
@@ -233,7 +233,7 @@ class PaginationScraper extends BaseConfigScraper {
     const currentUrl = page.url();
     if (currentUrl !== url) {
       await page.goto(url, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded',
         timeout: 30000
       });
     }

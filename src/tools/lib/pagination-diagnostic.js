@@ -255,7 +255,7 @@ class PaginationDiagnostic {
     const pageUrl = this.paginator._generateSinglePageUrl(pattern, pageNum);
 
     // Navigate and validate
-    await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const validation = await this.paginator.validatePage(page);
 
     return {
