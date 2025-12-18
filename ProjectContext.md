@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 18, 2025 (Added dependency analyzer for v3.0 cleanup planning)
+**Last Updated**: December 18, 2025 (v3.0 cleanup - removed 8 dead code files)
 
 ---
 
@@ -87,8 +87,6 @@ page-scrape/
 │   └── website-configs/        # Website-specific configs (domain-named)
 │       └── {domain}.json       # e.g., sullcrom-com.json
 ├── src/
-│   ├── index.js                # Main module index (unified imports)
-│   │
 │   ├── core/                   # Core infrastructure
 │   │   ├── index.js            # Core exports
 │   │   ├── browser-manager.js  # Puppeteer browser handling
@@ -104,13 +102,10 @@ page-scrape/
 │   │   └── pagination-patterns.js # Pagination parameter names (page, offset, etc.)
 │   │
 │   ├── config/                 # Configuration management
-│   │   ├── index.js            # Config exports
 │   │   ├── config-loader.js    # Config file loading/validation
 │   │   └── schemas.js          # v2.3 schema definitions
 │   │
 │   ├── extraction/             # Field extraction system
-│   │   ├── index.js            # Extraction exports
-│   │   ├── multi-method-extractor.js  # Multi-method runtime extractor
 │   │   ├── smart-field-extractor.js   # Smart field detection
 │   │   └── extractors/         # Individual field extractors
 │   │       ├── index.js        # Extractor exports
@@ -122,9 +117,8 @@ page-scrape/
 │   │       └── coordinate-extractor.js # Coordinate extraction
 │   │
 │   ├── scrapers/               # Core scraping implementations
-│   │   ├── index.js            # Scraper exports (v2.3 scrapers preferred)
+│   │   ├── index.js            # Scraper exports (v2.3 only, ConfigScraper removed)
 │   │   ├── base-scraper.js     # Abstract base class
-│   │   ├── config-scraper.js   # DEPRECATED - Legacy scraper (use config-scrapers/)
 │   │   └── config-scrapers/    # v2.3 Scrapers (PREFERRED)
 │   │       ├── index.js        # Factory (createScraper) and exports
 │   │       ├── base-config-scraper.js     # Base class for v2.3 configs
@@ -133,16 +127,13 @@ page-scrape/
 │   │       └── pagination-scraper.js      # Traditional pagination
 │   │
 │   ├── features/
-│   │   ├── index.js            # Features exports
 │   │   ├── pagination/         # Pagination subsystem
-│   │   │   ├── index.js        # Exports
 │   │   │   ├── paginator.js    # Main pagination orchestrator
 │   │   │   ├── pattern-detector.js # Pattern discovery
 │   │   │   ├── binary-searcher.js  # True max page finder
 │   │   │   └── url-generator.js    # Page URL generation
 │   │   │
 │   │   └── enrichment/         # Profile enrichment system
-│   │       ├── index.js        # Exports
 │   │       ├── profile-enricher.js  # Main enrichment orchestrator
 │   │       ├── profile-extractor.js # Profile page extraction
 │   │       ├── field-comparator.js  # Field comparison logic
@@ -1615,6 +1606,40 @@ node analyze-dependencies.js --json > dependency-analysis.json
 
 ## Architecture Notes
 
+### V3.0 Cleanup (December 2025)
+
+**Summary**: Removed 8 dead code files identified by dependency analysis. All functionality preserved.
+
+**Removed Files (8)**:
+
+| File | Reason |
+|------|--------|
+| `src/index.js` | Unused barrel export - no importers |
+| `src/config/index.js` | Unused barrel export - only imported by src/index.js |
+| `src/features/index.js` | Unused barrel export - only imported by src/index.js |
+| `src/features/enrichment/index.js` | Unused barrel export - only imported by src/features/index.js |
+| `src/features/pagination/index.js` | Unused barrel export - only imported by src/features/index.js |
+| `src/extraction/index.js` | Unused barrel export - only imported by deleted files |
+| `src/extraction/multi-method-extractor.js` | Only used by deprecated ConfigScraper |
+| `src/scrapers/config-scraper.js` | Deprecated v2.2 scraper - replaced by v2.3 scrapers |
+
+**Updated Files (1)**:
+- `src/scrapers/index.js` - Removed ConfigScraper require and export
+
+**Verified KEEP (not dead code)**:
+- `src/core/index.js` - Used by full-pipeline.js, validate-config.js, test-navigation.js
+- `src/tools/lib/card-matcher.js` - Used by interactive-session.js (config generator)
+- `src/tools/assets/overlay-client.js` - Loaded dynamically via fs.readFileSync
+- `tests/run-navigation-tests.js` - Working test runner
+- `tests/navigation/*.js` - Working navigation tests
+
+**NOT Touched**:
+- `configs/` folder - All configs preserved
+- `configs/website-configs/` - All website configs preserved
+- `src/config/config-loader.js` - Unchanged, fully functional
+
+**Verification**: All CLI tools, module imports, and test suites pass after cleanup.
+
 ### Module Organization (December 2025 Cleanup)
 
 The project uses canonical module paths:
@@ -1631,7 +1656,6 @@ The project uses canonical module paths:
 
 **Extraction** (`src/extraction/`):
 - `extractors/` - Individual field extractors (email, phone, link, label, screenshot, coordinate)
-- `multi-method-extractor.js` - Multi-method runtime extractor
 - `smart-field-extractor.js` - Smart field detection
 
 **Active Utilities** (`src/utils/`):
@@ -1660,7 +1684,6 @@ The project uses canonical module paths:
 | ConfigLoader | `src/config/config-loader` |
 | EmailExtractor | `src/extraction/extractors/email-extractor` |
 | SmartFieldExtractor | `src/extraction/smart-field-extractor` |
-| MultiMethodExtractor | `src/extraction/multi-method-extractor` |
 | contactExtractor | `src/utils/contact-extractor` |
 | DomainExtractor | `src/utils/domain-extractor` |
 | Paginator | `src/features/pagination/paginator` |
