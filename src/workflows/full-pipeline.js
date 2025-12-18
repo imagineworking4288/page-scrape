@@ -466,16 +466,33 @@ class FullPipelineOrchestrator {
         this.seleniumManager = null;
 
       } else {
-        // Use Puppeteer for traditional/single-page
-        const ConfigScraper = require('../scrapers/config-scraper');
+        // Use Puppeteer for traditional/single-page with v2.3 scrapers
+        const { SinglePageScraper, PaginationScraper } = require('../scrapers/config-scrapers');
+        const ConfigLoader = require('../config/config-loader');
 
         this.browserManager = new BrowserManager(logger);
         await this.browserManager.launch(this.options.headless);
 
-        const scraper = new ConfigScraper(this.browserManager, rateLimiter, logger, this.config);
+        // Choose scraper based on pagination type
+        const paginationType = this.config.pagination?.paginationType ||
+                              this.config.pagination?.type ||
+                              'single-page';
+
+        let scraper;
+        if (paginationType === 'pagination' || paginationType === 'traditional' || paginationType === 'parameter') {
+          const configLoader = new ConfigLoader(logger);
+          scraper = new PaginationScraper(this.browserManager, rateLimiter, logger, configLoader, {});
+        } else {
+          scraper = new SinglePageScraper(this.browserManager, rateLimiter, logger, {});
+        }
+
+        // Load config into scraper
+        scraper.config = this.config;
+        scraper.initializeCardSelector();
 
         displayInfo('Scraping page...');
-        this.contacts = await scraper.scrape(this.options.url, this.options.limit);
+        const result = await scraper.scrape(this.options.url, this.options.limit);
+        this.contacts = Array.isArray(result) ? result : (result.contacts || []);
 
         // Keep browser open for enrichment
       }

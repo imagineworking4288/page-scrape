@@ -1792,12 +1792,17 @@ class InteractiveSession {
         const scrapeResult = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
         scrapedContacts = scrapeResult.contacts || scrapeResult || [];
       } else {
-        // Use ConfigScraper for single-page sites
-        const ConfigScraper = require('../../scrapers/config-scraper');
-        const scraper = new ConfigScraper(this.browserManager, rateLimiter, this.logger, config);
+        // Use SinglePageScraper for single-page sites (v2.3)
+        const { SinglePageScraper } = require('../../scrapers/config-scrapers');
+        const scraper = new SinglePageScraper(this.browserManager, rateLimiter, this.logger, {});
 
-        this.logger.info('[Validation] Scraping with ConfigScraper (single-page)...');
-        scrapedContacts = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        // Load config into scraper
+        scraper.config = config;
+        scraper.initializeCardSelector();
+
+        this.logger.info('[Validation] Scraping with SinglePageScraper...');
+        const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        scrapedContacts = Array.isArray(result) ? result : (result.contacts || []);
       }
 
       // Ensure we have an array

@@ -74,17 +74,21 @@ class ConfigValidator {
 
   /**
    * Validate card selector
+   * Supports both v1.x (selectors.card) and v2.3 (cardPattern.primarySelector) formats
    * @param {Object} page - Puppeteer page
    * @param {Object} config - Configuration
    * @returns {Promise<Object>} - Card validation result
    */
   async validateCardSelector(page, config) {
-    const selector = config.selectors?.card;
+    // Support both v2.3 and legacy config formats
+    const selector = config.cardPattern?.primarySelector ||
+                    config.cardPattern?.selector ||
+                    config.selectors?.card;
 
     if (!selector) {
       return {
         valid: false,
-        error: 'No card selector defined',
+        error: 'No card selector defined (checked cardPattern.primarySelector and selectors.card)',
         matchCount: 0
       };
     }
@@ -120,14 +124,32 @@ class ConfigValidator {
 
   /**
    * Validate field selectors
+   * Supports both v1.x (selectors.fields) and v2.3 (fields) formats
    * @param {Object} page - Puppeteer page
    * @param {Object} config - Configuration
    * @returns {Promise<Object>} - Field validation results
    */
   async validateFieldSelectors(page, config) {
     const results = {};
-    const cardSelector = config.selectors?.card;
-    const fields = config.selectors?.fields || {};
+    // Support both v2.3 and legacy config formats
+    const cardSelector = config.cardPattern?.primarySelector ||
+                        config.cardPattern?.selector ||
+                        config.selectors?.card;
+
+    // v2.3 uses config.fields directly, legacy uses config.selectors.fields
+    // For v2.3, field selectors are in config.fields[fieldName].selector
+    let fields = {};
+    if (config.fields) {
+      // v2.3 format - extract selectors from fields object
+      for (const [fieldName, fieldConfig] of Object.entries(config.fields)) {
+        if (fieldConfig.selector) {
+          fields[fieldName] = fieldConfig.selector;
+        }
+      }
+    } else if (config.selectors?.fields) {
+      // Legacy format
+      fields = config.selectors.fields;
+    }
 
     for (const [fieldName, fieldSelector] of Object.entries(fields)) {
       if (!fieldSelector) {
@@ -198,24 +220,39 @@ class ConfigValidator {
 
   /**
    * Test extraction with config
+   * Supports both v1.x and v2.3 config formats
    * @param {Object} page - Puppeteer page
    * @param {Object} config - Configuration
    * @returns {Promise<Object>} - Extraction test results
    */
   async testExtraction(page, config) {
     try {
-      const contacts = await page.evaluate((cfg) => {
-        const cardSelector = cfg.selectors?.card;
-        const fields = cfg.selectors?.fields || {};
+      // Prepare config info for page.evaluate (it can't access closures)
+      const cardSelector = config.cardPattern?.primarySelector ||
+                          config.cardPattern?.selector ||
+                          config.selectors?.card;
 
-        const cards = document.querySelectorAll(cardSelector);
+      // Extract field selectors
+      let fields = {};
+      if (config.fields) {
+        for (const [fieldName, fieldConfig] of Object.entries(config.fields)) {
+          if (fieldConfig.selector) {
+            fields[fieldName] = fieldConfig.selector;
+          }
+        }
+      } else if (config.selectors?.fields) {
+        fields = config.selectors.fields;
+      }
+
+      const contacts = await page.evaluate((selector, fieldMap) => {
+        const cards = document.querySelectorAll(selector);
         const results = [];
 
         for (let i = 0; i < Math.min(cards.length, 5); i++) {
           const card = cards[i];
           const contact = {};
 
-          for (const [fieldName, fieldSelector] of Object.entries(fields)) {
+          for (const [fieldName, fieldSelector] of Object.entries(fieldMap)) {
             if (!fieldSelector) continue;
 
             const field = card.querySelector(fieldSelector);
@@ -230,7 +267,7 @@ class ConfigValidator {
         }
 
         return results;
-      }, config);
+      }, cardSelector, fields);
 
       // Analyze extraction quality
       const analysis = this.analyzeExtractionQuality(contacts, config);

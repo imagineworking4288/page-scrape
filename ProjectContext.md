@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 17, 2025 (Fixed config generator navigation timeout - changed waitUntil from networkidle0 to domcontentloaded)
+**Last Updated**: December 17, 2025 (v2.3 Modernization - deprecated ConfigScraper, updated all tools to use SinglePageScraper/PaginationScraper)
 
 ---
 
@@ -121,11 +121,11 @@ page-scrape/
 │   │       └── coordinate-extractor.js # Coordinate extraction
 │   │
 │   ├── scrapers/               # Core scraping implementations
-│   │   ├── index.js            # Scraper exports
-│   │   ├── base-scraper.js     # Abstract base class (extended by ConfigScraper)
-│   │   ├── config-scraper.js   # Config-driven scraper (main production scraper)
-│   │   └── config-scrapers/    # Specialized config-based scrapers
-│   │       ├── index.js        # Factory and exports
+│   │   ├── index.js            # Scraper exports (v2.3 scrapers preferred)
+│   │   ├── base-scraper.js     # Abstract base class
+│   │   ├── config-scraper.js   # DEPRECATED - Legacy scraper (use config-scrapers/)
+│   │   └── config-scrapers/    # v2.3 Scrapers (PREFERRED)
+│   │       ├── index.js        # Factory (createScraper) and exports
 │   │       ├── base-config-scraper.js     # Base class for v2.3 configs
 │   │       ├── single-page-scraper.js     # Single page extraction
 │   │       ├── infinite-scroll-scraper.js # Selenium PAGE_DOWN simulation
@@ -1101,6 +1101,16 @@ await this.page.goto(url, {
 - Initialization in `handleStartScraping()` when `paginationType === 'infinite-scroll'`
 - Cleanup in `handleFinalSaveAndClose()` and `cleanupResources()`
 
+**Validation Scraper Selection** (v2.3 Modernization - December 2025):
+Uses v2.3 scrapers exclusively for config validation:
+```javascript
+// For single-page validation
+const { SinglePageScraper } = require('../../scrapers/config-scrapers');
+const scraper = new SinglePageScraper(this.browserManager, rateLimiter, this.logger, {});
+scraper.config = config;
+scraper.initializeCardSelector();
+```
+
 #### src/tools/lib/extraction-tester.js
 
 **Purpose**: Orchestrates multiple extraction methods and returns ranked results.
@@ -1143,9 +1153,14 @@ await this.page.goto(url, {
 | `card-matcher.js` | Card similarity matching |
 | `enhanced-capture.js` | Enhanced element capture |
 | `profile-enrichment.js` | Profile page data enrichment |
-| `config-validator.js` | Config validation logic |
+| `config-validator.js` | Config validation (supports v2.3 + legacy formats) |
 | `pagination-diagnostic.js` | Pagination diagnosis utilities |
 | `constants/field-requirements.js` | Field requirement constants |
+
+**config-validator.js v2.3 Support** (December 2025):
+Supports both v2.3 and legacy config formats for backward compatibility:
+- Card selector: `config.cardPattern?.primarySelector || config.selectors?.card`
+- Field selectors: `config.fields[name].selector || config.selectors?.fields[name]`
 
 ---
 
@@ -1282,7 +1297,11 @@ module.exports = ClassName;
 
 ### Dependency Injection
 ```javascript
-const scraper = new ConfigScraper(browserManager, rateLimiter, logger, configLoader);
+// v2.3 pattern (PREFERRED)
+const { SinglePageScraper, PaginationScraper } = require('./src/scrapers/config-scrapers');
+const scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
+scraper.config = config;
+scraper.initializeCardSelector();
 ```
 
 ### Error Handling
@@ -1460,7 +1479,23 @@ node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 2. **AJAX pagination**: May not detect if URL doesn't change
 3. **CSP restrictions**: Bypassed but may affect some sites
 4. **Memory leaks**: Mitigated by page recycling every 50 navigations
-5. **Config not found**: If using `--config name`, ensure config is in `configs/website-configs/` directory. The old `ConfigScraper` looked in `configs/` which is the wrong location for v2.3 configs.
+5. **Config not found**: Ensure config is in `configs/website-configs/` directory with hyphenated domain name (e.g., `domain-com.json`)
+
+### December 2025 v2.3 Modernization
+
+All code paths now use v2.3 scrapers exclusively:
+- `SinglePageScraper` for single-page sites
+- `PaginationScraper` for paginated sites
+- `InfiniteScrollScraper` for infinite scroll sites
+
+The legacy `ConfigScraper` is deprecated and kept only for backward compatibility.
+
+**Files Updated**:
+- `src/scrapers/index.js` - Now exports v2.3 scrapers as primary
+- `src/tools/validate-config.js` - Uses SinglePageScraper/PaginationScraper
+- `src/workflows/full-pipeline.js` - Uses SinglePageScraper/PaginationScraper
+- `src/tools/lib/interactive-session.js` - Uses SinglePageScraper
+- `src/tools/lib/config-validator.js` - Supports both v2.3 and legacy config formats
 
 ---
 
@@ -2411,11 +2446,28 @@ class FullPipelineOrchestrator {
 - `stageConfigCheck()` - Check/generate config, display config summary
 - `runConfigGenerator()` - Spawn config generator subprocess, capture scrape results
 - `findRecentScrapeResults()` - Find scrape files in output/ created in last 10 minutes
-- `stageScraping()` - Use config gen results or run appropriate scraper
+- `stageScraping()` - Use config gen results or run appropriate v2.3 scraper
 - `stageEnrichment()` - Enrich contacts with profile data
 - `stageExport()` - Export to configured format(s)
 - `confirmProceedTo*()` - Interactive y/n prompts (skipped in auto mode)
 - `displayCompletion()` - Show final summary and next steps
+
+**Scraper Selection** (v2.3 Modernization - December 2025):
+```javascript
+// full-pipeline.js now uses v2.3 scrapers exclusively
+const { SinglePageScraper, PaginationScraper } = require('../scrapers/config-scrapers');
+
+const paginationType = config.pagination?.paginationType || 'single-page';
+
+if (paginationType === 'pagination' || paginationType === 'parameter') {
+  scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, {});
+} else {
+  scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
+}
+
+scraper.config = config;
+scraper.initializeCardSelector();  // CRITICAL: must call this after setting config
+```
 
 **Auto Mode** (`--auto`):
 - Skips all confirmation prompts

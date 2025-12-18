@@ -223,16 +223,29 @@ async function main() {
         contacts = results.contacts || results || [];
 
       } else {
-        // Use Puppeteer for traditional/single-page
-        const ConfigScraper = require('../scrapers/config-scraper');
+        // Use Puppeteer for traditional/single-page with v2.3 scrapers
+        const { SinglePageScraper, PaginationScraper } = require('../scrapers/config-scrapers');
 
         browserManager = new BrowserManager(logger);
         await browserManager.launch(headless);
 
-        const scraper = new ConfigScraper(browserManager, rateLimiter, logger, config);
+        // Choose scraper based on pagination type
+        let scraper;
+        if (paginationType === 'pagination' || paginationType === 'traditional') {
+          const ConfigLoader = require('../config/config-loader');
+          const configLoader = new ConfigLoader(logger);
+          scraper = new PaginationScraper(browserManager, rateLimiter, logger, configLoader, {});
+        } else {
+          scraper = new SinglePageScraper(browserManager, rateLimiter, logger, {});
+        }
+
+        // Load config into scraper
+        scraper.config = config;
+        scraper.initializeCardSelector();
 
         displayInfo('Scraping page...');
-        contacts = await scraper.scrape(options.url, testLimit);
+        const result = await scraper.scrape(options.url, testLimit);
+        contacts = Array.isArray(result) ? result : (result.contacts || []);
       }
 
       // Ensure contacts is an array
