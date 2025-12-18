@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 17, 2025 (v2.3 Modernization - deprecated ConfigScraper, updated all tools to use SinglePageScraper/PaginationScraper)
+**Last Updated**: December 17, 2025 (Fixed config generator browser close issue - browser now stays open until user clicks "Save & Close")
 
 ---
 
@@ -1111,6 +1111,19 @@ scraper.config = config;
 scraper.initializeCardSelector();
 ```
 
+**Session Lifecycle** (Fixed December 2025):
+The session promise (`resolveSession`) should ONLY be called in two places:
+1. `handleFinalSaveAndClose()` - When user clicks "Save & Close" button
+2. `handleUserCancelled()` - When user cancels the session
+
+**IMPORTANT**: The following handlers store results but do NOT resolve the session:
+- `handleSaveRequested()` - Saves config, browser stays open
+- `handleConfirmAndGenerate()` - Generates config, browser stays open
+- `handleGenerateV23Config()` - Generates v2.3 config, browser stays open
+- `handleStartScraping()` completion - Scraping done, browser stays open
+
+This ensures the browser remains open for user review until explicitly closed.
+
 #### src/tools/lib/extraction-tester.js
 
 **Purpose**: Orchestrates multiple extraction methods and returns ranked results.
@@ -1494,8 +1507,26 @@ The legacy `ConfigScraper` is deprecated and kept only for backward compatibilit
 - `src/scrapers/index.js` - Now exports v2.3 scrapers as primary
 - `src/tools/validate-config.js` - Uses SinglePageScraper/PaginationScraper
 - `src/workflows/full-pipeline.js` - Uses SinglePageScraper/PaginationScraper
-- `src/tools/lib/interactive-session.js` - Uses SinglePageScraper
-- `src/tools/lib/config-validator.js` - Supports both v2.3 and legacy config formats
+
+### December 2025 Config Generator Browser Fix
+
+**Issue**: Browser was closing immediately after config save/validation instead of staying open.
+
+**Cause**: Multiple handlers (`handleSaveRequested`, `handleConfirmAndGenerate`, `handleStartScraping`) were calling `resolveSession()` which ended the session and closed the browser.
+
+**Fix**: Removed `resolveSession()` calls from these handlers. Now only `handleFinalSaveAndClose()` (triggered by "Save & Close" button) resolves the session.
+
+**Expected Flow**:
+1. User creates config, clicks "Save"
+2. Config saves, validation runs
+3. Config Preview Panel shown with results
+4. **Browser stays open**
+5. User clicks "Save & Close"
+6. `handleFinalSaveAndClose()` resolves session
+7. Browser closes
+
+**Files Updated**:
+- `src/tools/lib/interactive-session.js` - Removed early `resolveSession()` calls, uses SinglePageScraper
 
 ---
 

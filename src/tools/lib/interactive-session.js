@@ -588,8 +588,8 @@ class InteractiveSession {
         }
       }, result);
 
-      // Mark session complete
-      this.sessionComplete = true;
+      // Store session result but DON'T resolve session yet
+      // Session should only end when user clicks "Save & Close"
       this.sessionResult = {
         success: true,
         configPath: configPath,
@@ -597,9 +597,12 @@ class InteractiveSession {
         validation: validation
       };
 
-      if (this.resolveSession) {
-        this.resolveSession(this.sessionResult);
-      }
+      // NOTE: Do NOT call resolveSession() here!
+      // The browser should stay open until user explicitly clicks "Save & Close"
+      // which triggers handleFinalSaveAndClose()
+
+      this.logger.info(`[v${version}] Config generated and saved, waiting for user confirmation`);
+      this.logger.info(`[v${version}] Browser will remain open until user clicks "Save & Close"`);
 
       return result;
 
@@ -1335,7 +1338,8 @@ class InteractiveSession {
 
       this.logger.info(`Config saved to: ${configPath}`);
 
-      this.sessionComplete = true;
+      // Store session result but DON'T resolve session yet
+      // Session should only end when user clicks "Save & Close"
       this.sessionResult = {
         success: true,
         configPath: configPath,
@@ -1343,14 +1347,17 @@ class InteractiveSession {
         testResults: testResults
       };
 
-      if (this.resolveSession) {
-        this.resolveSession(this.sessionResult);
-      }
+      // NOTE: Do NOT call resolveSession() here!
+      // The browser should stay open until user explicitly clicks "Save & Close"
+      // which triggers handleFinalSaveAndClose()
+
+      this.logger.info('[v2.3] Config saved. Browser will stay open until user clicks "Save & Close"');
 
       return {
         success: true,
         configPath: configPath,
-        message: 'Config saved successfully!'
+        testResults: testResults,
+        message: 'Config saved successfully! Click "Save & Close" when ready to finish.'
       };
 
     } catch (error) {
@@ -2211,21 +2218,18 @@ class InteractiveSession {
         }
       }, result);
 
-      // Store scraping result
+      // Store scraping result but DON'T resolve session yet
+      // Session should only end when user clicks "Save & Close"
       this.sessionResult = {
         ...this.sessionResult,
         scrapingResult: result
       };
 
-      // Mark session as complete
-      this.sessionComplete = true;
+      // NOTE: Do NOT call resolveSession() here!
+      // The browser should stay open until user explicitly clicks "Save & Close"
+      // which triggers handleFinalSaveAndClose()
 
-      // Resolve session after a short delay to allow UI to update
-      setTimeout(() => {
-        if (this.resolveSession) {
-          this.resolveSession(this.sessionResult);
-        }
-      }, 3000);
+      this.logger.info('[Scraping] Scraping complete. Browser will remain open until user clicks "Save & Close"');
 
       return result;
 
