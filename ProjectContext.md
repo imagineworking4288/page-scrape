@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 15, 2025 (Fixed orchestrator routing to v2.3 scraper system, ConfigLoader.loadConfigByName() for named configs)
+**Last Updated**: December 17, 2025 (Fixed config generator navigation timeout - changed waitUntil from networkidle0 to domcontentloaded)
 
 ---
 
@@ -895,7 +895,18 @@ const {
 **Usage**:
 ```bash
 node src/tools/config-generator.js --url "https://example.com/directory"
+
+# For slow-loading sites, increase timeout (default: 30000ms)
+node src/tools/config-generator.js --url "URL" --timeout 60000
 ```
+
+**CLI Options**:
+- `-u, --url <url>` - Target URL (required)
+- `-o, --output <dir>` - Config output directory (default: configs)
+- `-t, --timeout <ms>` - Page load timeout in milliseconds (default: 30000)
+- `--no-test` - Skip testing config after generation
+- `--delay <ms>` - Delay between requests (default: 2000-5000)
+- `--verbose` - Show detailed logs
 
 **Process**:
 1. Opens browser in visible mode
@@ -1062,6 +1073,19 @@ node src/tools/enrich-contacts.js --input output/scrape.json --review-output out
 - Automatic cleanup on session end and process signals (SIGINT, SIGTERM)
 - Multi-method extraction testing
 - Config validation and generation
+
+**Navigation Strategy** (Updated December 2025):
+Uses `waitUntil: 'domcontentloaded'` instead of `networkidle0` because:
+1. Modern sites with analytics, chat widgets, and tracking never reach network idle
+2. The config generator is interactive - the user confirms when the page is ready
+3. `domcontentloaded` fires when HTML is parsed, which is sufficient for the UI
+
+```javascript
+await this.page.goto(url, {
+  waitUntil: 'domcontentloaded',  // Not networkidle0
+  timeout: this.options.timeout || 30000
+});
+```
 
 **Exposed Browser Functions**:
 - `__configGen_testFieldExtraction(data)` - Test extraction methods

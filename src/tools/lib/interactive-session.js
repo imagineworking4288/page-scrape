@@ -158,14 +158,18 @@ class InteractiveSession {
     this.page = await this.browserManager.getPage();
 
     // Navigate to URL
+    // Using 'domcontentloaded' instead of 'networkidle0' because:
+    // 1. Modern sites with analytics, chat widgets, and tracking never reach network idle
+    // 2. The config generator is interactive - the user confirms when the page is ready
+    // 3. 'domcontentloaded' fires when HTML is parsed, which is sufficient for the UI
     this.logger.info(`Navigating to: ${url}`);
     await this.page.goto(url, {
-      waitUntil: 'networkidle0',
+      waitUntil: 'domcontentloaded',
       timeout: this.options.timeout || 30000
     });
 
-    // Wait a bit for dynamic content
-    await this.page.waitForTimeout(2000);
+    // Wait a bit for dynamic content to render
+    await this.page.waitForTimeout(3000);
 
     this.logger.info('Page loaded successfully');
   }
