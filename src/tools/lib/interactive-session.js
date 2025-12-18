@@ -1786,6 +1786,7 @@ class InteractiveSession {
         await seleniumManager.close();
       } else if (isPagination) {
         // Use PaginationScraper for paginated pages (matches production behavior)
+        // IMPORTANT: Use skipNavigation=true to preserve overlay UI
         const { PaginationScraper } = require('../../scrapers/config-scrapers');
         const scraper = new PaginationScraper(this.browserManager, rateLimiter, this.logger, this.configLoader, {
           maxPages: 1,  // Only scrape first page for validation
@@ -1795,11 +1796,12 @@ class InteractiveSession {
         scraper.config = config;
         scraper.initializeCardSelector();
 
-        this.logger.info('[Validation] Scraping with PaginationScraper...');
-        const scrapeResult = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        this.logger.info('[Validation] Scraping with PaginationScraper (skipNavigation=true)...');
+        const scrapeResult = await scraper.scrape(this.testUrl, VALIDATION_LIMIT, { skipNavigation: true });
         scrapedContacts = scrapeResult.contacts || scrapeResult || [];
       } else {
         // Use SinglePageScraper for single-page sites (v2.3)
+        // IMPORTANT: Use skipNavigation=true to preserve overlay UI
         const { SinglePageScraper } = require('../../scrapers/config-scrapers');
         const scraper = new SinglePageScraper(this.browserManager, rateLimiter, this.logger, {});
 
@@ -1807,8 +1809,8 @@ class InteractiveSession {
         scraper.config = config;
         scraper.initializeCardSelector();
 
-        this.logger.info('[Validation] Scraping with SinglePageScraper...');
-        const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT);
+        this.logger.info('[Validation] Scraping with SinglePageScraper (skipNavigation=true)...');
+        const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT, { skipNavigation: true });
         scrapedContacts = Array.isArray(result) ? result : (result.contacts || []);
       }
 

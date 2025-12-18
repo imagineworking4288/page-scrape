@@ -32,12 +32,18 @@ class PaginationScraper extends BaseConfigScraper {
    * Scrape contacts across multiple pages
    * @param {string} url - Starting URL
    * @param {number} limit - Max contacts to extract (0 = unlimited)
-   * @param {Object} diagnosisResults - Pre-discovered pagination info (optional)
+   * @param {Object} options - Options object or diagnosisResults for backward compatibility
+   * @param {boolean} options.skipNavigation - If true, extract from current page without navigating
+   * @param {Object} options.diagnosisResults - Pre-discovered pagination info
    * @returns {Promise<Object>} - Scraping results
    */
-  async scrape(url, limit = 0, diagnosisResults = null) {
+  async scrape(url, limit = 0, options = {}) {
+    // Backward compatibility: if options has 'pattern' property, it's diagnosisResults
+    const diagnosisResults = options?.pattern ? options : options?.diagnosisResults || null;
+    const { skipNavigation = false } = options;
+
     this.logger.info(`[PaginationScraper] Starting scrape: ${url}`);
-    this.logger.info(`[PaginationScraper] Limit: ${limit || 'unlimited'}, Max pages: ${this.maxPages}`);
+    this.logger.info(`[PaginationScraper] Limit: ${limit || 'unlimited'}, Max pages: ${this.maxPages}, skipNavigation: ${skipNavigation}`);
     this.startTime = Date.now();
     this.requestedLimit = limit;
 
@@ -51,6 +57,17 @@ class PaginationScraper extends BaseConfigScraper {
     }
 
     try {
+      // If skipNavigation, just extract from current page without pagination discovery
+      if (skipNavigation) {
+        this.logger.info('[PaginationScraper] Using current page DOM (skipNavigation=true)');
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await this.initializeExtractors(page);
+        await this.extractFromCurrentPage(page, 1, limit);
+        this.flushContactBuffer();
+        return this.getResults();
+      }
+
       // Discover pagination pattern (or use pre-discovered)
       let paginationResult;
 

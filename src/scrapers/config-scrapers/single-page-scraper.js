@@ -19,11 +19,15 @@ class SinglePageScraper extends BaseConfigScraper {
    * Scrape contacts from a single page
    * @param {string} url - URL to scrape
    * @param {number} limit - Max contacts to extract (0 = unlimited)
+   * @param {Object} options - Scraping options
+   * @param {boolean} options.skipNavigation - If true, extract from current page without navigating
    * @returns {Promise<Object>} - Scraping results
    */
-  async scrape(url, limit = 0) {
+  async scrape(url, limit = 0, options = {}) {
+    const { skipNavigation = false } = options;
+
     this.logger.info(`[SinglePageScraper] Starting scrape: ${url}`);
-    this.logger.info(`[SinglePageScraper] Limit: ${limit || 'unlimited'}`);
+    this.logger.info(`[SinglePageScraper] Limit: ${limit || 'unlimited'}, skipNavigation: ${skipNavigation}`);
     this.startTime = Date.now();
     this.requestedLimit = limit;
 
@@ -37,24 +41,32 @@ class SinglePageScraper extends BaseConfigScraper {
     }
 
     try {
-      // Navigate to URL
-      this.logger.info('[SinglePageScraper] Navigating to page...');
-      await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
+      // Only navigate if not skipping navigation
+      if (!skipNavigation) {
+        // Navigate to URL
+        this.logger.info('[SinglePageScraper] Navigating to page...');
+        await page.goto(url, {
+          waitUntil: 'networkidle2',
+          timeout: 30000
+        });
 
-      // Wait for content to load
-      const waitSelector = this.config.cardPattern?.primarySelector ||
-                          this.config.extraction?.waitFor;
-      if (waitSelector) {
-        try {
-          await page.waitForSelector(waitSelector, {
-            timeout: this.config.extraction?.waitTimeout || 15000
-          });
-        } catch (e) {
-          this.logger.warn(`[SinglePageScraper] Wait selector timeout: ${waitSelector}`);
+        // Wait for content to load
+        const waitSelector = this.config.cardPattern?.primarySelector ||
+                            this.config.extraction?.waitFor;
+        if (waitSelector) {
+          try {
+            await page.waitForSelector(waitSelector, {
+              timeout: this.config.extraction?.waitTimeout || 15000
+            });
+          } catch (e) {
+            this.logger.warn(`[SinglePageScraper] Wait selector timeout: ${waitSelector}`);
+          }
         }
+      } else {
+        this.logger.info('[SinglePageScraper] Using current page DOM (skipNavigation=true)');
+        // Scroll to top to ensure consistent starting point
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       // Apply rate limiting
