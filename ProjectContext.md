@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 17, 2025 (Fixed config generator browser close issue - browser now stays open until user clicks "Save & Close")
+**Last Updated**: December 17, 2025 (Fixed validation navigation issue - overlay now stays visible during validation with skipNavigation option)
 
 ---
 
@@ -630,13 +630,19 @@ this.scrollConfig = {
 **Extends**: BaseConfigScraper
 
 **Key Methods**:
-- `scrape(url, limit)` - Find cards, extract contacts, return results
+- `scrape(url, limit, options)` - Find cards, extract contacts, return results
+  - `options.skipNavigation` (Boolean, default: false) - If true, extracts from current page DOM without navigating. Used by config generator validation to preserve overlay UI.
 
 #### src/scrapers/config-scrapers/pagination-scraper.js
 
 **Purpose**: Handles traditional paginated pages.
 
 **Extends**: BaseConfigScraper
+
+**Key Methods**:
+- `scrape(url, limit, options)` - Scrape across multiple pages
+  - `options.skipNavigation` (Boolean, default: false) - If true, extracts from current page only without pagination discovery. Used by config generator validation.
+  - `options.diagnosisResults` - Pre-discovered pagination info (backward compatible with legacy third parameter)
 
 **Key Features**:
 - Uses Paginator for URL pattern discovery
@@ -1102,13 +1108,14 @@ await this.page.goto(url, {
 - Cleanup in `handleFinalSaveAndClose()` and `cleanupResources()`
 
 **Validation Scraper Selection** (v2.3 Modernization - December 2025):
-Uses v2.3 scrapers exclusively for config validation:
+Uses v2.3 scrapers exclusively for config validation with `skipNavigation: true` to preserve overlay UI:
 ```javascript
-// For single-page validation
+// For single-page validation - skipNavigation prevents page reload
 const { SinglePageScraper } = require('../../scrapers/config-scrapers');
 const scraper = new SinglePageScraper(this.browserManager, rateLimiter, this.logger, {});
 scraper.config = config;
 scraper.initializeCardSelector();
+const result = await scraper.scrape(url, limit, { skipNavigation: true });
 ```
 
 **Session Lifecycle** (Fixed December 2025):
@@ -1527,6 +1534,48 @@ The legacy `ConfigScraper` is deprecated and kept only for backward compatibilit
 
 **Files Updated**:
 - `src/tools/lib/interactive-session.js` - Removed early `resolveSession()` calls, uses SinglePageScraper
+
+### December 2025 Validation Navigation Fix
+
+**Issue**: Clicking "Validate Data" in the config generator overlay caused the page to navigate/reload, destroying the overlay UI.
+
+**Cause**: Both `SinglePageScraper.scrape()` and `PaginationScraper.scrape()` called `page.goto()` which navigated away from the current page, destroying all injected DOM elements including the overlay.
+
+**Fix**: Added `skipNavigation` option to scrapers to extract from current DOM without navigating:
+
+```javascript
+// SinglePageScraper and PaginationScraper now support:
+async scrape(url, limit = 0, options = {}) {
+  const { skipNavigation = false } = options;
+
+  if (skipNavigation) {
+    // Extract from current page DOM without navigating
+    await page.evaluate(() => window.scrollTo(0, 0));
+    // ... continue with extraction
+  } else {
+    // Normal behavior: navigate to URL first
+    await page.goto(url, { waitUntil: 'networkidle2' });
+  }
+}
+```
+
+**Usage in Validation Handler**:
+```javascript
+// interactive-session.js - handleValidateData()
+const result = await scraper.scrape(this.testUrl, VALIDATION_LIMIT, { skipNavigation: true });
+```
+
+**Files Updated**:
+- `src/scrapers/config-scrapers/single-page-scraper.js` - Added `skipNavigation` option
+- `src/scrapers/config-scrapers/pagination-scraper.js` - Added `skipNavigation` option (backward compatible)
+- `src/tools/lib/interactive-session.js` - Validation uses `skipNavigation: true`
+
+**Expected Behavior**:
+1. User clicks "Validate Data" button
+2. Overlay UI stays visible (no page reload)
+3. Extraction runs against current DOM
+4. Validation results display in overlay modal
+5. User can continue interacting with overlay
 
 ---
 
