@@ -731,12 +731,31 @@
 
   /**
    * Close panel and notify backend
+   * After scraping completes, this should call finalSaveAndClose to properly close browsers
    */
-  window.closePanel = function() {
+  window.closePanel = async function() {
     console.log('[ConfigGen v2.2] Closing panel');
+    console.log('[ConfigGen v2.2] Current state:', state.currentState);
 
-    if (typeof __configGen_close === 'function') {
-      __configGen_close();
+    // If scraping was completed or config was generated, use finalSaveAndClose
+    // to properly close browsers and resolve the session
+    if (state.currentState === STATES.COMPLETE || state.generatedConfigData) {
+      console.log('[ConfigGen v2.2] Scraping/config complete - calling finalSaveAndClose');
+      if (typeof __configGen_finalSaveAndClose === 'function') {
+        try {
+          const result = await __configGen_finalSaveAndClose();
+          console.log('[ConfigGen v2.2] finalSaveAndClose result:', result);
+        } catch (error) {
+          console.error('[ConfigGen v2.2] Error in finalSaveAndClose:', error);
+        }
+      } else {
+        console.error('[ConfigGen v2.2] __configGen_finalSaveAndClose not available');
+      }
+    } else {
+      // For cancellation before completion, use close
+      if (typeof __configGen_close === 'function') {
+        __configGen_close();
+      }
     }
   };
 

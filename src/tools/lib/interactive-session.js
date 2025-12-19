@@ -1677,6 +1677,7 @@ class InteractiveSession {
 
       this.logger.info('[v2.3] Session marked as complete');
       this.logger.info('[v2.3] Config path:', this.sessionResult?.configPath);
+      this.logger.info('[v2.3] Scraping result:', this.sessionResult?.scrapingResult ? 'present' : 'none');
 
       // Cleanup extraction tester if present
       if (this.extractionTester) {
@@ -1693,9 +1694,12 @@ class InteractiveSession {
       }
 
       // Resolve session to close browser
+      // This will return control to config-generator.js which calls browserManager.close()
       if (this.resolveSession) {
-        this.logger.info('[v2.3] Resolving session promise - browser will close');
+        this.logger.info('[v2.3] Resolving session promise - control returns to config-generator.js');
         this.resolveSession(this.sessionResult);
+      } else {
+        this.logger.warn('[v2.3] No resolveSession function available - session may not close properly');
       }
 
       this.logger.info('========================================');
@@ -1711,6 +1715,13 @@ class InteractiveSession {
     } catch (error) {
       this.logger.error(`[v2.3] Final save error: ${error.message}`);
       this.logger.error(`[v2.3] Error stack: ${error.stack}`);
+
+      // Still try to resolve session even on error
+      if (this.resolveSession) {
+        this.logger.info('[v2.3] Resolving session despite error');
+        this.resolveSession({ success: false, error: error.message });
+      }
+
       return {
         success: false,
         error: error.message

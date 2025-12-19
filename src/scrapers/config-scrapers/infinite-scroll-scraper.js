@@ -54,7 +54,7 @@ class InfiniteScrollScraper extends BaseConfigScraper {
       verbose: options.verbose !== false,
       // Load More button options (automatic detection and clicking)
       enableLoadMoreButton: options.enableLoadMoreButton !== false,  // enabled by default
-      maxButtonClicks: options.maxButtonClicks || 50,
+      maxButtonClicks: options.maxButtonClicks || 200,
       waitAfterButtonClick: options.waitAfterButtonClick || 2000,
       cardSelector: null  // will be set from config if available
     };
@@ -395,7 +395,7 @@ class InfiniteScrollScraper extends BaseConfigScraper {
           maxRetries: 25,
           maxScrolls: 1000,
           enableLoadMoreButton: true,
-          maxButtonClicks: 50
+          maxButtonClicks: 200
         }
       };
 

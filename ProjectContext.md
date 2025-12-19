@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 18, 2025 (orchestrator refactoring - 55% line reduction)
+**Last Updated**: December 19, 2025 (Documentation cleanup, navigation strategy section, maxButtonClicks: 200)
 
 ---
 
@@ -304,20 +304,30 @@ node orchestrator.js --url <url>           # Target URL (required)
 
 ---
 
-### src/index.js (Unified Module Index)
+### Module Imports (Recommended Pattern)
 
-**Purpose**: Provides unified imports for all project modules.
+**Use direct imports from canonical paths** (unified index files were removed in v3.0 cleanup):
 
-**Usage**:
 ```javascript
-// Recommended: Feature-based imports
-const { BrowserManager, logger, RateLimiter } = require('./src/core');
-const { ConfigLoader, validateConfigV23 } = require('./src/config');
-const { EmailExtractor, MultiMethodExtractor } = require('./src/extraction');
+// Core infrastructure
+const BrowserManager = require('./src/core/browser-manager');
+const logger = require('./src/core/logger');
+const RateLimiter = require('./src/core/rate-limiter');
+const { SeleniumManager } = require('./src/core');  // core/index.js still exists
 
-// Or use unified index
-const src = require('./src');
-const { BrowserManager, ConfigLoader, EmailExtractor } = src;
+// Configuration
+const ConfigLoader = require('./src/config/config-loader');
+
+// Scrapers (v2.3)
+const { SinglePageScraper, PaginationScraper, InfiniteScrollScraper, createScraperFromConfig } = require('./src/scrapers/config-scrapers');
+
+// Extractors
+const EmailExtractor = require('./src/extraction/extractors/email-extractor');
+const PhoneExtractor = require('./src/extraction/extractors/phone-extractor');
+
+// Features
+const Paginator = require('./src/features/pagination/paginator');
+const ProfileEnricher = require('./src/features/enrichment/profile-enricher');
 ```
 
 ---
@@ -402,7 +412,10 @@ const { BrowserManager, ConfigLoader, EmailExtractor } = src;
   maxScrolls: 1000,           // safety limit
   initialWait: 5000,          // wait for initial content
   scrollContainer: null,      // CSS selector for scroll container
-  verbose: true               // log progress
+  verbose: true,              // log progress
+  enableLoadMoreButton: true, // try to detect and click Load More buttons
+  maxButtonClicks: 200,       // maximum number of button clicks
+  waitAfterButtonClick: 2000  // ms to wait after clicking button
 }
 ```
 
@@ -1466,6 +1479,7 @@ node orchestrator.js --url "URL" --full-pipeline --output sheets --auto
 3. **CSP restrictions**: Bypassed but may affect some sites
 4. **Memory leaks**: Mitigated by page recycling every 50 navigations
 5. **Config not found**: Ensure config is in `configs/website-configs/` directory with hyphenated domain name (e.g., `domain-com.json`)
+6. **"Requesting main frame too early" error**: Occurs occasionally (~2% of contacts) during enrichment when page recycling happens mid-navigation. Non-critical - the contact is skipped and enrichment continues. Affects profile page visits, not main scraping.
 
 ### December 2025 v2.3 Modernization (COMPLETE)
 
@@ -1523,6 +1537,39 @@ async scrape(url, limit = 0, options = {}) {
 - `src/scrapers/config-scrapers/single-page-scraper.js`
 - `src/scrapers/config-scrapers/pagination-scraper.js`
 - `src/tools/lib/interactive-session.js`
+
+### December 2025 Config Generator Close Button Fix (FIXED)
+
+**Status**: RESOLVED
+
+**Issue**: After scraping completes in config generator, clicking the "Close" button didn't close the browser or return control to terminal. The terminal stayed blocked.
+
+**Root Cause**: The `closePanel()` function in overlay-client.js was calling `__configGen_close()` which resolves the session as cancelled. After scraping completes, it should call `__configGen_finalSaveAndClose()` instead to properly cleanup and close browsers.
+
+**Fix Applied**:
+1. `src/tools/assets/overlay-client.js` - Updated `closePanel()` to detect if scraping is complete and call the appropriate backend function:
+   - If `state.currentState === STATES.COMPLETE`: calls `__configGen_finalSaveAndClose()`
+   - Otherwise: calls `__configGen_close()` for cancellation
+
+2. `src/tools/lib/interactive-session.js` - Enhanced `handleFinalSaveAndClose()` with better error handling and fallback session resolution
+
+**Expected Flow (Now Working)**:
+```
+User clicks Close → closePanel() checks state →
+calls __configGen_finalSaveAndClose() →
+handleFinalSaveAndClose() runs →
+cleanup Selenium/tester → resolveSession() →
+config-generator.js gets control → browserManager.close() →
+process exits → terminal responsive
+```
+
+### December 2025 maxButtonClicks Increase
+
+**Change**: Increased `maxButtonClicks` default from 50 to 200 in `src/core/selenium-manager.js`
+
+**Reason**: 50 button clicks was stopping scraping too early on large directories that use "Load More" button pagination.
+
+**File**: `src/core/selenium-manager.js` line 36
 
 ### December 2025 Dependency Analyzer
 
@@ -1674,6 +1721,51 @@ The project uses canonical module paths:
 | DomainExtractor | `src/utils/domain-extractor` |
 | Paginator | `src/features/pagination/paginator` |
 
+### Navigation Strategy: domcontentloaded (CRITICAL)
+
+**All page.goto() calls MUST use `waitUntil: 'domcontentloaded'`.**
+
+```javascript
+// CORRECT - use this everywhere
+await page.goto(url, {
+  waitUntil: 'domcontentloaded',
+  timeout: 30000
+});
+
+// WRONG - causes timeouts on modern sites
+await page.goto(url, {
+  waitUntil: 'networkidle0',  // DON'T USE
+  timeout: 30000
+});
+```
+
+**Why `networkidle0` and `networkidle2` Cause Timeouts**:
+- Modern sites with analytics (Google Analytics, Facebook Pixel, etc.) never reach "network idle"
+- Chat widgets, tracking pixels, and real-time features maintain open connections
+- Sites with websockets or long-polling connections never idle
+- Result: 30+ second timeouts on nearly every site
+
+**Why `domcontentloaded` Works**:
+- Fires when HTML is parsed and DOM is ready
+- Fast (typically 1-3 seconds)
+- Sufficient for scraping - content is in the DOM
+- Follow-up `waitForTimeout(3000)` handles dynamic rendering
+
+**Files Using page.goto()** (all verified to use `domcontentloaded`):
+- `src/core/browser-manager.js:134`
+- `src/tools/lib/interactive-session.js:166`
+- `src/features/pagination/paginator.js:60, 486, 1032`
+- `src/features/pagination/pattern-detector.js:584`
+- `src/features/pagination/binary-searcher.js:247`
+- `src/scrapers/config-scrapers/pagination-scraper.js:98, 123, 235`
+- `src/scrapers/config-scrapers/single-page-scraper.js:48`
+- `src/utils/profile-visitor.js:129`
+- `src/tools/test-config.js:120`
+- `src/tools/test-navigation.js:262`
+- `src/tools/lib/pagination-diagnostic.js:258`
+
+**If You See Timeout Errors**: Check that all `page.goto()` calls use `domcontentloaded`. Search with: `grep -r "networkidle" src/`
+
 ### Infinite Scroll Implementation (Selenium PAGE_DOWN Only)
 
 The infinite scroll scraper uses Selenium WebDriver with PAGE_DOWN key simulation. This is the ONLY infinite scroll implementation - Puppeteer wheel events were found to be unreliable and have been removed.
@@ -1745,7 +1837,7 @@ The Selenium infinite scroll system now includes automatic "Load More" button de
 ```javascript
 {
   enableLoadMoreButton: true,   // Enable button detection (default: true)
-  maxButtonClicks: 50,          // Max clicks before stopping (default: 50)
+  maxButtonClicks: 200,         // Max clicks before stopping (default: 200)
   waitAfterButtonClick: 2000,   // Wait time after click (default: 2000ms)
   cardSelector: '.card-class'   // CSS selector for counting new elements
 }
@@ -1770,7 +1862,7 @@ node orchestrator.js --url "https://www.skadden.com/professionals?skip=25&office
 ```
 [Selenium] Scroll exhausted (25 retries), looking for Load More button...
 [Selenium] Found Load More button via text-content: "Load More Results"
-[Selenium] Clicked Load More button (1/50), loaded 25 new elements
+[Selenium] Clicked Load More button (1/200), loaded 25 new elements
 [Selenium] No Load More button found, scroll complete
 ```
 
@@ -1794,13 +1886,15 @@ After the first successful Load More button click, the scraper enters "button-fi
 ```
 [Selenium] Entering button-first mode for faster button pagination
 [Selenium] [Button-first] Found button: "VIEW MORE" (strategy: text-content)
-[Selenium] [Button-first] Clicked (45/50)
-[Selenium] Reached max button clicks (50), stopping pagination
-[Selenium] Button pagination complete: 50 clicks, exiting cleanly
+[Selenium] [Button-first] Clicked (195/200)
+[Selenium] Reached max button clicks (200), stopping pagination
+[Selenium] Button pagination complete: 200 clicks, exiting cleanly
 ```
 
 **Clean Exit on Max Clicks**:
-The code checks `buttonClicks >= maxButtonClicks` at the START of each loop to prevent StaleElementReferenceError. After 50 DOM updates, element references become stale - querying DOM after reaching the limit would crash.
+The code checks `buttonClicks >= maxButtonClicks` at the START of each loop to prevent StaleElementReferenceError. After many DOM updates, element references become stale - querying DOM after reaching the limit would crash.
+
+**Natural Termination**: The scraper will stop naturally when the "Load More" button disappears from the page (indicating all content has been loaded), even if `maxButtonClicks` limit hasn't been reached.
 
 **Files**:
 - `src/core/selenium-manager.js` - `scrollToFullyLoad()` with button-first mode

@@ -120,7 +120,7 @@ async function testInfiniteScroll(url, opts) {
       initialWait: 3000,
       verbose: opts.verbose,
       enableLoadMoreButton: true,
-      maxButtonClicks: 50,
+      // maxButtonClicks uses SeleniumManager default (200)
 
       // Timeline callbacks
       onHeightChange: (data) => {

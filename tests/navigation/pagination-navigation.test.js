@@ -82,7 +82,7 @@ async function testPatternDetection(url, testConfig = {}) {
   try {
     await browserManager.launch(headless);
     const page = browserManager.getPage();
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Detect visual pagination controls
     console.log('  Detecting visual controls...');
@@ -214,7 +214,7 @@ async function testPageUrlGeneration(url, testConfig = {}) {
   try {
     await browserManager.launch(headless);
     const page = browserManager.getPage();
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Discover pattern
     const pattern = await patternDetector.discoverPattern(page, url);
@@ -270,7 +270,7 @@ async function testPageUrlGeneration(url, testConfig = {}) {
     for (let i = 0; i < Math.min(pagesToTest, urls.length); i++) {
       const testUrl = urls[i];
       try {
-        await page.goto(testUrl.url, { waitUntil: 'networkidle0', timeout: 15000 });
+        await page.goto(testUrl.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
         // Check page has content
         const hasContent = await page.evaluate(() => {
@@ -389,7 +389,7 @@ async function testInfiniteScrollDetection(url, testConfig = {}) {
   try {
     await browserManager.launch(headless);
     const page = browserManager.getPage();
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Detect infinite scroll
     console.log('  Detecting infinite scroll indicators...');

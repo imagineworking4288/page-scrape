@@ -33,7 +33,7 @@ class SeleniumManager {
       verbose: true,              // log progress
       // Load More button options
       enableLoadMoreButton: true, // try to detect and click Load More buttons
-      maxButtonClicks: 50,        // maximum number of button clicks
+      maxButtonClicks: 200,       // maximum number of button clicks (increased from 50 for large directories)
       waitAfterButtonClick: 2000, // ms to wait after clicking button
       cardSelector: null          // CSS selector for cards (used to count new elements)
     };
@@ -142,7 +142,7 @@ class SeleniumManager {
    * @param {string} options.scrollContainer - CSS selector for scroll container (default: null/body)
    * @param {boolean} options.verbose - Log progress (default: true)
    * @param {boolean} options.enableLoadMoreButton - Try Load More buttons (default: true)
-   * @param {number} options.maxButtonClicks - Max button click attempts (default: 50)
+   * @param {number} options.maxButtonClicks - Max button click attempts (default: 200)
    * @param {number} options.waitAfterButtonClick - Wait after button click in ms (default: 2000)
    * @param {string} options.cardSelector - CSS selector for cards to count new elements
    * @param {Function} options.onHeightChange - Callback when height increases: ({type, scrollCount, previousHeight, newHeight, delta, timestamp}) => void
