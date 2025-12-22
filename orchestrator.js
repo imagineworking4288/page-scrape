@@ -23,6 +23,8 @@ const { createScraperFromConfig } = require('./src/scrapers/config-scrapers');
 
 // Pagination
 const Paginator = require('./src/features/pagination/paginator');
+const { detectPaginationFromUrl } = require('./src/constants/pagination-patterns');
+const { selectPaginationMode } = require('./src/utils/prompt-helper');
 
 // CLI setup
 const program = new Command();
@@ -43,6 +45,7 @@ program
   .option('--discover-only', 'Only discover pagination pattern without scraping all pages')
   .option('--no-export', 'Skip Google Sheets export (only output JSON)')
   .option('--scroll', 'Enable infinite scroll handling for --method config')
+  .option('--single-page', 'Force single-page mode (no pagination or scrolling)')
   .option('--max-scrolls <number>', 'Maximum scroll attempts for infinite scroll', parseInt, 50)
   .option('--force-selenium', 'Force Selenium browser for infinite scroll (PAGE_DOWN simulation)')
   .option('--scroll-delay <ms>', 'Selenium scroll delay in ms', parseInt, 400)
@@ -176,11 +179,41 @@ async function main() {
     }
     logger.info(`Loaded config: ${config.name || config.domain} (v${config.version || '1.0'})`);
 
+    // Determine effective pagination type
+    const urlDetection = detectPaginationFromUrl(options.url);
+    let effectivePaginationType;
+
+    if (options.scroll || options.forceSelenium) {
+      effectivePaginationType = 'infinite-scroll';
+      logger.info('[Override] CLI flag: using infinite-scroll mode');
+    } else if (options.paginate) {
+      effectivePaginationType = 'pagination';
+      logger.info('[Override] CLI flag: using pagination mode');
+    } else if (options.singlePage) {
+      effectivePaginationType = 'single-page';
+      logger.info('[Override] CLI flag: using single-page mode');
+    } else {
+      effectivePaginationType = await selectPaginationMode({
+        configPaginationType: config?.pagination?.paginationType,
+        urlDetection,
+        autoMode: options.auto,
+        logger
+      });
+    }
+
+    const configType = config?.pagination?.paginationType;
+    if (configType && effectivePaginationType !== configType) {
+      logger.info(`[Pagination] Mode: ${effectivePaginationType} (overriding config: ${configType})`);
+    }
+
+    // Update paginationEnabled based on effective type
+    const effectivePaginationEnabled = effectivePaginationType === 'pagination';
+
     // Pagination discovery
     let paginationResult = null;
     let pageUrls = [options.url];
 
-    if (paginationEnabled) {
+    if (effectivePaginationEnabled) {
       const paginator = new Paginator(browserManager, rateLimiter, logger, configLoader);
       if (startPage > 1) paginator.setStartPage(startPage);
 
@@ -217,10 +250,8 @@ async function main() {
       paginator.resetSeenContent();
     }
 
-    // Determine if infinite scroll is needed
-    const needsSelenium = options.forceSelenium || options.scroll ||
-      config.pagination?.paginationType === 'infinite-scroll' ||
-      config.pagination?.type === 'infinite-scroll';
+    // Determine if infinite scroll is needed based on effective pagination type
+    const needsSelenium = effectivePaginationType === 'infinite-scroll';
 
     if (needsSelenium) {
       seleniumManager = new SeleniumManager(logger);
@@ -229,21 +260,20 @@ async function main() {
       logger.info(`[Orchestrator] Selenium initialized (scrollDelay=${options.scrollDelay || 400}ms)`);
     }
 
-    // Create scraper using factory
-    const { scraper, isInfiniteScroll } = createScraperFromConfig(config, {
+    // Create scraper using factory with effective pagination type
+    const { scraper } = createScraperFromConfig(config, {
       browserManager, seleniumManager, rateLimiter, logger, configLoader
     }, {
-      scroll: options.scroll, forceSelenium: options.forceSelenium,
+      scroll: effectivePaginationType === 'infinite-scroll',
+      forceSelenium: effectivePaginationType === 'infinite-scroll',
       scrollDelay: options.scrollDelay, maxRetries: options.maxRetries,
-      maxScrolls: options.maxScrolls, paginate: paginationEnabled, maxPages
+      maxScrolls: options.maxScrolls,
+      paginate: effectivePaginationType === 'pagination',
+      maxPages
     });
 
-    // Determine scraper type for execution strategy
-    const scraperType = isInfiniteScroll ? 'infinite-scroll' :
-      (config.pagination?.paginationType === 'pagination' ||
-       config.pagination?.paginationType === 'parameter' ||
-       paginationEnabled) ? 'pagination' : 'single-page';
-
+    // Use effective pagination type for execution strategy
+    const scraperType = effectivePaginationType;
     logger.info(`[Orchestrator] Using scraper type: ${scraperType}`);
 
     // Execute scraping based on type
@@ -280,7 +310,7 @@ async function main() {
     const contacts = Array.from(uniqueMap.values());
 
     // Log results using stats reporter
-    logScrapingStats(contacts, logger, { paginationEnabled, pageUrls, allContacts });
+    logScrapingStats(contacts, logger, { paginationEnabled: effectivePaginationEnabled, pageUrls, allContacts });
     const domainStats = logDomainStats(contacts, domainExtractor, logger);
     logSampleContacts(contacts, logger, 5);
 

@@ -38,8 +38,11 @@ const {
   displayInfo,
   displayContactsTable,
   displayCompletionSummary,
-  countdown
+  countdown,
+  selectPaginationMode
 } = require('../utils/prompt-helper');
+
+const { detectPaginationFromUrl } = require('../constants/pagination-patterns');
 
 class FullPipelineOrchestrator {
   constructor(options = {}) {
@@ -54,6 +57,10 @@ class FullPipelineOrchestrator {
       headless: options.headless !== false,
       verbose: options.verbose || false,
       delay: options.delay || 3000,
+      // Pagination mode overrides
+      scroll: options.scroll || false,
+      paginate: options.paginate || false,
+      singlePage: options.singlePage || false,
       ...options
     };
 
@@ -418,25 +425,38 @@ class FullPipelineOrchestrator {
       maxDelay: 5000
     });
 
-    // Determine pagination type from config
-    let paginationType = this.config.pagination?.paginationType ||
-                          this.config.pagination?.type ||
-                          null;
+    // Determine effective pagination type using mode selection
+    const urlDetection = detectPaginationFromUrl(this.options.url);
+    let effectivePaginationType;
 
-    // Only auto-detect if not explicitly specified in config
-    if (!paginationType) {
-      // For --skip-config-gen with --paginate, use pagination
-      if (this.options.paginate) {
-        paginationType = 'parameter';
-      } else {
-        // Default to single-page for existing configs without explicit type
-        paginationType = 'single-page';
-      }
+    // Check for CLI overrides first
+    if (this.options.scroll) {
+      effectivePaginationType = 'infinite-scroll';
+      displayInfo('[Override] CLI flag: using infinite-scroll mode');
+    } else if (this.options.paginate) {
+      effectivePaginationType = 'pagination';
+      displayInfo('[Override] CLI flag: using pagination mode');
+    } else if (this.options.singlePage) {
+      effectivePaginationType = 'single-page';
+      displayInfo('[Override] CLI flag: using single-page mode');
+    } else {
+      // Use pagination mode selection
+      effectivePaginationType = await selectPaginationMode({
+        configPaginationType: this.config?.pagination?.paginationType,
+        urlDetection,
+        autoMode: this.options.autoMode,
+        logger
+      });
     }
 
-    const isInfiniteScroll = paginationType === 'infinite-scroll';
+    const configType = this.config?.pagination?.paginationType;
+    if (configType && effectivePaginationType !== configType) {
+      displayInfo(`Mode: ${effectivePaginationType} (overriding config: ${configType})`);
+    }
 
-    displayInfo(`Pagination type: ${paginationType}${this.options.paginate ? ' (from --paginate flag)' : ''}`);
+    const isInfiniteScroll = effectivePaginationType === 'infinite-scroll';
+
+    displayInfo(`Pagination type: ${effectivePaginationType}`);
     displayInfo(`Using ${isInfiniteScroll ? 'Selenium (PAGE_DOWN)' : 'Puppeteer'}`);
     console.log('');
 
@@ -473,13 +493,9 @@ class FullPipelineOrchestrator {
         this.browserManager = new BrowserManager(logger);
         await this.browserManager.launch(this.options.headless);
 
-        // Choose scraper based on pagination type
-        const paginationType = this.config.pagination?.paginationType ||
-                              this.config.pagination?.type ||
-                              'single-page';
-
+        // Choose scraper based on effective pagination type
         let scraper;
-        if (paginationType === 'pagination' || paginationType === 'traditional' || paginationType === 'parameter') {
+        if (effectivePaginationType === 'pagination') {
           const configLoader = new ConfigLoader(logger);
           scraper = new PaginationScraper(this.browserManager, rateLimiter, logger, configLoader, {});
         } else {

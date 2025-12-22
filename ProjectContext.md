@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 19, 2025 (Documentation cleanup, navigation strategy section, maxButtonClicks: 200)
+**Last Updated**: December 22, 2025 (Pagination mode selection feature, detectPaginationFromUrl, selectPaginationMode)
 
 ---
 
@@ -279,15 +279,18 @@ node orchestrator.js --url <url>           # Target URL (required)
                      --headless <bool>     # Browser mode (default: true)
                      --delay <ms>          # Request delay range (default: 2000-5000)
                      --output <format>     # json|sheets (default: json)
-                     --paginate            # Enable pagination
+
+# Pagination Mode Selection (choose one, or use interactive prompt)
+                     --paginate            # Force pagination mode (URL-based pagination)
+                     --scroll              # Force infinite scroll mode (Selenium PAGE_DOWN)
+                     --single-page         # Force single-page mode (no pagination)
                      --start-page <n>      # Resume from page
                      --max-pages <n>       # Max pages to scrape
-                     --scroll              # Enable infinite scroll handling
                      --max-scrolls <n>     # Max scroll attempts (default: 50)
 
 # Full Pipeline Workflow Options
                      --full-pipeline       # Run full pipeline: config → scrape → enrich → export
-                     --auto                # Skip confirmation prompts in full-pipeline mode
+                     --auto                # Skip confirmation prompts AND pagination mode selection
                      --skip-config-gen     # Skip config generation, use existing config
                      --no-enrich           # Skip enrichment stage
                      --no-export           # Skip export stage
@@ -299,6 +302,30 @@ node orchestrator.js --url <url>           # Target URL (required)
                      --validate            # Run validation tool (quick test with first N contacts)
                      -v, --verbose         # Detailed output with field-level information
 ```
+
+**Pagination Mode Selection** (December 2025):
+
+When no explicit mode flag is provided (`--scroll`, `--paginate`, `--single-page`), the orchestrator displays an interactive prompt:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  PAGINATION MODE SELECTION              │
+├─────────────────────────────────────────────────────────┤
+│ Detection:                                              │
+│   Domain match: compass.com (pagination)                │
+│   URL param: page=1                                     │
+├─────────────────────────────────────────────────────────┤
+│ Suggested mode: pagination                              │
+└─────────────────────────────────────────────────────────┘
+
+Select pagination mode:
+  1. pagination (Recommended)
+  2. infinite-scroll
+  3. single-page
+Enter choice (1-3 or text):
+```
+
+Use `--auto` to skip the prompt and auto-select based on detection.
 
 **Dependencies**: All scrapers, browser-manager, rate-limiter, logger, paginator
 
@@ -818,14 +845,48 @@ The URL generator preserves ALL non-pagination URL parameters when generating pa
 - `getPaginationParameterType(paramName)` - Returns 'page', 'offset', 'size', or null
 - `isPageParameter(paramName)` - Boolean check for page parameters
 - `isOffsetParameter(paramName)` - Boolean check for offset parameters
+- `detectPaginationFromUrl(url)` - Analyzes URL to suggest pagination type (see below)
+
+**Known Domain Pagination Types** (`KNOWN_DOMAIN_PAGINATION`):
+```javascript
+// Infinite scroll sites
+'sullcrom.com': 'infinite-scroll',
+'skadden.com': 'infinite-scroll',
+'weil.com': 'infinite-scroll',
+
+// Traditional pagination sites
+'paulweiss.com': 'pagination',
+'kirkland.com': 'pagination',
+'clearygottlieb.com': 'pagination',
+'compass.com': 'pagination',
+// ... more in source file
+```
+
+**URL Detection Function** (`detectPaginationFromUrl`):
+```javascript
+const { detectPaginationFromUrl } = require('./src/constants/pagination-patterns');
+
+const result = detectPaginationFromUrl('https://example.com/people?page=2');
+// Returns:
+// {
+//   hasPaginationParam: true,
+//   paramName: 'page',
+//   paramValue: '2',
+//   suggestedType: 'pagination',
+//   confidence: 'high',
+//   domainMatch: null  // or matched domain name
+// }
+```
 
 **Import Path**:
 ```javascript
 const {
   PAGE_PARAMETER_NAMES,
   OFFSET_PARAMETER_NAMES,
+  KNOWN_DOMAIN_PAGINATION,
   getPaginationParameterType,
-  isPageParameter
+  isPageParameter,
+  detectPaginationFromUrl
 } = require('./src/constants/pagination-patterns');
 ```
 
@@ -2806,6 +2867,7 @@ displayCompletionSummary({
 | `displayProgressIndicator(current, total, label)` | Progress bar | `void` |
 | `displayCompletionSummary(stats)` | Final summary | `void` |
 | `countdown(seconds, prefix)` | Countdown timer | `Promise<void>` |
+| `selectPaginationMode(options)` | Interactive pagination mode selection | `Promise<string>` |
 
 **Import Path**:
 ```javascript
@@ -2823,7 +2885,8 @@ const {
   displayFieldComparison,
   displayProgressIndicator,
   displayCompletionSummary,
-  countdown
+  countdown,
+  selectPaginationMode
 } = require('./src/utils/prompt-helper');
 ```
 

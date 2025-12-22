@@ -373,6 +373,109 @@ function displayCompletionSummary(result) {
   displayStageSummary(summary);
 }
 
+/**
+ * Select pagination mode based on URL detection, config, and user input
+ * @param {Object} options - Selection options
+ * @param {string} options.configPaginationType - Pagination type from config (may be null)
+ * @param {Object} options.urlDetection - Result from detectPaginationFromUrl()
+ * @param {boolean} options.autoMode - Skip prompt and auto-select (default: false)
+ * @param {Object} options.logger - Logger instance (optional)
+ * @returns {Promise<string>} - Selected pagination type: 'pagination', 'infinite-scroll', or 'single-page'
+ */
+async function selectPaginationMode(options = {}) {
+  const {
+    configPaginationType,
+    urlDetection = {},
+    autoMode = false,
+    logger = null
+  } = options;
+
+  const log = (msg) => logger ? logger.info(msg) : console.log(msg);
+
+  // Build detection info for display
+  const detectionInfo = [];
+
+  if (configPaginationType) {
+    detectionInfo.push(`Config: ${configPaginationType}`);
+  }
+
+  if (urlDetection.domainMatch) {
+    detectionInfo.push(`Domain match: ${urlDetection.domainMatch} (${urlDetection.suggestedType})`);
+  }
+
+  if (urlDetection.hasPaginationParam) {
+    detectionInfo.push(`URL param: ${urlDetection.paramName}=${urlDetection.paramValue}`);
+  }
+
+  // Determine suggested type (priority: config > domain match > URL param > single-page)
+  let suggestedType = configPaginationType || urlDetection.suggestedType || 'single-page';
+
+  // Normalize type names
+  if (suggestedType === 'parameter' || suggestedType === 'traditional') {
+    suggestedType = 'pagination';
+  }
+
+  // Auto mode: use suggestion without prompt
+  if (autoMode) {
+    if (detectionInfo.length > 0) {
+      log(`[Pagination] Detection: ${detectionInfo.join(', ')}`);
+    }
+    log(`[Pagination] Auto-selecting: ${suggestedType}`);
+    return suggestedType;
+  }
+
+  // Display detection info
+  console.log('');
+  console.log('┌─────────────────────────────────────────────────────────┐');
+  console.log('│                  PAGINATION MODE SELECTION              │');
+  console.log('├─────────────────────────────────────────────────────────┤');
+
+  if (detectionInfo.length > 0) {
+    console.log('│ Detection:                                              │');
+    detectionInfo.forEach(info => {
+      const padded = info.padEnd(55);
+      console.log(`│   ${padded} │`);
+    });
+    console.log('├─────────────────────────────────────────────────────────┤');
+  }
+
+  console.log('│ Suggested mode: ' + suggestedType.padEnd(40) + ' │');
+  console.log('└─────────────────────────────────────────────────────────┘');
+  console.log('');
+
+  // Build options with recommended first
+  const modeOptions = [];
+  const modeDescriptions = {
+    'pagination': 'Traditional pagination (URL changes per page)',
+    'infinite-scroll': 'Infinite scroll (content loads on scroll)',
+    'single-page': 'Single page (no pagination)'
+  };
+
+  // Add suggested option first with "(Recommended)" suffix
+  modeOptions.push(`${suggestedType} (Recommended)`);
+
+  // Add other options
+  ['pagination', 'infinite-scroll', 'single-page'].forEach(mode => {
+    if (mode !== suggestedType) {
+      modeOptions.push(mode);
+    }
+  });
+
+  // Prompt user
+  const choice = await confirmOptions(
+    'Select pagination mode:',
+    modeOptions
+  );
+
+  // Extract mode from choice (remove " (Recommended)" if present)
+  const selectedMode = choice.replace(' (Recommended)', '');
+
+  console.log('');
+  displayInfo(`Selected mode: ${selectedMode}`);
+
+  return selectedMode;
+}
+
 module.exports = {
   confirmYesNo,
   confirmOptions,
@@ -389,5 +492,6 @@ module.exports = {
   displayCompletionSummary,
   countdown,
   sleep,
-  truncate
+  truncate,
+  selectPaginationMode
 };
