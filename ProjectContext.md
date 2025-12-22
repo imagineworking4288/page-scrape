@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 22, 2025 (Pagination mode selection feature, detectPaginationFromUrl, selectPaginationMode)
+**Last Updated**: December 22, 2025 (Binary search upper bound fix - expands to hardCap when visual max is valid)
 
 ---
 
@@ -795,6 +795,21 @@ this.scrollConfig = {
 #### src/features/pagination/binary-searcher.js
 
 **Purpose**: Finds true maximum page number using binary search.
+
+**Key Parameters**:
+- `hardCap` - Maximum pages to search (default: 500)
+- `visualMax` - Max page detected from pagination UI (hint for search)
+- `minContacts` - Minimum contacts to consider page valid
+
+**Critical Fix (December 2025)**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max. This allows finding the true maximum page beyond what the pagination UI shows.
+
+```javascript
+if (visualMaxValid.hasContacts) {
+  lowerBound = visualMax;
+  lastValidPage = visualMax;
+  upperBound = hardCap;  // CRITICAL: Expand bounds to find true max
+}
+```
 
 #### src/features/pagination/url-generator.js
 

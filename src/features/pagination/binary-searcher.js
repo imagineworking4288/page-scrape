@@ -20,10 +20,10 @@ class BinarySearcher {
    * @param {function} urlGenerator - Function to generate page URLs
    * @param {number|null} visualMax - Max page from visual detection (hint)
    * @param {number} minContacts - Minimum contacts to consider page valid
-   * @param {number} hardCap - Maximum pages to search (default: 200)
+   * @param {number} hardCap - Maximum pages to search (default: 500)
    * @returns {Promise<object>} - {trueMax, isCapped, testedPages, searchPath, boundaryConfirmed}
    */
-  async findTrueMaxPage(page, pattern, urlGenerator, visualMax, minContacts, hardCap = 200) {
+  async findTrueMaxPage(page, pattern, urlGenerator, visualMax, minContacts, hardCap = 500) {
     try {
       this.logger.info('[BinarySearcher] Starting binary search for true max page...');
 
@@ -64,8 +64,9 @@ class BinarySearcher {
         if (visualMaxValid.hasContacts) {
           lowerBound = visualMax;
           lastValidPage = visualMax;
-          searchPath.push(`Visual max ${visualMax} valid (${visualMaxValid.contactCount} contacts), searching forward`);
-          this.logger.info(`[BinarySearcher] Visual max ${visualMax} is valid, searching forward...`);
+          upperBound = hardCap;  // CRITICAL: Expand bounds to find true max beyond visual max
+          searchPath.push(`Visual max ${visualMax} valid (${visualMaxValid.contactCount} contacts), expanding search to ${hardCap}`);
+          this.logger.info(`[BinarySearcher] Visual max ${visualMax} is valid, expanding search range to ${hardCap}`);
         } else {
           upperBound = visualMax - 1;
           searchPath.push(`Visual max ${visualMax} invalid, searching backward`);
