@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 22, 2025 (Multi-method page validation with card selector support in binary searcher)
+**Last Updated**: December 22, 2025 (Smart waitForSelector validation in binary searcher - exclusive card selector mode)
 
 ---
 
@@ -800,24 +800,44 @@ this.scrollConfig = {
 - `hardCap` - Maximum pages to search (default: 500)
 - `visualMax` - Max page detected from pagination UI (hint for search)
 - `minContacts` - Minimum contacts to consider page valid
-- `cardSelector` - CSS selector from config for card-based validation (NEW)
+- `cardSelector` - CSS selector from config for card-based validation
 
-**Multi-Method Page Validation (December 2025)**: The `_validatePage()` method now uses multiple detection strategies in priority order:
+**Smart Page Validation (December 2025)**: The `_validatePage()` method uses intelligent waiting and exclusive detection:
 
-1. **PRIMARY - Config card selector**: Uses `cardPattern.primarySelector` from config (e.g., `div.agentCard`)
-2. **FALLBACK 1 - Mailto links**: `a[href^="mailto:"]`
-3. **FALLBACK 2 - Profile URL patterns**: `/agents/`, `/people/`, `/attorney/`, `/lawyer/`, etc.
-4. **FALLBACK 3 - Email regex**: Emails in visible page text
-5. **FALLBACK 4 - Tel links**: `a[href^="tel:"]`
+**When card selector exists** (from config):
+1. Uses `waitForSelector()` with 5-second timeout (smarter than fixed delay)
+2. If cards appear → count them immediately, return result
+3. If timeout → page is truly empty, return 0 contacts
+4. **NO FALLBACKS** - uses only the card selector to prevent false positives
 
-This fixes sites like Compass.com where cards exist but no mailto links are present.
+**When NO card selector**:
+1. Uses 2-second fixed wait
+2. Fallback chain: mailto links → profile URL patterns → email regex → tel links
+
+```javascript
+// Smart waiting logic
+if (this.cardSelector) {
+  try {
+    await page.waitForSelector(this.cardSelector, { timeout: 5000 });
+    // Cards loaded - count them
+  } catch (e) {
+    // Timeout - page is truly empty
+    return { hasContacts: false, contactCount: 0 };
+  }
+}
+```
+
+**Why exclusive selector (no fallbacks)**:
+- Fallback patterns (mailto, tel, profile links) match navigation/footer elements on empty pages
+- This caused every page to appear "valid", making binary search run forever
+- With exclusive mode: empty pages timeout and correctly return 0 contacts
 
 **Data Flow**:
 ```
 PaginationScraper.config.cardPattern.primarySelector
     → Paginator.paginate(options.cardSelector)
     → BinarySearcher.findTrueMaxPage(cardSelector)
-    → _validatePage() uses this.cardSelector as PRIMARY check
+    → _validatePage() uses waitForSelector() for smart waiting
 ```
 
 **Critical Fix (December 2025)**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max.

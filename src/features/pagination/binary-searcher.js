@@ -282,8 +282,8 @@ class BinarySearcher {
 
   /**
    * Validate page content
-   * If card selector exists (from config): use ONLY that selector, no fallbacks
-   * If no card selector: use fallback chain (mailto -> profile links -> email regex -> tel links)
+   * If card selector exists (from config): wait for selector to appear, use ONLY that selector
+   * If no card selector: use fixed wait + fallback chain (mailto -> profile links -> email regex -> tel links)
    * @param {object} page - Puppeteer page object
    * @param {number} minContacts - Minimum contacts to consider page valid
    * @returns {Promise<object>} - {hasContacts, contactCount, method}
@@ -291,25 +291,43 @@ class BinarySearcher {
    */
   async _validatePage(page, minContacts = 1) {
     try {
-      await page.waitForTimeout(2000);
-
-      const result = await page.evaluate((cardSelector) => {
-        // ========== IF CARD SELECTOR EXISTS: USE ONLY THAT ==========
-        if (cardSelector) {
-          try {
-            const cards = document.querySelectorAll(cardSelector);
-            return {
-              hasContacts: cards.length > 0,
-              contactCount: cards.length,
-              method: 'config-card-selector'
-            };
-          } catch (e) {
-            return { hasContacts: false, contactCount: 0, method: 'selector-error', error: e.message };
-          }
+      // If we have a card selector, wait for it to appear (smarter than fixed delay)
+      if (this.cardSelector) {
+        try {
+          await page.waitForSelector(this.cardSelector, { timeout: 5000 });
+          this.logger.debug(`[BinarySearcher] Card selector appeared, checking count...`);
+        } catch (e) {
+          // Selector didn't appear within timeout - page is truly empty
+          this.logger.debug(`[BinarySearcher] Page validation: 0 contacts via config-card-selector (timeout - no cards found)`);
+          return {
+            hasContacts: false,
+            contactCount: 0,
+            contactEstimate: 0,
+            emailCount: 0,
+            method: 'config-card-selector'
+          };
         }
 
-        // ========== NO CARD SELECTOR: USE FALLBACK CHAIN ==========
+        // Cards appeared - now count them
+        const result = await page.evaluate((selector) => {
+          const cards = document.querySelectorAll(selector);
+          return { contactCount: cards.length };
+        }, this.cardSelector);
 
+        this.logger.debug(`[BinarySearcher] Page validation: ${result.contactCount} contacts via config-card-selector`);
+        return {
+          hasContacts: result.contactCount >= minContacts,
+          contactCount: result.contactCount,
+          contactEstimate: result.contactCount,
+          emailCount: 0,
+          method: 'config-card-selector'
+        };
+      }
+
+      // No card selector - use fixed wait and fallback chain
+      await page.waitForTimeout(2000);
+
+      const result = await page.evaluate(() => {
         // Fallback 1: Mailto links
         const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]').length;
         if (mailtoLinks > 0) {
@@ -353,16 +371,15 @@ class BinarySearcher {
 
         // No contacts found
         return { hasContacts: false, contactCount: 0, method: 'none' };
-
-      }, this.cardSelector);
+      });
 
       this.logger.debug(`[BinarySearcher] Page validation: ${result.contactCount} contacts via ${result.method}`);
 
       return {
         hasContacts: result.hasContacts && result.contactCount >= minContacts,
         contactCount: result.contactCount,
-        contactEstimate: result.contactCount,  // Alias for backward compatibility
-        emailCount: 0,  // Simplified - not tracking separately
+        contactEstimate: result.contactCount,
+        emailCount: 0,
         method: result.method
       };
     } catch (error) {
