@@ -1,6 +1,12 @@
 # Project Structure
 
-**Last Verified**: 2025-12-22
+## Overview
+
+Universal Professional Scraper - A comprehensive web scraping tool with intelligent extraction, pagination detection, profile enrichment, and Google Sheets export capabilities.
+
+**Total Files:** 86 JavaScript files
+**Main Entry Point:** `orchestrator.js`
+**Package:** universal-scraper v1.0.0
 
 ---
 
@@ -8,268 +14,201 @@
 
 ```
 page-scrape/
-├── orchestrator.js              # Main CLI entry point — routes to scrapers/workflows
-├── package.json                 # Dependencies and npm scripts
-├── .env                         # Environment variables (not committed)
-├── .env.example                 # Template for .env
-├── start.bat                    # Windows interactive launcher
-├── README.md                    # Project documentation
 │
-├── context/                     # Documentation system (you are here)
-│   ├── Summary.md               # Navigation hub and overview
-│   ├── ProjectContext.md        # Operational guide
-│   ├── ProjectStructure.md      # This file — directory map
-│   ├── API.md                   # Complete function encyclopedia
-│   ├── Algorithms.md            # Complex logic explained
-│   ├── Dependencies.md          # Package documentation
-│   └── CHANGELOG.md             # Historical record
-│
-├── configs/                     # Runtime configuration files
-│   ├── _default.json            # Fallback config for unknown sites
-│   ├── _template.json           # Template for new configs
-│   ├── _pagination_cache.json   # Cached pagination patterns
-│   └── website-configs/         # Site-specific configs
-│       ├── compass-com.json     # Compass.com config
-│       ├── sullcrom-com.json    # Sullivan & Cromwell
-│       ├── kirkland-com.json    # Kirkland & Ellis
-│       ├── davispolk-com.json   # Davis Polk
-│       ├── paulweiss-com.json   # Paul Weiss
-│       ├── skadden-com.json     # Skadden
-│       ├── debevoise-com.json   # Debevoise
-│       └── clearygottlieb-com.json
+├── orchestrator.js                          # Main CLI entry point and workflow orchestrator
 │
 ├── src/
-│   ├── core/                    # Infrastructure layer
-│   │   ├── browser-manager.js   # Puppeteer browser lifecycle
-│   │   ├── selenium-manager.js  # Selenium for infinite scroll
-│   │   ├── rate-limiter.js      # Request throttling
-│   │   ├── logger.js            # Winston logging setup
-│   │   └── index.js             # Barrel exports
+│   ├── config/
+│   │   ├── config-loader.js                # Loads and validates site-specific JSON configs
+│   │   └── schemas.js                      # JSON schema validators for config files
 │   │
-│   ├── config/                  # Configuration handling
-│   │   ├── config-loader.js     # Load site configs from disk
-│   │   └── schemas.js           # Config validation schemas
+│   ├── constants/
+│   │   ├── index.js                        # Central constants export
+│   │   └── pagination-patterns.js          # Predefined pagination detection patterns
 │   │
-│   ├── constants/               # Shared constants
-│   │   ├── index.js             # Main constants exports
-│   │   └── pagination-patterns.js # URL pattern detection
+│   ├── core/
+│   │   ├── browser-manager.js              # Puppeteer browser lifecycle management with stealth
+│   │   ├── index.js                        # Core module exports
+│   │   ├── logger.js                       # Winston-based logging system
+│   │   ├── rate-limiter.js                 # Exponential backoff rate limiting
+│   │   └── selenium-manager.js             # Selenium WebDriver management (fallback)
 │   │
-│   ├── features/                # Feature modules
-│   │   ├── pagination/          # Pagination handling
-│   │   │   ├── paginator.js     # Main pagination orchestrator
-│   │   │   ├── binary-searcher.js # Binary search for true max
-│   │   │   ├── pattern-detector.js # Detect pagination patterns
-│   │   │   └── url-generator.js # Generate page URLs
+│   ├── extraction/
+│   │   ├── extractors/
+│   │   │   ├── coordinate-extractor.js     # GPS/lat-long coordinate extraction
+│   │   │   ├── email-extractor.js          # Email address pattern matching
+│   │   │   ├── index.js                    # Extractor module exports
+│   │   │   ├── label-extractor.js          # Field label detection
+│   │   │   ├── link-extractor.js           # Hyperlink and URL extraction
+│   │   │   ├── phone-extractor.js          # International phone number extraction
+│   │   │   └── screenshot-extractor.js     # Visual element screenshot capture
+│   │   └── smart-field-extractor.js        # Intelligent field extraction orchestrator
+│   │
+│   ├── features/
+│   │   ├── enrichment/
+│   │   │   ├── cleaners/
+│   │   │   │   ├── index.js                # Cleaner module exports
+│   │   │   │   ├── location-cleaner.js     # Remove phone/email noise from locations
+│   │   │   │   ├── name-cleaner.js         # Extract embedded titles from names
+│   │   │   │   ├── noise-detector.js       # Generic noise pattern detection
+│   │   │   │   └── title-extractor.js      # Professional title extraction
+│   │   │   │
+│   │   │   ├── post-cleaners/
+│   │   │   │   ├── confidence-scorer.js    # Assign confidence scores to fields
+│   │   │   │   ├── domain-classifier.js    # Email domain classification (personal/work)
+│   │   │   │   ├── field-cleaner.js        # Post-enrichment field cleaning
+│   │   │   │   ├── index.js                # Post-cleaner module exports
+│   │   │   │   ├── location-normalizer.js  # Normalize location formats
+│   │   │   │   ├── multi-location-handler.js # Handle multiple location values
+│   │   │   │   └── phone-location-correlator.js # Cross-reference phone area codes with locations
+│   │   │   │
+│   │   │   ├── field-comparator.js         # Compare list vs profile field values
+│   │   │   ├── profile-enricher.js         # Visit profile pages to enrich data
+│   │   │   ├── profile-extractor.js        # Extract data from individual profiles
+│   │   │   └── report-generator.js         # Generate enrichment summary reports
 │   │   │
-│   │   ├── enrichment/          # Profile enrichment system
-│   │   │   ├── profile-enricher.js # Main enrichment logic
-│   │   │   ├── profile-extractor.js # Extract from profiles
-│   │   │   ├── field-comparator.js # Compare/merge fields
-│   │   │   ├── report-generator.js # Enrichment reports
-│   │   │   ├── cleaners/        # Data cleaning
-│   │   │   │   ├── name-cleaner.js
-│   │   │   │   ├── location-cleaner.js
-│   │   │   │   ├── title-extractor.js
-│   │   │   │   ├── noise-detector.js
-│   │   │   │   └── index.js
-│   │   │   └── post-cleaners/   # Post-enrichment cleaning
-│   │   │       ├── confidence-scorer.js
-│   │   │       ├── domain-classifier.js
-│   │   │       ├── field-cleaner.js
-│   │   │       ├── location-normalizer.js
-│   │   │       ├── multi-location-handler.js
-│   │   │       ├── phone-location-correlator.js
-│   │   │       └── index.js
+│   │   ├── export/
+│   │   │   ├── batch-writer.js             # Batch writing to Google Sheets
+│   │   │   ├── column-detector.js          # Detect existing column structure
+│   │   │   ├── data-formatter.js           # Format data for Sheets export
+│   │   │   ├── index.js                    # Export module exports
+│   │   │   ├── sheet-exporter.js           # Main Google Sheets export orchestrator
+│   │   │   └── sheet-manager.js            # Sheet creation and management
 │   │   │
-│   │   └── export/              # Data export
-│   │       ├── sheet-exporter.js # Google Sheets export
-│   │       ├── sheet-manager.js  # Sheets API wrapper
-│   │       ├── batch-writer.js   # Batch write operations
-│   │       ├── column-detector.js # Auto-detect columns
-│   │       ├── data-formatter.js # Format for export
-│   │       └── index.js
+│   │   └── pagination/
+│   │       ├── binary-searcher.js          # Binary search for max page discovery
+│   │       ├── paginator.js                # Main pagination orchestrator
+│   │       ├── pattern-detector.js         # Detect pagination patterns (URL/visual/nav)
+│   │       └── url-generator.js            # Generate pagination URLs from patterns
 │   │
-│   ├── extraction/              # Field extraction
-│   │   ├── smart-field-extractor.js # Multi-method extraction
-│   │   └── extractors/          # Individual extractors
-│   │       ├── email-extractor.js
-│   │       ├── phone-extractor.js
-│   │       ├── link-extractor.js
-│   │       ├── label-extractor.js
-│   │       ├── coordinate-extractor.js
-│   │       ├── screenshot-extractor.js
-│   │       └── index.js
+│   ├── scrapers/
+│   │   ├── base-scraper.js                 # Abstract base scraper class
+│   │   ├── index.js                        # Scraper module exports
+│   │   │
+│   │   └── config-scrapers/
+│   │       ├── base-config-scraper.js      # Config-driven scraper base class
+│   │       ├── index.js                    # Config scraper exports
+│   │       ├── infinite-scroll-scraper.js  # Infinite scroll page handling
+│   │       ├── pagination-scraper.js       # Paginated list scraping
+│   │       └── single-page-scraper.js      # Single page scraping
 │   │
-│   ├── scrapers/                # Scraping implementations
-│   │   ├── base-scraper.js      # Abstract base class
-│   │   ├── index.js             # Barrel exports
-│   │   └── config-scrapers/     # v2.3 config-based scrapers
-│   │       ├── base-config-scraper.js # Config scraper base
-│   │       ├── pagination-scraper.js  # Multi-page scraper
-│   │       ├── infinite-scroll-scraper.js # Scroll scraper
-│   │       ├── single-page-scraper.js # Single page scraper
-│   │       └── index.js         # Factory + exports
+│   ├── tools/
+│   │   ├── assets/
+│   │   │   └── overlay-client.js           # Browser-injected overlay UI for config generation
+│   │   │
+│   │   ├── lib/
+│   │   │   ├── card-matcher.js             # Match DOM elements to contact cards
+│   │   │   ├── config-builder.js           # Interactive config file builder
+│   │   │   ├── config-schemas.js           # Config validation schemas
+│   │   │   ├── config-validator.js         # Validate config file structure
+│   │   │   ├── constants/
+│   │   │   │   └── field-requirements.js   # Required/optional field definitions
+│   │   │   ├── element-capture.js          # Capture element selectors
+│   │   │   ├── enhanced-capture.js         # Enhanced element capture with context
+│   │   │   ├── extraction-tester.js        # Test extraction selectors live
+│   │   │   ├── index.js                    # Tools lib exports
+│   │   │   ├── interactive-session.js      # Interactive CLI session manager
+│   │   │   ├── pagination-diagnostic.js    # Diagnose pagination issues
+│   │   │   └── profile-enrichment.js       # Profile enrichment configuration
+│   │   │
+│   │   ├── config-generator.js             # Main config generation CLI tool
+│   │   ├── enrich-contacts.js              # Standalone enrichment CLI tool
+│   │   ├── export-to-sheets.js             # Standalone Sheets export CLI tool
+│   │   ├── test-config.js                  # Test config file validity
+│   │   ├── test-navigation.js              # Test navigation strategies
+│   │   └── validate-config.js              # Validate config against schema
 │   │
-│   ├── workflows/               # High-level orchestrators
-│   │   └── full-pipeline.js     # Full pipeline workflow
+│   ├── utils/
+│   │   ├── constants.js                    # Utility constants
+│   │   ├── contact-extractor.js            # Extract contact cards from DOM
+│   │   ├── domain-extractor.js             # Extract domain from URL
+│   │   ├── google-sheets-exporter.js       # Google Sheets API wrapper
+│   │   ├── profile-visitor.js              # Visit and extract from profile pages
+│   │   ├── prompt-helper.js                # CLI prompting utilities
+│   │   └── stats-reporter.js               # Progress and statistics reporting
 │   │
-│   ├── utils/                   # Shared utilities
-│   │   ├── contact-extractor.js # Contact parsing
-│   │   ├── domain-extractor.js  # Domain analysis
-│   │   ├── google-sheets-exporter.js # Legacy sheets export
-│   │   ├── profile-visitor.js   # Visit profile pages
-│   │   ├── prompt-helper.js     # Terminal UI utilities
-│   │   ├── stats-reporter.js    # Scraping statistics
-│   │   └── constants.js         # Utility constants
-│   │
-│   └── tools/                   # CLI tools
-│       ├── config-generator.js  # Visual config creation
-│       ├── validate-config.js   # Quick config testing
-│       ├── test-config.js       # Config extraction test
-│       ├── enrich-contacts.js   # Profile enrichment CLI
-│       ├── export-to-sheets.js  # Google Sheets export CLI
-│       ├── test-navigation.js   # Navigation testing
-│       ├── assets/              # Tool assets
-│       │   └── overlay-client.js # Browser overlay script
-│       └── lib/                 # Tool libraries
-│           ├── card-matcher.js
-│           ├── config-builder.js
-│           ├── config-schemas.js
-│           ├── config-validator.js
-│           ├── element-capture.js
-│           ├── enhanced-capture.js
-│           ├── extraction-tester.js
-│           ├── interactive-session.js
-│           ├── pagination-diagnostic.js
-│           ├── profile-enrichment.js
-│           ├── index.js
-│           └── constants/
-│               └── field-requirements.js
+│   └── workflows/
+│       └── full-pipeline.js                # Complete scraping workflow
 │
-├── tests/                       # Test suites
-│   ├── enrichment-test.js       # Enrichment system tests (68 cases)
-│   ├── post-cleaning-test.js    # Post-cleaner tests (41 cases)
-│   ├── selenium-infinite-scroll.test.js
-│   ├── pagination-priority.test.js
-│   ├── run-navigation-tests.js  # Navigation test runner
-│   └── navigation/              # Navigation tests
-│       ├── navigation-test-utils.js
-│       ├── infinite-scroll-navigation.test.js
-│       └── pagination-navigation.test.js
-│
-├── output/                      # Generated output (gitignored)
-│   ├── contacts-*.json          # Scraped contacts
-│   ├── scrape-*.json            # Raw scrape output
-│   ├── enriched-*.json          # Enriched contacts
-│   └── diagnostics/             # Diagnostic output
-│
-└── logs/                        # Log files (gitignored)
-    ├── scraper.log
-    └── error.log
+└── tests/
+    ├── enrichment-test.js                  # Test enrichment functionality
+    ├── pagination-priority.test.js         # Test pagination pattern priority
+    ├── post-cleaning-test.js               # Test post-cleaning operations
+    ├── run-navigation-tests.js             # Navigation strategy test runner
+    └── selenium-infinite-scroll.test.js    # Test Selenium infinite scroll
 ```
 
 ---
 
-## Directory Purposes
+## File Count by Category
 
-### `/src/core/`
-
-**Purpose**: Infrastructure-level code that all other modules depend on.
-
-**Philosophy**: These files should be stable and rarely change. They provide foundational services (browser management, logging, rate limiting) that feature code builds upon.
-
-**Files:**
-| File | Single-Line Purpose | Key Exports |
-|------|---------------------|-------------|
-| `browser-manager.js` | Puppeteer browser lifecycle | `BrowserManager` class |
-| `selenium-manager.js` | Selenium for infinite scroll | `SeleniumManager` class |
-| `rate-limiter.js` | Request throttling | `RateLimiter` class |
-| `logger.js` | Winston logging setup | `logger` instance |
-
-### `/src/features/pagination/`
-
-**Purpose**: Handles pagination detection and page discovery.
-
-**How It Works**: The Paginator orchestrates pattern detection (find ?page=N in URLs), URL generation, and binary search to find the true maximum page efficiently.
-
-**Files:**
-| File | Single-Line Purpose | Key Exports |
-|------|---------------------|-------------|
-| `paginator.js` | Orchestrate pagination discovery | `Paginator` class |
-| `binary-searcher.js` | Binary search for max page | `BinarySearcher` class |
-| `pattern-detector.js` | Detect pagination patterns | `PatternDetector` class |
-| `url-generator.js` | Generate page URLs | `URLGenerator` class |
-
-### `/src/features/enrichment/`
-
-**Purpose**: Validate and fill missing contact data by visiting profile pages.
-
-**How It Works**: For each contact with a profileUrl, visit the page, extract fields, compare with existing data, and merge (ENRICHED, VALIDATED, CLEANED, or REPLACED).
-
-### `/src/scrapers/config-scrapers/`
-
-**Purpose**: v2.3 config-based scrapers that use site configs for extraction.
-
-**Files:**
-| File | Single-Line Purpose | Key Exports |
-|------|---------------------|-------------|
-| `pagination-scraper.js` | Multi-page scraping with pagination | `PaginationScraper` class |
-| `infinite-scroll-scraper.js` | Selenium scroll scraping | `InfiniteScrollScraper` class |
-| `single-page-scraper.js` | Single page extraction | `SinglePageScraper` class |
-| `index.js` | Factory function | `createScraperFromConfig()` |
-
-### `/configs/`
-
-**Purpose**: Runtime configuration files for site-specific scraping.
-
-**Naming Convention**: `{domain-with-dashes}.json` (e.g., `compass-com.json`)
-
-**Structure**: See `ProjectContext.md` → Config File Structure
+| Category | Count | Purpose |
+|----------|-------|---------|
+| **Core** | 5 | Browser management, logging, rate limiting |
+| **Config** | 2 | Config loading and validation |
+| **Constants** | 2 | Shared constants and patterns |
+| **Extraction** | 8 | Field extractors and smart extraction |
+| **Enrichment** | 15 | Profile enrichment, cleaning, scoring |
+| **Export** | 6 | Google Sheets export functionality |
+| **Pagination** | 4 | Pagination detection and navigation |
+| **Scrapers** | 6 | Base and specialized scraper classes |
+| **Tools** | 17 | CLI tools for config generation and testing |
+| **Utils** | 7 | Shared utilities |
+| **Workflows** | 1 | Complete pipeline orchestration |
+| **Tests** | 5 | Test suites |
+| **Entry Point** | 1 | orchestrator.js |
+| **Total** | **86** | |
 
 ---
 
-## Quick File Lookup
+## Key Entry Points
 
-| I need to... | File | Function |
-|--------------|------|----------|
-| Run the main CLI | `orchestrator.js` | `main()` |
-| Load a site config | `src/config/config-loader.js` | `loadConfig()` |
-| Find pagination max page | `src/features/pagination/binary-searcher.js` | `findTrueMaxPage()` |
-| Detect pagination pattern | `src/features/pagination/pattern-detector.js` | `detect()` |
-| Generate page URLs | `src/features/pagination/url-generator.js` | `generate()` |
-| Scrape paginated site | `src/scrapers/config-scrapers/pagination-scraper.js` | `scrape()` |
-| Scrape infinite scroll | `src/scrapers/config-scrapers/infinite-scroll-scraper.js` | `scrapeWithScroll()` |
-| Enrich contacts | `src/features/enrichment/profile-enricher.js` | `enrich()` |
-| Export to Sheets | `src/features/export/sheet-exporter.js` | `export()` |
-| Create visual config | `src/tools/config-generator.js` | `main()` |
-| Validate a config | `src/tools/validate-config.js` | `main()` |
+| File | Purpose | When to Use |
+|------|---------|-------------|
+| `orchestrator.js` | Main CLI scraper | Run full scraping workflow |
+| `src/tools/config-generator.js` | Config creation tool | Create new site config |
+| `src/tools/enrich-contacts.js` | Standalone enrichment | Enrich existing CSV data |
+| `src/tools/export-to-sheets.js` | Standalone export | Export CSV to Google Sheets |
+| `src/tools/test-config.js` | Config validator | Test config before scraping |
+| `src/tools/test-navigation.js` | Navigation tester | Debug pagination issues |
 
 ---
 
-## File Naming Conventions
+## Configuration Files Location
 
-| Pattern | Meaning | Example |
-|---------|---------|---------|
-| `{name}.js` | Standard module | `paginator.js` |
-| `{name}-{type}.js` | Specialized type | `binary-searcher.js` |
-| `{domain}-com.json` | Site config | `compass-com.json` |
-| `index.js` | Barrel exports for directory | `src/core/index.js` |
-| `*.test.js` | Test file | `enrichment-test.js` |
+Config files are stored in `configs/website-configs/` (not shown in tree above, as they're user-generated):
+
+```
+configs/
+├── website-configs/
+│   ├── example.com.json
+│   ├── anotherdomain.com.json
+│   └── ...
+└── _pagination_cache.json
+```
+
+Each config defines selectors and strategies for a specific website domain.
 
 ---
 
-## Adding New Files
+## Technology Stack
 
-### When adding a new file:
+- **Browser Automation**: Puppeteer (primary), Selenium WebDriver (fallback)
+- **Stealth**: puppeteer-extra-plugin-stealth
+- **Parsing**: Cheerio
+- **Export**: Google Sheets API (googleapis)
+- **OCR**: Tesseract.js (for PDF/image text)
+- **PDF**: pdf-parse
+- **CLI**: Commander.js
+- **Logging**: Winston
+- **Testing**: Custom test runners (no framework)
 
-1. Follow the naming convention for its directory
-2. Add it to `index.js` if the directory has barrel exports
-3. Update this file (`ProjectStructure.md`) with its purpose
-4. Document its functions in `API.md`
-5. If it contains complex logic, add to `Algorithms.md`
+---
 
-### When adding a new directory:
+## Notes
 
-1. Create an `index.js` for exports if it will have multiple files
-2. Add directory description to this file
-3. Add to the directory tree above
+- All source files are in ES6 module syntax (`import`/`export`)
+- Config files use JSON format
+- Logs output to `logs/` directory
+- Scraped data saves to `output/` directory
+- Screenshots save to `screenshots/` directory

@@ -105,6 +105,36 @@ class PatternDetector {
   }
 
   /**
+   * Extract base URL without pagination parameter
+   * Used to update cached patterns with current URL path
+   * @param {string} url - Full URL with pagination param
+   * @param {string} paramName - Name of pagination parameter (e.g., 'page')
+   * @returns {string|null} Base URL for building pagination URLs
+   */
+  _extractBaseUrl(url, paramName) {
+    try {
+      const urlObj = new URL(url);
+
+      // Remove the pagination parameter from search params
+      urlObj.searchParams.delete(paramName);
+
+      // Return the URL without the pagination param (will be added back by URL generator)
+      const baseUrl = urlObj.origin + urlObj.pathname;
+
+      // If there are remaining search params, include them
+      const remainingParams = urlObj.searchParams.toString();
+      if (remainingParams) {
+        return `${baseUrl}?${remainingParams}`;
+      }
+
+      return baseUrl;
+    } catch (error) {
+      this.logger.warn(`[PatternDetector] Failed to extract baseUrl: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Discover pagination pattern from current page (URL-PARAMS-FIRST APPROACH)
    *
    * DETECTION PRIORITY ORDER (December 2025):
@@ -147,8 +177,21 @@ class PatternDetector {
       const domain = this.extractDomain(currentUrl);
       const cachedPattern = this.configLoader?.getCachedPattern?.(domain);
       if (cachedPattern?.pattern) {
-        this.logger.info('[PatternDetector] ✓ STEP 2: Using cached pattern');
-        return cachedPattern.pattern;
+        // FIX: Cache is keyed by domain only, but baseUrl may be from different path
+        // Update baseUrl to match current URL's base path, keeping only the paramName
+        const pattern = { ...cachedPattern.pattern };
+        const currentUrlBase = this._extractBaseUrl(currentUrl, pattern.paramName);
+        if (currentUrlBase && pattern.baseUrl !== currentUrlBase) {
+          this.logger.info(`[PatternDetector] ✓ STEP 2: Using cached pattern (paramName: ${pattern.paramName})`);
+          this.logger.info(`[PatternDetector] Updating baseUrl from cache to current URL path`);
+          this.logger.debug(`[PatternDetector] Cached baseUrl: ${pattern.baseUrl}`);
+          this.logger.debug(`[PatternDetector] Current baseUrl: ${currentUrlBase}`);
+          pattern.baseUrl = currentUrlBase;
+          pattern.originalUrl = currentUrl;
+        } else {
+          this.logger.info('[PatternDetector] ✓ STEP 2: Using cached pattern');
+        }
+        return pattern;
       }
       this.logger.info('[PatternDetector] Step 2: No cached pattern');
 
