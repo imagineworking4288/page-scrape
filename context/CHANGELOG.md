@@ -19,6 +19,18 @@ Each entry should include:
 
 # 2025
 
+## 2025-12-22 — Binary Searcher Wait Time Increase
+
+**Type**: Bugfix
+**Files**: `src/features/pagination/binary-searcher.js`
+**Impact**: Low — Fine-tuning of previous fix
+
+### What Changed
+
+Increased wait time from 3 seconds to 4 seconds after navigation. Diagnostic testing with `diagnose-visible.js` confirmed 4 seconds is more reliable for Compass.com and similar slow-loading dynamic sites.
+
+---
+
 ## 2025-12-22 — Binary Searcher Card Detection Fix
 
 **Type**: Bugfix

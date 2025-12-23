@@ -296,8 +296,8 @@ class BinarySearcher {
         timeout: 30000
       });
 
-      // Wait for content to load - CRITICAL: 3 seconds like working pattern
-      await new Promise(r => setTimeout(r, 3000));
+      // Wait for content to load - CRITICAL: 4 seconds for dynamic sites (proven working)
+      await new Promise(r => setTimeout(r, 4000));
 
       const validation = await this._validatePage(page, minContacts);
 
