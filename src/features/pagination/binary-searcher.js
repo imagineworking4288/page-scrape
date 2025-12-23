@@ -290,21 +290,23 @@ class BinarySearcher {
 
       this.logger.debug(`[BinarySearcher] Testing page ${pageNum}: ${pageUrl}`);
 
+      // Navigate with domcontentloaded (same as working scraper)
       await page.goto(pageUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30000
       });
 
-      await page.waitForTimeout(1000);
+      // Wait for content to load - CRITICAL: 3 seconds like working pattern
+      await new Promise(r => setTimeout(r, 3000));
 
-      const validation = await this._validatePage(page);
+      const validation = await this._validatePage(page, minContacts);
 
       return {
         hasContacts: validation.contactEstimate >= minContacts,
         contactCount: validation.contactEstimate,
         isEmpty: validation.contactEstimate === 0,
         url: pageUrl,
-        emailCount: validation.emailCount
+        emailCount: validation.emailCount || 0
       };
 
     } catch (error) {
@@ -320,11 +322,10 @@ class BinarySearcher {
   }
 
   /**
-   * Validate page content
-   * Uses the SAME approach as pagination-scraper's findCardElements():
-   * 1. Wait for selector (10s timeout, same as scraper) - warn on timeout but continue
-   * 2. Use page.$$() to count cards (Puppeteer native API, same as scraper)
-   * 3. If no card selector, use fallback chain
+   * Validate page content using the PROVEN WORKING pattern:
+   * - No waitForSelector (can timeout before content loads)
+   * - Use page.$$eval() with .catch(() => 0) for direct counting
+   * - Already waited 3 seconds in _testPageValidity
    * @param {object} page - Puppeteer page object
    * @param {number} minContacts - Minimum contacts to consider page valid
    * @returns {Promise<object>} - {hasContacts, contactCount, method}
@@ -332,20 +333,10 @@ class BinarySearcher {
    */
   async _validatePage(page, minContacts = 1) {
     try {
-      // If we have a card selector, use SAME approach as pagination-scraper
+      // If we have a card selector, count cards directly (PROVEN WORKING PATTERN)
       if (this.cardSelector) {
-        // Wait for selector (same 10s timeout as pagination-scraper)
-        // But DON'T return 0 on timeout - continue to count anyway
-        try {
-          await page.waitForSelector(this.cardSelector, { timeout: 10000 });
-          this.logger.debug(`[BinarySearcher] Card selector appeared`);
-        } catch (e) {
-          this.logger.debug(`[BinarySearcher] waitForSelector timeout, counting cards anyway...`);
-        }
-
-        // Use page.$$() - SAME as findCardElements() in base-config-scraper.js
-        const cards = await page.$$(this.cardSelector);
-        const contactCount = cards.length;
+        // Direct count with $$eval - no waitForSelector, no try/catch swallowing
+        const contactCount = await page.$$eval(this.cardSelector, els => els.length).catch(() => 0);
 
         this.logger.debug(`[BinarySearcher] Page validation: ${contactCount} contacts via config-card-selector`);
         return {
@@ -357,9 +348,7 @@ class BinarySearcher {
         };
       }
 
-      // No card selector - use fixed wait and fallback chain
-      await page.waitForTimeout(2000);
-
+      // No card selector - use fallback chain
       const result = await page.evaluate(() => {
         // Fallback 1: Mailto links
         const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]').length;
