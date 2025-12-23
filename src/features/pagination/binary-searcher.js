@@ -321,8 +321,10 @@ class BinarySearcher {
 
   /**
    * Validate page content
-   * If card selector exists (from config): wait for selector to appear, use ONLY that selector
-   * If no card selector: use fixed wait + fallback chain (mailto -> profile links -> email regex -> tel links)
+   * Uses the SAME approach as pagination-scraper's findCardElements():
+   * 1. Wait for selector (10s timeout, same as scraper) - warn on timeout but continue
+   * 2. Use page.$$() to count cards (Puppeteer native API, same as scraper)
+   * 3. If no card selector, use fallback chain
    * @param {object} page - Puppeteer page object
    * @param {number} minContacts - Minimum contacts to consider page valid
    * @returns {Promise<object>} - {hasContacts, contactCount, method}
@@ -330,34 +332,26 @@ class BinarySearcher {
    */
   async _validatePage(page, minContacts = 1) {
     try {
-      // If we have a card selector, wait for it to appear (smarter than fixed delay)
+      // If we have a card selector, use SAME approach as pagination-scraper
       if (this.cardSelector) {
+        // Wait for selector (same 10s timeout as pagination-scraper)
+        // But DON'T return 0 on timeout - continue to count anyway
         try {
-          await page.waitForSelector(this.cardSelector, { timeout: 5000 });
-          this.logger.debug(`[BinarySearcher] Card selector appeared, checking count...`);
+          await page.waitForSelector(this.cardSelector, { timeout: 10000 });
+          this.logger.debug(`[BinarySearcher] Card selector appeared`);
         } catch (e) {
-          // Selector didn't appear within timeout - page is truly empty
-          this.logger.debug(`[BinarySearcher] Page validation: 0 contacts via config-card-selector (timeout - no cards found)`);
-          return {
-            hasContacts: false,
-            contactCount: 0,
-            contactEstimate: 0,
-            emailCount: 0,
-            method: 'config-card-selector'
-          };
+          this.logger.debug(`[BinarySearcher] waitForSelector timeout, counting cards anyway...`);
         }
 
-        // Cards appeared - now count them
-        const result = await page.evaluate((selector) => {
-          const cards = document.querySelectorAll(selector);
-          return { contactCount: cards.length };
-        }, this.cardSelector);
+        // Use page.$$() - SAME as findCardElements() in base-config-scraper.js
+        const cards = await page.$$(this.cardSelector);
+        const contactCount = cards.length;
 
-        this.logger.debug(`[BinarySearcher] Page validation: ${result.contactCount} contacts via config-card-selector`);
+        this.logger.debug(`[BinarySearcher] Page validation: ${contactCount} contacts via config-card-selector`);
         return {
-          hasContacts: result.contactCount >= minContacts,
-          contactCount: result.contactCount,
-          contactEstimate: result.contactCount,
+          hasContacts: contactCount >= minContacts,
+          contactCount: contactCount,
+          contactEstimate: contactCount,
           emailCount: 0,
           method: 'config-card-selector'
         };
