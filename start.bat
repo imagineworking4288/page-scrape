@@ -60,6 +60,9 @@ echo.
 echo [STEP 3C - FULL PIPELINE]
 echo node orchestrator.js --full-pipeline --auto --core-only --url "URL"
 echo.
+echo [STEP TEST]
+echo node orchestrator.js --full-pipeline --url "https://www.compass.com/agents/locations/new-york-ny/21429/?page=1" --core-only
+echo.
 color 0A
 echo ================================================================================
 echo.

@@ -5,8 +5,6 @@
  * Confirms boundaries by testing consecutive empty pages.
  */
 
-const crypto = require('crypto');
-
 class BinarySearcher {
   constructor(logger, rateLimiter) {
     this.logger = logger;
@@ -21,9 +19,16 @@ class BinarySearcher {
    * @param {number|null} visualMax - Max page from visual detection (hint)
    * @param {number} minContacts - Minimum contacts to consider page valid
    * @param {number} hardCap - Maximum pages to search (default: 500)
+   * @param {string|null} cardSelector - CSS selector for contact cards (from config)
    * @returns {Promise<object>} - {trueMax, isCapped, testedPages, searchPath, boundaryConfirmed}
    */
-  async findTrueMaxPage(page, pattern, urlGenerator, visualMax, minContacts, hardCap = 500) {
+  async findTrueMaxPage(page, pattern, urlGenerator, visualMax, minContacts, hardCap = 500, cardSelector = null) {
+    // Store cardSelector for use in validation
+    this.cardSelector = cardSelector;
+    if (cardSelector) {
+      this.logger.info(`[BinarySearcher] Using card selector for validation: ${cardSelector}`);
+    }
+
     try {
       this.logger.info('[BinarySearcher] Starting binary search for true max page...');
 
@@ -144,7 +149,8 @@ class BinarySearcher {
               urlGenerator,
               lastValidPage + 2,
               minContacts,
-              hardCap
+              hardCap,
+              this.cardSelector  // Preserve cardSelector in recursive calls
             );
 
             return {
@@ -276,48 +282,92 @@ class BinarySearcher {
 
   /**
    * Validate page content
+   * If card selector exists (from config): use ONLY that selector, no fallbacks
+   * If no card selector: use fallback chain (mailto -> profile links -> email regex -> tel links)
    * @param {object} page - Puppeteer page object
-   * @returns {Promise<object>} - {hasContent, emailCount, contactEstimate, contentHash}
+   * @param {number} minContacts - Minimum contacts to consider page valid
+   * @returns {Promise<object>} - {hasContacts, contactCount, method}
    * @private
    */
-  async _validatePage(page) {
+  async _validatePage(page, minContacts = 1) {
     try {
-      const validation = await page.evaluate(() => {
-        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-        const bodyText = document.body.innerText;
-        const emails = bodyText.match(emailRegex) || [];
-        const uniqueEmails = [...new Set(emails)];
+      await page.waitForTimeout(2000);
 
+      const result = await page.evaluate((cardSelector) => {
+        // ========== IF CARD SELECTOR EXISTS: USE ONLY THAT ==========
+        if (cardSelector) {
+          try {
+            const cards = document.querySelectorAll(cardSelector);
+            return {
+              hasContacts: cards.length > 0,
+              contactCount: cards.length,
+              method: 'config-card-selector'
+            };
+          } catch (e) {
+            return { hasContacts: false, contactCount: 0, method: 'selector-error', error: e.message };
+          }
+        }
+
+        // ========== NO CARD SELECTOR: USE FALLBACK CHAIN ==========
+
+        // Fallback 1: Mailto links
         const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]').length;
-        const contactEstimate = Math.max(mailtoLinks, uniqueEmails.length);
+        if (mailtoLinks > 0) {
+          return { hasContacts: true, contactCount: mailtoLinks, method: 'mailto-links' };
+        }
 
-        const contentSample = bodyText.substring(0, 1000).replace(/\s+/g, ' ').trim();
+        // Fallback 2: Profile URL patterns
+        const profilePatterns = [
+          'a[href*="/profile"]',
+          'a[href*="/people/"]',
+          'a[href*="/attorney"]',
+          'a[href*="/lawyer"]',
+          'a[href*="/team/"]',
+          'a[href*="/staff/"]',
+          'a[href*="/agents/"]',
+          'a[href*="/professionals/"]',
+          'a[href*="/bio/"]'
+        ];
+        for (const pattern of profilePatterns) {
+          try {
+            const links = document.querySelectorAll(pattern);
+            if (links.length >= 3) {
+              return { hasContacts: true, contactCount: links.length, method: 'profile-links' };
+            }
+          } catch (e) {}
+        }
 
-        return {
-          hasContent: bodyText.length > 100,
-          emailCount: uniqueEmails.length,
-          contactEstimate: contactEstimate,
-          contentSample: contentSample
-        };
-      });
+        // Fallback 3: Email regex in text
+        const bodyText = document.body.innerText || '';
+        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+        const emails = [...new Set(bodyText.match(emailRegex) || [])];
+        if (emails.length > 0) {
+          return { hasContacts: true, contactCount: emails.length, method: 'email-regex' };
+        }
 
-      const contentHash = crypto.createHash('md5').update(validation.contentSample).digest('hex');
+        // Fallback 4: Tel links
+        const telLinks = document.querySelectorAll('a[href^="tel:"]').length;
+        if (telLinks > 0) {
+          return { hasContacts: true, contactCount: telLinks, method: 'tel-links' };
+        }
+
+        // No contacts found
+        return { hasContacts: false, contactCount: 0, method: 'none' };
+
+      }, this.cardSelector);
+
+      this.logger.debug(`[BinarySearcher] Page validation: ${result.contactCount} contacts via ${result.method}`);
 
       return {
-        hasContent: validation.hasContent,
-        emailCount: validation.emailCount,
-        contactEstimate: validation.contactEstimate,
-        contentHash: contentHash
+        hasContacts: result.hasContacts && result.contactCount >= minContacts,
+        contactCount: result.contactCount,
+        contactEstimate: result.contactCount,  // Alias for backward compatibility
+        emailCount: 0,  // Simplified - not tracking separately
+        method: result.method
       };
-
     } catch (error) {
-      this.logger.error(`[BinarySearcher] Page validation error: ${error.message}`);
-      return {
-        hasContent: false,
-        emailCount: 0,
-        contactEstimate: 0,
-        contentHash: null
-      };
+      this.logger.warn(`[BinarySearcher] Validation error: ${error.message}`);
+      return { hasContacts: false, contactCount: 0, contactEstimate: 0, emailCount: 0, error: error.message };
     }
   }
 }

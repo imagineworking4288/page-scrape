@@ -47,8 +47,15 @@ class Paginator {
       timeout = 30000,
       discoverOnly = false,
       siteConfig = null,
-      preDiscoveredPattern = null  // NEW: Accept pre-discovered pattern
+      preDiscoveredPattern = null,  // NEW: Accept pre-discovered pattern
+      cardSelector = null  // Card selector from config for accurate validation
     } = options;
+
+    // Store cardSelector for use in binary search
+    this.cardSelector = cardSelector;
+    if (cardSelector) {
+      this.logger.debug(`[Paginator] Using card selector for validation: ${cardSelector}`);
+    }
 
     try {
       this.logger.info(`[Paginator] Starting pagination for: ${url}`);
@@ -1078,7 +1085,8 @@ class Paginator {
       urlGeneratorFn,
       visualMax,
       minContacts,
-      hardCap
+      hardCap,
+      this.cardSelector  // Pass card selector for accurate validation
     );
   }
 }

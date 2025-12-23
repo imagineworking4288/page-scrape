@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 22, 2025 (Binary search upper bound fix - expands to hardCap when visual max is valid)
+**Last Updated**: December 22, 2025 (Multi-method page validation with card selector support in binary searcher)
 
 ---
 
@@ -800,16 +800,27 @@ this.scrollConfig = {
 - `hardCap` - Maximum pages to search (default: 500)
 - `visualMax` - Max page detected from pagination UI (hint for search)
 - `minContacts` - Minimum contacts to consider page valid
+- `cardSelector` - CSS selector from config for card-based validation (NEW)
 
-**Critical Fix (December 2025)**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max. This allows finding the true maximum page beyond what the pagination UI shows.
+**Multi-Method Page Validation (December 2025)**: The `_validatePage()` method now uses multiple detection strategies in priority order:
 
-```javascript
-if (visualMaxValid.hasContacts) {
-  lowerBound = visualMax;
-  lastValidPage = visualMax;
-  upperBound = hardCap;  // CRITICAL: Expand bounds to find true max
-}
+1. **PRIMARY - Config card selector**: Uses `cardPattern.primarySelector` from config (e.g., `div.agentCard`)
+2. **FALLBACK 1 - Mailto links**: `a[href^="mailto:"]`
+3. **FALLBACK 2 - Profile URL patterns**: `/agents/`, `/people/`, `/attorney/`, `/lawyer/`, etc.
+4. **FALLBACK 3 - Email regex**: Emails in visible page text
+5. **FALLBACK 4 - Tel links**: `a[href^="tel:"]`
+
+This fixes sites like Compass.com where cards exist but no mailto links are present.
+
+**Data Flow**:
 ```
+PaginationScraper.config.cardPattern.primarySelector
+    → Paginator.paginate(options.cardSelector)
+    → BinarySearcher.findTrueMaxPage(cardSelector)
+    → _validatePage() uses this.cardSelector as PRIMARY check
+```
+
+**Critical Fix (December 2025)**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max.
 
 #### src/features/pagination/url-generator.js
 

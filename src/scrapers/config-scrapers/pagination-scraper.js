@@ -76,10 +76,18 @@ class PaginationScraper extends BaseConfigScraper {
         paginationResult = diagnosisResults;
       } else {
         this.logger.info('[PaginationScraper] Discovering pagination pattern...');
+
+        // Pass card selector from config for accurate page validation
+        const cardSelector = this.config?.cardPattern?.primarySelector || null;
+        if (cardSelector) {
+          this.logger.debug(`[PaginationScraper] Passing card selector to paginator: ${cardSelector}`);
+        }
+
         paginationResult = await this.paginator.paginate(url, {
           maxPages: this.maxPages,
           minContacts: this.minContactsPerPage,
-          discoverOnly: false
+          discoverOnly: false,
+          cardSelector: cardSelector
         });
       }
 
