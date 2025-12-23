@@ -2,7 +2,7 @@
 
 This document provides comprehensive context for editing this project. It covers every file, their purposes, key functions, dependencies, and architectural patterns.
 
-**Last Updated**: December 22, 2025 (Smart waitForSelector validation in binary searcher - exclusive card selector mode)
+**Last Updated**: December 22, 2025 (Fixed binary searcher hardCap enforcement in boundary confirmation)
 
 ---
 
@@ -840,7 +840,16 @@ PaginationScraper.config.cardPattern.primarySelector
     → _validatePage() uses waitForSelector() for smart waiting
 ```
 
-**Critical Fix (December 2025)**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max.
+**Critical Fixes (December 2025)**:
+
+1. **Upper bound expansion**: When visual max page is valid (has contacts), the search now expands `upperBound` to `hardCap` instead of stopping at the visual max.
+
+2. **HardCap enforcement in boundary confirmation**: Fixed infinite recursion bug where the boundary confirmation logic (Step 4) would recursively call `findTrueMaxPage` without respecting the hardCap. Now checks `lastValidPage >= hardCap` at three critical points:
+   - At start of Step 4 (before testing next pages)
+   - After `next1` is valid (before updating lastValidPage)
+   - After `next2` is valid (before recursing)
+
+   This prevents the algorithm from crawling linearly past the hardCap when all pages are valid (e.g., Compass.com with 200+ pages of agents).
 
 #### src/features/pagination/url-generator.js
 

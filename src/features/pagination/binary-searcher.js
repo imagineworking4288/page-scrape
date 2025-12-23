@@ -121,6 +121,19 @@ class BinarySearcher {
 
       // Step 4: Confirm boundary with 2 consecutive empty pages
       if (lastValidPage) {
+        // CRITICAL: Check if we've already hit hardCap - stop immediately
+        if (lastValidPage >= hardCap) {
+          this.logger.warn(`[BinarySearcher] Reached hard cap of ${hardCap} pages`);
+          searchPath.push(`Reached hard cap at ${hardCap} pages`);
+          return {
+            trueMax: hardCap,
+            isCapped: true,
+            boundaryConfirmed: false,
+            testedPages,
+            searchPath
+          };
+        }
+
         this.logger.info(`[BinarySearcher] Confirming boundary at page ${lastValidPage}...`);
 
         const next1 = await this._testPageValidity(page, urlGenerator, lastValidPage + 1, minContacts);
@@ -129,6 +142,19 @@ class BinarySearcher {
         await this.rateLimiter.waitBeforeRequest();
 
         if (next1.hasContacts) {
+          // Check if we've hit hardCap
+          if (lastValidPage + 1 >= hardCap) {
+            this.logger.warn(`[BinarySearcher] Reached hard cap of ${hardCap} pages`);
+            searchPath.push(`Reached hard cap at ${hardCap} pages`);
+            return {
+              trueMax: hardCap,
+              isCapped: true,
+              boundaryConfirmed: false,
+              testedPages,
+              searchPath
+            };
+          }
+
           this.logger.info(`[BinarySearcher] Page ${lastValidPage + 1} is valid, extending search...`);
           lastValidPage = lastValidPage + 1;
           searchPath.push(`Page ${lastValidPage} valid (${next1.contactCount} contacts), extending search`);
@@ -139,6 +165,19 @@ class BinarySearcher {
           await this.rateLimiter.waitBeforeRequest();
 
           if (next2.hasContacts) {
+            // Check if we've hit hardCap - don't recurse if at cap
+            if (lastValidPage + 1 >= hardCap) {
+              this.logger.warn(`[BinarySearcher] Reached hard cap of ${hardCap} pages`);
+              searchPath.push(`Reached hard cap at ${hardCap} pages`);
+              return {
+                trueMax: hardCap,
+                isCapped: true,
+                boundaryConfirmed: false,
+                testedPages,
+                searchPath
+              };
+            }
+
             this.logger.info(`[BinarySearcher] Page ${lastValidPage + 1} also valid, continuing forward...`);
             searchPath.push(`Page ${lastValidPage + 1} valid (${next2.contactCount} contacts), continuing search`);
 
