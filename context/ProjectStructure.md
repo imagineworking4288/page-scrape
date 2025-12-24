@@ -4,7 +4,7 @@
 
 Universal Professional Scraper - A comprehensive web scraping tool with intelligent extraction, pagination detection, profile enrichment, and Google Sheets export capabilities.
 
-**Total Files:** 86 JavaScript files
+**Total Files:** 87 JavaScript files
 **Main Entry Point:** `orchestrator.js`
 **Package:** universal-scraper v1.0.0
 
@@ -123,6 +123,7 @@ page-scrape/
 │   │   ├── contact-extractor.js            # Extract contact cards from DOM
 │   │   ├── domain-extractor.js             # Extract domain from URL
 │   │   ├── google-sheets-exporter.js       # Google Sheets API wrapper
+│   │   ├── page-fingerprint.js             # Page duplicate detection for pagination
 │   │   ├── profile-visitor.js              # Visit and extract from profile pages
 │   │   ├── prompt-helper.js                # CLI prompting utilities
 │   │   └── stats-reporter.js               # Progress and statistics reporting
@@ -153,11 +154,11 @@ page-scrape/
 | **Pagination** | 4 | Pagination detection and navigation |
 | **Scrapers** | 6 | Base and specialized scraper classes |
 | **Tools** | 17 | CLI tools for config generation and testing |
-| **Utils** | 7 | Shared utilities |
+| **Utils** | 8 | Shared utilities |
 | **Workflows** | 1 | Complete pipeline orchestration |
 | **Tests** | 5 | Test suites |
 | **Entry Point** | 1 | orchestrator.js |
-| **Total** | **86** | |
+| **Total** | **87** | |
 
 ---
 

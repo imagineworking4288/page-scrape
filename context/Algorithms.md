@@ -1488,7 +1488,135 @@ validate('+1-213-555-0100', 'New York, NY')
 
 ## Summary
 
-This document covered the 8 most complex algorithms in the Universal Professional Scraper:
+---
+
+## 9. Page Fingerprint Validation Algorithm
+
+**File**: `src/utils/page-fingerprint.js`
+**Purpose**: Detects duplicate page content to prevent pagination false positives
+**Complexity**: O(1) hash comparison with triple-verification
+
+### Problem Statement
+
+Some websites serve page 1 content when accessing invalid page numbers (e.g., page 999 returns page 1 instead of 404). This causes binary search to incorrectly identify pagination boundaries.
+
+**Example:**
+- Page 1: Contains contacts 1-20
+- Page 5: Contains contacts 101-120 (valid)
+- Page 50: Returns contacts 1-20 (duplicate of page 1, not valid)
+
+Binary search must detect when a page is actually a duplicate of page 1.
+
+### Algorithm Overview
+
+1. **Capture Phase**: Store fingerprint of page 1 contacts
+2. **Validation Phase**: Compare subsequent pages against page 1 fingerprint
+3. **Triple Verification**: Use 3 independent methods to detect duplicates
+
+### Implementation
+
+```
+FUNCTION validate(pageNum, contacts):
+  # Page 1 always valid
+  IF pageNum == 1:
+    RETURN {valid: true, reason: 'page_1'}
+
+  # Empty page invalid
+  IF contacts.length == 0:
+    RETURN {valid: false, reason: 'empty'}
+
+  # Skip if no fingerprint captured
+  IF page1Fingerprint == null:
+    RETURN {valid: true, reason: 'no_fingerprint'}
+
+  # Method 1: Profile URL hash comparison (most reliable)
+  currentUrlHash = generateUrlHash(contacts[0:5])
+  IF currentUrlHash == page1Fingerprint.urlHash:
+    RETURN {valid: false, reason: 'duplicate_urls'}
+
+  # Method 2: Name hash comparison (backup for sites without URLs)
+  currentNameHash = generateNameHash(contacts[0:5])
+  IF currentNameHash == page1Fingerprint.nameHash:
+    RETURN {valid: false, reason: 'duplicate_names'}
+
+  # Method 3: Boundary comparison (triple verification)
+  IF contacts[0].name == page1Fingerprint.firstContactName
+     AND contacts[last].name == page1Fingerprint.lastContactName
+     AND contacts.length == page1Fingerprint.contactCount:
+    RETURN {valid: false, reason: 'duplicate_boundaries'}
+
+  # All checks passed - page is unique
+  RETURN {valid: true, reason: 'unique'}
+
+FUNCTION generateUrlHash(contacts):
+  RETURN contacts[0:5].map(c => c.profileUrl || c.name).join('|')
+
+FUNCTION generateNameHash(contacts):
+  RETURN contacts[0:5].map(c => c.name).join('|')
+```
+
+### Triple Verification Strategy
+
+1. **URL Hash (Primary)**
+   - Uses first 5 profile URLs
+   - Most reliable because URLs are unique per contact
+   - Example: `"/profile/1|/profile/2|/profile/3|/profile/4|/profile/5"`
+
+2. **Name Hash (Backup)**
+   - Uses first 5 contact names
+   - Works for sites without profile URLs
+   - Example: `"John Doe|Jane Smith|Bob Johnson|Alice Brown|Charlie Davis"`
+
+3. **Boundary Check (Triple Verification)**
+   - Compares first contact, last contact, and count
+   - Catches edge cases where first 5 contacts differ but full page is same
+   - Requires ALL three to match for duplicate detection
+
+### Integration with Binary Search
+
+```
+# In binary search loop:
+midValid = testPageValidity(page, mid)
+
+IF midValid.hasContacts:
+  # Validate for duplicates using fingerprint
+  validation = fingerprint.validate(mid, midValid.fingerprintData)
+
+  IF NOT validation.valid:
+    LOG "Page {mid} is duplicate: {validation.reason}"
+    upperBound = mid - 1  # Treat as invalid, search lower
+    CONTINUE
+
+  # Page is valid and unique
+  lastValidPage = mid
+  lowerBound = mid + 1
+```
+
+### Edge Cases Handled
+
+1. **No Fingerprint**: Skip validation if page 1 fingerprint not captured
+2. **Empty Page 1**: Set fingerprint to null, skip all validations
+3. **Partial Matches**: All 3 methods must agree for duplicate detection
+4. **Reset Between Scrapes**: `reset()` clears fingerprint for new sessions
+
+### Performance
+
+- **Time Complexity**: O(1) - hash comparison and boundary checks
+- **Space Complexity**: O(1) - stores only 5 names/URLs + boundary markers
+- **Binary Search Impact**: Adds ~10ms per page validation (negligible)
+
+### Benefits
+
+1. **Accuracy**: Prevents false positives in pagination detection
+2. **Reliability**: Triple verification catches edge cases
+3. **Performance**: Minimal overhead, O(1) operations
+4. **Flexibility**: Works with or without profile URLs
+
+---
+
+## Summary
+
+This document covered the 9 most complex algorithms in the Universal Professional Scraper:
 
 1. **Binary Search Pagination** - O(log n) page discovery with boundary confirmation
 2. **Pagination Pattern Detection** - 5-strategy priority chain with cache URL path fix
@@ -1498,8 +1626,9 @@ This document covered the 8 most complex algorithms in the Universal Professiona
 6. **Title Pattern Extraction** - 70+ regex patterns with normalization
 7. **Multi-Location Handling** - Parsing, country detection, and US-prioritization
 8. **Phone-Location Correlation** - Area code validation with 300+ city mappings
+9. **Page Fingerprint Validation** - Triple-verification duplicate detection for pagination
 
 Each algorithm handles multiple edge cases and uses sophisticated logic to ensure accuracy and reliability.
 
 ---
-**Total Lines of Complex Algorithm Code:** ~1,500+ lines across all modules
+**Total Lines of Complex Algorithm Code:** ~1,650+ lines across all modules

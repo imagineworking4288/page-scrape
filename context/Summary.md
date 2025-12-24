@@ -16,6 +16,8 @@ The Universal Professional Scraper is an enterprise-grade web scraping platform 
 - **Visual Config Generator (v2.3)**: Interactive 4-layer detection with click-to-select field mapping
 - **Multi-Method Extraction**: DOM-based, coordinate-based, mailto/tel link detection, OCR fallback
 - **Smart Pagination**: Auto-detection of pagination patterns (URL-based, offset, infinite scroll)
+- **Binary Search Discovery**: O(log n) max page detection with duplicate content validation
+- **Page Fingerprint Validation**: Triple-verification duplicate detection prevents false positives
 - **Infinite Scroll Support**: Selenium PAGE_DOWN simulation for dynamic loading sites
 - **Profile Enrichment**: Automated profile page visits to validate and fill missing data
 - **Google Sheets Export**: Direct export with configurable columns and auto-formatting

@@ -5,10 +5,13 @@
  * Confirms boundaries by testing consecutive empty pages.
  */
 
+const { PageFingerprint } = require('../../utils/page-fingerprint');
+
 class BinarySearcher {
   constructor(logger, rateLimiter) {
     this.logger = logger;
     this.rateLimiter = rateLimiter;
+    this.fingerprint = new PageFingerprint(logger);
   }
 
   /**
@@ -32,6 +35,9 @@ class BinarySearcher {
     try {
       this.logger.info('[BinarySearcher] Starting binary search for true max page...');
 
+      // Reset fingerprint for new search
+      this.fingerprint.reset();
+
       let lowerBound = 1;
       let upperBound = visualMax || hardCap;
       let lastValidPage = null;
@@ -53,6 +59,11 @@ class BinarySearcher {
           searchPath,
           boundaryConfirmed: true
         };
+      }
+
+      // Capture page 1 fingerprint for duplicate detection
+      if (page1Valid.fingerprintData) {
+        this.fingerprint.capturePage1(page1Valid.fingerprintData);
       }
 
       lastValidPage = 1;
@@ -108,6 +119,17 @@ class BinarySearcher {
         await this.rateLimiter.waitBeforeRequest();
 
         if (midValid.hasContacts) {
+          // Check for duplicate content using fingerprint
+          if (midValid.fingerprintData) {
+            const validation = this.fingerprint.validate(mid, midValid.fingerprintData);
+            if (!validation.valid) {
+              this.logger.info(`[BinarySearcher] Page ${mid} contains duplicate content (${validation.reason}), treating as invalid`);
+              searchPath.push(`Page ${mid} duplicate of page 1 (${validation.reason}), search lower`);
+              upperBound = mid - 1;
+              continue;
+            }
+          }
+
           lastValidPage = mid;
           lowerBound = mid + 1;
           searchPath.push(`Page ${mid} valid (${midValid.contactCount} contacts), search higher`);
@@ -326,9 +348,10 @@ class BinarySearcher {
    * - No waitForSelector (can timeout before content loads)
    * - Use page.$$eval() with .catch(() => 0) for direct counting
    * - Already waited 3 seconds in _testPageValidity
+   * - Extract fingerprint data for duplicate detection
    * @param {object} page - Puppeteer page object
    * @param {number} minContacts - Minimum contacts to consider page valid
-   * @returns {Promise<object>} - {hasContacts, contactCount, method}
+   * @returns {Promise<object>} - {hasContacts, contactCount, method, fingerprintData}
    * @private
    */
   async _validatePage(page, minContacts = 1) {
@@ -338,22 +361,58 @@ class BinarySearcher {
         // Direct count with $$eval - no waitForSelector, no try/catch swallowing
         const contactCount = await page.$$eval(this.cardSelector, els => els.length).catch(() => 0);
 
+        // Extract fingerprint data from card elements for duplicate detection
+        const fingerprintData = await page.$$eval(this.cardSelector, (cards) => {
+          return cards.slice(0, 10).map(card => {
+            // Extract name from card (try common selectors)
+            const nameSelectors = ['h1', 'h2', 'h3', 'h4', '.name', '[class*="name"]', 'a'];
+            let name = null;
+            for (const selector of nameSelectors) {
+              const el = card.querySelector(selector);
+              if (el && el.textContent.trim()) {
+                name = el.textContent.trim();
+                break;
+              }
+            }
+
+            // Extract profile URL (try common patterns)
+            const linkEl = card.querySelector('a[href*="/profile"], a[href*="/people/"], a[href*="/attorney"], a[href*="/lawyer"], a[href*="/team/"], a[href*="/bio/"], a');
+            const profileUrl = linkEl ? linkEl.href : null;
+
+            return { name, profileUrl };
+          });
+        }).catch(() => []);
+
         this.logger.debug(`[BinarySearcher] Page validation: ${contactCount} contacts via config-card-selector`);
         return {
           hasContacts: contactCount >= minContacts,
           contactCount: contactCount,
           contactEstimate: contactCount,
           emailCount: 0,
-          method: 'config-card-selector'
+          method: 'config-card-selector',
+          fingerprintData: fingerprintData
         };
       }
 
-      // No card selector - use fallback chain
+      // No card selector - use fallback chain with fingerprint extraction
       const result = await page.evaluate(() => {
+        // Helper to extract fingerprint data from links
+        const extractFingerprintFromLinks = (links) => {
+          return Array.from(links).slice(0, 10).map(link => ({
+            name: link.textContent?.trim() || null,
+            profileUrl: link.href || null
+          }));
+        };
+
         // Fallback 1: Mailto links
-        const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]').length;
-        if (mailtoLinks > 0) {
-          return { hasContacts: true, contactCount: mailtoLinks, method: 'mailto-links' };
+        const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
+        if (mailtoLinks.length > 0) {
+          return {
+            hasContacts: true,
+            contactCount: mailtoLinks.length,
+            method: 'mailto-links',
+            fingerprintData: extractFingerprintFromLinks(mailtoLinks)
+          };
         }
 
         // Fallback 2: Profile URL patterns
@@ -372,7 +431,12 @@ class BinarySearcher {
           try {
             const links = document.querySelectorAll(pattern);
             if (links.length >= 3) {
-              return { hasContacts: true, contactCount: links.length, method: 'profile-links' };
+              return {
+                hasContacts: true,
+                contactCount: links.length,
+                method: 'profile-links',
+                fingerprintData: extractFingerprintFromLinks(links)
+              };
             }
           } catch (e) {}
         }
@@ -382,17 +446,27 @@ class BinarySearcher {
         const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
         const emails = [...new Set(bodyText.match(emailRegex) || [])];
         if (emails.length > 0) {
-          return { hasContacts: true, contactCount: emails.length, method: 'email-regex' };
+          return {
+            hasContacts: true,
+            contactCount: emails.length,
+            method: 'email-regex',
+            fingerprintData: emails.slice(0, 10).map(email => ({ name: email, profileUrl: null }))
+          };
         }
 
         // Fallback 4: Tel links
-        const telLinks = document.querySelectorAll('a[href^="tel:"]').length;
-        if (telLinks > 0) {
-          return { hasContacts: true, contactCount: telLinks, method: 'tel-links' };
+        const telLinks = document.querySelectorAll('a[href^="tel:"]');
+        if (telLinks.length > 0) {
+          return {
+            hasContacts: true,
+            contactCount: telLinks.length,
+            method: 'tel-links',
+            fingerprintData: extractFingerprintFromLinks(telLinks)
+          };
         }
 
         // No contacts found
-        return { hasContacts: false, contactCount: 0, method: 'none' };
+        return { hasContacts: false, contactCount: 0, method: 'none', fingerprintData: [] };
       });
 
       this.logger.debug(`[BinarySearcher] Page validation: ${result.contactCount} contacts via ${result.method}`);
@@ -402,7 +476,8 @@ class BinarySearcher {
         contactCount: result.contactCount,
         contactEstimate: result.contactCount,
         emailCount: 0,
-        method: result.method
+        method: result.method,
+        fingerprintData: result.fingerprintData || []
       };
     } catch (error) {
       this.logger.warn(`[BinarySearcher] Validation error: ${error.message}`);

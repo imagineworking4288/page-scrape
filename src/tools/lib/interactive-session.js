@@ -2224,6 +2224,19 @@ class InteractiveSession {
       this.logger.info(`[Scraping] Completed. Total contacts: ${result.totalContacts}`);
       this.logger.info(`[Scraping] Output: ${result.outputPath}`);
 
+      // Check if overlay still exists, re-inject if missing
+      const overlayExists = await this.page.evaluate(() => {
+        return !!document.querySelector('#config-generator-overlay-root');
+      });
+
+      if (!overlayExists) {
+        this.logger.info('[Scraping] Overlay UI was removed during scraping - re-injecting...');
+        await this.injectOverlay();
+        this.logger.info('[Scraping] Overlay UI re-injected. Click "Save & Close" to proceed to enrichment.');
+      } else {
+        this.logger.info('[Scraping] Overlay UI is still present.');
+      }
+
       // Send result to frontend
       await this.page.evaluate((res) => {
         if (window.handleScrapingComplete) {
