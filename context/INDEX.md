@@ -54,6 +54,8 @@ Automated web scraping system for extracting contact information from directory-
 | ProfileVisitor | src/utils/profile-visitor.js | Profile page visiting for email extraction |
 | DomainExtractor | src/utils/domain-extractor.js | Email domain classification business vs personal |
 | ContactExtractor | src/utils/contact-extractor.js | Shared email phone name extraction patterns |
+| RetryHandler | src/utils/retry.js | Exponential backoff retry with circuit breaker |
+| DuplicateDetector | src/utils/duplicate-detector.js | Contact deduplication with fuzzy matching |
 | CardMatcher | src/tools/lib/card-matcher.js | Visual card pattern matching engine |
 | EnhancedCapture | src/tools/lib/enhanced-capture.js | Comprehensive DOM data capture for config generation |
 | ElementCapture | src/tools/lib/element-capture.js | Manual field selection processing |
@@ -136,6 +138,8 @@ src/
 │   ├── stats-reporter.js             # Statistics display
 │   ├── prompt-helper.js              # CLI prompt utilities
 │   ├── page-fingerprint.js           # Page duplicate detection
+│   ├── retry.js                      # Retry logic with exponential backoff
+│   ├── duplicate-detector.js         # Contact deduplication utility
 │   └── constants.js                  # Shared constants
 ├── tools/
 │   ├── config-generator.js           # Interactive config generation

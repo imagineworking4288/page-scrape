@@ -300,6 +300,41 @@ Comprehensive API documentation for all exported functions and classes.
 | `validate` | `pageNum, fingerprintData` | `Object` | Validates page against page 1 detects duplicates |
 | `reset` | none | `void` | Resets fingerprint data for new search |
 
+### RetryHandler (`src/utils/retry.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `options={}` | `RetryHandler` | Initializes retry handler with max retries initial delay backoff settings |
+| `calculateDelay` | `attempt` | `number` | Calculates exponential backoff delay with optional jitter |
+| `isRetryable` | `error` | `boolean` | Checks if error matches retryable patterns ECONNRESET ETIMEDOUT etc |
+| `execute` | `operation, context, options={}` | `Promise<any>` | Executes async operation with automatic retry on retryable errors |
+| `executeWithCondition` | `operation, shouldRetry, context` | `Promise<any>` | Executes with custom retry condition function |
+| `sleep` | `ms` | `Promise<void>` | Promise-based delay utility |
+| `withRetry` (export) | `operation, options={}` | `Promise<any>` | Convenience wrapper for one-off retry operations |
+
+### CircuitBreaker (`src/utils/retry.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `options={}` | `CircuitBreaker` | Initializes circuit breaker with failure and success thresholds |
+| `execute` | `operation, context` | `Promise<any>` | Executes operation through circuit breaker throws when OPEN |
+| `getState` | none | `string` | Returns current state CLOSED OPEN or HALF-OPEN |
+| `reset` | none | `void` | Force resets circuit to CLOSED state |
+
+### DuplicateDetector (`src/utils/duplicate-detector.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `options={}` | `DuplicateDetector` | Initializes detector with primary and secondary keys fuzzy threshold |
+| `check` | `contact` | `Object` | Checks if contact is duplicate returns isDuplicate original matchType matchKey |
+| `filterUnique` | `contacts` | `Array<Object>` | Filters array returning only unique contacts stores duplicates |
+| `normalize` | `value` | `string|null` | Normalizes value for comparison lowercase trim remove special chars |
+| `fuzzyMatch` | `a, b` | `boolean` | Checks if strings match above fuzzy threshold using Levenshtein |
+| `calculateSimilarity` | `a, b` | `number` | Calculates string similarity 0-1 using Levenshtein distance |
+| `getStats` | none | `Object` | Returns statistics total unique duplicates byKey duplicateRate |
+| `getDuplicates` | none | `Array<Object>` | Returns all detected duplicates with original and match details |
+| `reset` | none | `void` | Clears all state for new detection session |
+
 ## Tools
 
 ### ConfigBuilder (`src/tools/lib/config-builder.js`)
