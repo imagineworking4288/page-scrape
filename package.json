@@ -5,7 +5,12 @@
   "main": "orchestrator.js",
   "scripts": {
     "start": "node orchestrator.js",
-    "test": "node tests/enrichment-test.js && node tests/post-cleaning-test.js",
+    "test": "jest",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:legacy": "node tests/enrichment-test.js && node tests/post-cleaning-test.js",
     "test:enrichment": "node tests/enrichment-test.js",
     "test:post-clean": "node tests/post-cleaning-test.js",
     "test:selenium": "node tests/selenium-infinite-scroll.test.js",
@@ -14,7 +19,7 @@
     "test:nav:page": "node tests/run-navigation-tests.js --type pagination",
     "test:nav:quick": "node tests/run-navigation-tests.js --quick",
     "test:nav:verbose": "node tests/run-navigation-tests.js --verbose",
-    "test:all": "npm run test && npm run test:selenium && npm run test:nav"
+    "test:all": "npm run test && npm run test:legacy && npm run test:selenium && npm run test:nav"
   },
   "keywords": [
     "scraper",
@@ -38,5 +43,8 @@
     "selenium-webdriver": "^4.39.0",
     "tesseract.js": "^6.0.1",
     "winston": "^3.18.3"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }
