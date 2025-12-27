@@ -6,9 +6,12 @@
  * - Card highlighting
  * - Preview data display
  * - Communication with Node.js backend
- * - v2.2: Manual field selection with click mode
- * - v2.2: Profile link disambiguation modal
+ * - Manual field selection with rectangle drawing
+ * - Profile link disambiguation modal
  * - v2.3: Multi-method extraction testing with user validation
+ *
+ * NOTE: All v2.2 fallback code has been removed.
+ * All field extraction uses v2.3 multi-method testing exclusively.
  */
 
 (function() {
@@ -80,7 +83,7 @@
     PROCESSING: 'PROCESSING',
     PREVIEW: 'PREVIEW',
     MANUAL_SELECTION: 'MANUAL_SELECTION',
-    FIELD_RECTANGLE_SELECTION: 'FIELD_RECTANGLE_SELECTION',  // v2.2: Rectangle selection for fields
+    FIELD_RECTANGLE_SELECTION: 'FIELD_RECTANGLE_SELECTION',  // Rectangle selection for fields
     EXTRACTION_RESULTS: 'EXTRACTION_RESULTS',  // v2.3: Showing extraction method results
     LINK_DISAMBIGUATION: 'LINK_DISAMBIGUATION',
     GENERATING: 'GENERATING',
@@ -107,22 +110,22 @@
     previewData: null,
     backendReady: false,
 
-    // v2.2: Manual selection state
+    // Manual selection state
     manualSelections: {},          // { fieldName: { selector, value, element, coordinates } }
     currentFieldIndex: 0,          // Index in FIELD_ORDER
     currentField: null,            // Current field being captured
     pendingFieldCapture: null,     // Data from field rectangle selection
     autoDetectedFields: {},        // Fields auto-detected by v2.1
 
-    // v2.2: Field rectangle selection state
+    // Field rectangle selection state
     isDrawingField: false,         // Currently drawing field rectangle
     fieldStartX: 0,                // Field rectangle start X
     fieldStartY: 0,                // Field rectangle start Y
     fieldCurrentX: 0,              // Field rectangle current X
     fieldCurrentY: 0,              // Field rectangle current Y
-    selectorEnabled: false,        // v2.2: Toggle for enabling/disabling drawing mode
+    selectorEnabled: false,        // Toggle for enabling/disabling drawing mode
 
-    // v2.2: Link disambiguation state
+    // Link disambiguation state
     pendingLinks: [],              // Links found when clicking for profileUrl
     selectedLinkIndex: -1,         // Index of selected link in modal
     personName: null,              // Name for matching profile links
@@ -168,7 +171,7 @@
    * Initialize the overlay
    */
   async function init() {
-    console.log('[ConfigGen v2.2] Initializing overlay...');
+    console.log('[ConfigGen v2.3] Initializing overlay...');
 
     // Get DOM elements
     canvas = document.getElementById('selectionCanvas');
@@ -190,7 +193,7 @@
       return;
     }
 
-    console.log('[ConfigGen v2.2] Overlay initialized successfully');
+    console.log('[ConfigGen v2.3] Overlay initialized successfully');
   }
 
   /**
@@ -217,7 +220,7 @@
       await sleep(100);
     }
 
-    console.error('[ConfigGen v2.2] Backend initialization timeout');
+    console.error('[ConfigGen v2.3] Backend initialization timeout');
     return false;
   }
 
@@ -289,7 +292,7 @@
    * Start selection mode
    */
   window.startSelection = function() {
-    console.log('[ConfigGen v2.2] Starting selection mode');
+    console.log('[ConfigGen v2.3] Starting selection mode');
 
     // Show canvas
     canvas.classList.remove('hidden');
@@ -420,7 +423,7 @@
         throw new Error('Backend function not available');
       }
     } catch (error) {
-      console.error('[ConfigGen v2.2] Selection processing error:', error);
+      console.error('[ConfigGen v2.3] Selection processing error:', error);
       showToast('Failed to process selection: ' + error.message, 'error');
       showPanel('instructionPanel');
     }
@@ -431,7 +434,7 @@
    * Called by backend via page.evaluate
    */
   window.handleCardDetectionResult = function(result) {
-    console.log('[ConfigGen v2.2] Card detection result:', result);
+    console.log('[ConfigGen v2.3] Card detection result:', result);
 
     if (!result.success) {
       showToast(result.error || 'No cards found', 'error');
@@ -589,7 +592,7 @@
    * Retry selection
    */
   window.retrySelection = function() {
-    console.log('[ConfigGen v2.2] Retrying selection');
+    console.log('[ConfigGen v2.3] Retrying selection');
 
     // Clear state
     state.currentState = STATES.IDLE;
@@ -609,14 +612,14 @@
 
     // Show instruction panel
     showPanel('instructionPanel');
-    document.getElementById('panelSubtitle').textContent = 'Config Generator v2.2';
+    document.getElementById('panelSubtitle').textContent = 'Config Generator v2.3';
   };
 
   /**
    * Confirm selection and generate config
    */
   window.confirmAndGenerate = function() {
-    console.log('[ConfigGen v2.2] Confirming and generating config');
+    console.log('[ConfigGen v2.3] Confirming and generating config');
 
     showProgress('Generating Config', 'Extracting field patterns...');
 
@@ -734,22 +737,22 @@
    * After scraping completes, this should call finalSaveAndClose to properly close browsers
    */
   window.closePanel = async function() {
-    console.log('[ConfigGen v2.2] Closing panel');
-    console.log('[ConfigGen v2.2] Current state:', state.currentState);
+    console.log('[ConfigGen v2.3] Closing panel');
+    console.log('[ConfigGen v2.3] Current state:', state.currentState);
 
     // If scraping was completed or config was generated, use finalSaveAndClose
     // to properly close browsers and resolve the session
     if (state.currentState === STATES.COMPLETE || state.generatedConfigData) {
-      console.log('[ConfigGen v2.2] Scraping/config complete - calling finalSaveAndClose');
+      console.log('[ConfigGen v2.3] Scraping/config complete - calling finalSaveAndClose');
       if (typeof __configGen_finalSaveAndClose === 'function') {
         try {
           const result = await __configGen_finalSaveAndClose();
-          console.log('[ConfigGen v2.2] finalSaveAndClose result:', result);
+          console.log('[ConfigGen v2.3] finalSaveAndClose result:', result);
         } catch (error) {
-          console.error('[ConfigGen v2.2] Error in finalSaveAndClose:', error);
+          console.error('[ConfigGen v2.3] Error in finalSaveAndClose:', error);
         }
       } else {
-        console.error('[ConfigGen v2.2] __configGen_finalSaveAndClose not available');
+        console.error('[ConfigGen v2.3] __configGen_finalSaveAndClose not available');
       }
     } else {
       // For cancellation before completion, use close
@@ -831,7 +834,7 @@
      * Handle message from backend
      */
     handleBackendMessage(command, data) {
-      console.log('[ConfigGen v2.2] Backend message:', command, data);
+      console.log('[ConfigGen v2.3] Backend message:', command, data);
 
       switch (command) {
         case 'initialize':
@@ -844,7 +847,7 @@
           showToast(data.message, 'error');
           break;
         default:
-          console.warn('[ConfigGen v2.2] Unknown command:', command);
+          console.warn('[ConfigGen v2.3] Unknown command:', command);
       }
     },
 
@@ -874,7 +877,7 @@
   window.__configGenState = state;
 
   // ===========================
-  // v2.2: PREVIEW PANEL FUNCTIONS
+  // PREVIEW PANEL FUNCTIONS
   // ===========================
 
   /**
@@ -938,7 +941,7 @@
    * Accept auto-detection and proceed to config generation
    */
   window.acceptAutoDetection = function() {
-    console.log('[ConfigGen v2.2] Accepting auto-detection');
+    console.log('[ConfigGen v2.3] Accepting auto-detection');
     state.currentState = STATES.GENERATING;
 
     // Merge auto-detected fields as selections
@@ -960,7 +963,7 @@
    * Start manual field selection workflow
    */
   window.startManualSelection = function() {
-    console.log('[ConfigGen v2.2] Starting manual field selection');
+    console.log('[ConfigGen v2.3] Starting manual field selection');
     state.currentState = STATES.MANUAL_SELECTION;
     state.currentFieldIndex = 0;
     state.manualSelections = {};
@@ -982,7 +985,7 @@
   };
 
   // ===========================
-  // v2.2: MANUAL SELECTION FUNCTIONS
+  // MANUAL SELECTION FUNCTIONS
   // ===========================
 
   /**
@@ -1092,7 +1095,7 @@
    */
   window.skipCurrentField = function() {
     const fieldName = state.currentField;
-    console.log(`[ConfigGen v2.2] Skipping field: ${fieldName}`);
+    console.log(`[ConfigGen v2.3] Skipping field: ${fieldName}`);
 
     // Remove any existing selection for this field
     delete state.manualSelections[fieldName];
@@ -1106,7 +1109,7 @@
    */
   window.confirmCurrentField = function() {
     const fieldName = state.currentField;
-    console.log(`[ConfigGen v2.2] Confirmed field: ${fieldName}`);
+    console.log(`[ConfigGen v2.3] Confirmed field: ${fieldName}`);
 
     // Field should already be in manualSelections from rectangle capture
     if (state.pendingFieldCapture) {
@@ -1122,7 +1125,7 @@
    * Go back to preview panel
    */
   window.backToPreview = function() {
-    console.log('[ConfigGen v2.2] Back to preview');
+    console.log('[ConfigGen v2.3] Back to preview');
     exitFieldRectangleSelection();
     state.currentState = STATES.PREVIEW;
     showPanel('previewPanel');
@@ -1133,15 +1136,15 @@
    * Finish manual selection and generate config
    */
   window.finishManualSelection = function() {
-    console.log('[v2.2-DEBUG] ========================================');
-    console.log('[v2.2-DEBUG] FINISH SELECTION CLICKED');
-    console.log('[v2.2-DEBUG] ========================================');
-    console.log('[v2.2-DEBUG] state.manualSelections:', JSON.stringify(state.manualSelections, null, 2));
-    console.log('[v2.2-DEBUG] Object.keys:', Object.keys(state.manualSelections || {}));
-    console.log('[v2.2-DEBUG] Field count:', Object.keys(state.manualSelections || {}).length);
-    console.log('[v2.2-DEBUG] state.detectedCards count:', state.detectedCards?.length);
-    console.log('[v2.2-DEBUG] state.selectionBox:', state.selectionBox);
-    console.log('[v2.2-DEBUG] state.previewData:', state.previewData);
+    console.log('[v2.3-DEBUG] ========================================');
+    console.log('[v2.3-DEBUG] FINISH SELECTION CLICKED');
+    console.log('[v2.3-DEBUG] ========================================');
+    console.log('[v2.3-DEBUG] state.manualSelections:', JSON.stringify(state.manualSelections, null, 2));
+    console.log('[v2.3-DEBUG] Object.keys:', Object.keys(state.manualSelections || {}));
+    console.log('[v2.3-DEBUG] Field count:', Object.keys(state.manualSelections || {}).length);
+    console.log('[v2.3-DEBUG] state.detectedCards count:', state.detectedCards?.length);
+    console.log('[v2.3-DEBUG] state.selectionBox:', state.selectionBox);
+    console.log('[v2.3-DEBUG] state.previewData:', state.previewData);
 
     try {
       // ==========================================
@@ -1151,25 +1154,25 @@
       // if (missingRequired.length > 0) {
       //   const missingNames = missingRequired.map(f => FIELD_METADATA[f].label).join(', ');
       //   showToast(`Missing required fields: ${missingNames}`, 'error');
-      //   console.log('[v2.2-DEBUG] Cannot finish - missing required fields:', missingRequired);
+      //   console.log('[v2.3-DEBUG] Cannot finish - missing required fields:', missingRequired);
       //   return;
       // }
       // ==========================================
 
       const fieldCount = Object.keys(state.manualSelections || {}).length;
-      console.log('[v2.2-VALIDATION-BYPASS] Required field validation disabled for testing');
-      console.log('[v2.2-VALIDATION-BYPASS] Proceeding with', fieldCount, 'fields');
+      console.log('[v2.3-VALIDATION-BYPASS] Required field validation disabled for testing');
+      console.log('[v2.3-VALIDATION-BYPASS] Proceeding with', fieldCount, 'fields');
 
       if (fieldCount === 0) {
         showToast('Please capture at least one field', 'error');
-        console.log('[v2.2-DEBUG] Cannot finish - no fields captured');
+        console.log('[v2.3-DEBUG] Cannot finish - no fields captured');
         return;
       }
 
       // Log what we're sending to backend
-      console.log('[v2.2-DEBUG] Proceeding to config generation with', fieldCount, 'fields');
+      console.log('[v2.3-DEBUG] Proceeding to config generation with', fieldCount, 'fields');
       Object.entries(state.manualSelections).forEach(([field, data]) => {
-        console.log(`[v2.2-DEBUG] Field ${field}:`);
+        console.log(`[v2.3-DEBUG] Field ${field}:`);
         console.log(`  - value: "${data.value?.substring(0, 50)}..."`);
         console.log(`  - selector: ${data.selector}`);
         console.log(`  - coordinates:`, data.coordinates);
@@ -1184,12 +1187,12 @@
       showProgress('Generating Config', 'Building config with manual selections...');
 
       // Call backend with complete selections
-      console.log('[v2.2-DEBUG] About to call confirmAndGenerateWithSelections()...');
+      console.log('[v2.3-DEBUG] About to call confirmAndGenerateWithSelections()...');
       confirmAndGenerateWithSelections();
 
     } catch (error) {
-      console.error('[v2.2-DEBUG] ERROR in finishManualSelection:', error);
-      console.error('[v2.2-DEBUG] Error stack:', error.stack);
+      console.error('[v2.3-DEBUG] ERROR in finishManualSelection:', error);
+      console.error('[v2.3-DEBUG] Error stack:', error.stack);
       showToast('Error finishing selection: ' + error.message, 'error');
       showPanel('manualPanel');
     }
@@ -1215,8 +1218,8 @@
     const hasSomeFields = Object.keys(state.manualSelections || {}).length > 0;
     btn.disabled = !hasSomeFields;
 
-    console.log('[v2.2-VALIDATION-BYPASS] Finish button enabled:', !btn.disabled);
-    console.log('[v2.2-VALIDATION-BYPASS] Fields captured:', Object.keys(state.manualSelections || {}).length);
+    console.log('[v2.3-VALIDATION-BYPASS] Finish button enabled:', !btn.disabled);
+    console.log('[v2.3-VALIDATION-BYPASS] Fields captured:', Object.keys(state.manualSelections || {}).length);
 
     if (!hasSomeFields) {
       btn.title = 'Capture at least one field to generate config';
@@ -1257,7 +1260,7 @@
     // Update finish button state
     updateFinishButton();
 
-    console.log(`[v2.2] Field completion: ${capturedCount}/${totalFields} fields captured`);
+    console.log(`[v2.3] Field completion: ${capturedCount}/${totalFields} fields captured`);
   }
 
   /**
@@ -2041,14 +2044,14 @@
   };
 
   // ===========================
-  // v2.2: FIELD RECTANGLE SELECTION FUNCTIONS
+  // FIELD RECTANGLE SELECTION FUNCTIONS
   // ===========================
 
   /**
    * Enter field rectangle selection mode
    */
   function enterFieldRectangleSelection() {
-    console.log('[ConfigGen v2.2] Entering field rectangle selection mode');
+    console.log('[ConfigGen v2.3] Entering field rectangle selection mode');
     state.currentState = STATES.FIELD_RECTANGLE_SELECTION;
 
     // Initialize toggle button (starts with selector disabled)
@@ -2060,7 +2063,7 @@
    * Exit field rectangle selection mode
    */
   function exitFieldRectangleSelection() {
-    console.log('[ConfigGen v2.2] Exiting field rectangle selection mode');
+    console.log('[ConfigGen v2.3] Exiting field rectangle selection mode');
     document.body.classList.remove('field-selection-mode');
 
     // Disable selector (removes event listeners and hides canvas)
@@ -2074,7 +2077,7 @@
   }
 
   // ===========================
-  // v2.2: SELECTOR TOGGLE FUNCTIONS
+  // SELECTOR TOGGLE FUNCTIONS
   // ===========================
 
   /**
@@ -2100,7 +2103,7 @@
    * Enable the selector - allow drawing rectangles
    */
   function enableSelector() {
-    console.log('[ConfigGen v2.2] Enabling selector');
+    console.log('[ConfigGen v2.3] Enabling selector');
     state.selectorEnabled = true;
 
     // Show canvas for field selection
@@ -2121,7 +2124,7 @@
    * Disable the selector - prevent drawing, allow scrolling
    */
   function disableSelector() {
-    console.log('[ConfigGen v2.2] Disabling selector');
+    console.log('[ConfigGen v2.3] Disabling selector');
     state.selectorEnabled = false;
 
     // Hide canvas
@@ -2233,7 +2236,7 @@
    */
   function handleFieldKeyDown(e) {
     if (e.key === 'Escape') {
-      console.log('[ConfigGen v2.2] Escape pressed, canceling field selection');
+      console.log('[ConfigGen v2.3] Escape pressed, canceling field selection');
       state.isDrawingField = false;
       hideFieldSelectionPreview();
       resetFeedbackSection();
@@ -2346,127 +2349,12 @@
     }
   }
 
-  /**
-   * DEPRECATED: Handle field rectangle result from backend
-   * This function is no longer used - processFieldRectangle now calls v2.3 directly
-   * Kept for backwards compatibility but should never be called
-   */
-  window.handleFieldRectangleResult = function(result) {
-    console.warn('[DEPRECATED] handleFieldRectangleResult called - this should not happen in v2.3');
-    console.warn('[DEPRECATED] processFieldRectangle should call __configGen_testFieldExtraction directly');
-    console.log('[DEPRECATED] Result received:', result);
+  // NOTE: handleFieldRectangleResult (v2.2) has been REMOVED
+  // processFieldRectangle now calls __configGen_testFieldExtraction (v2.3) directly
 
-    // If somehow called, still try to process via v2.3
-    if (result.success && result.fieldName) {
-      console.log('[DEPRECATED] Attempting v2.3 extraction as fallback...');
-      triggerV23Extraction(result.fieldName, result);
-    } else {
-      showErrorFeedback(result.error || 'Could not extract field value');
-    }
-  };
-
-  /**
-   * v2.3: Trigger multi-method extraction testing for a field
-   * This calls the backend to test all applicable extraction methods
-   * @param {string} fieldName - Field to test (e.g., 'name')
-   * @param {Object} rectangleResult - Result from handleFieldRectangle with coordinates
-   */
-  async function triggerV23Extraction(fieldName, rectangleResult) {
-    console.log('');
-    console.log('========================================');
-    console.log(`[v2.3] TRIGGERING MULTI-METHOD EXTRACTION`);
-    console.log('========================================');
-    console.log(`[v2.3] Field: ${fieldName.toUpperCase()}`);
-    console.log('[v2.3] Rectangle result:', JSON.stringify(rectangleResult, null, 2));
-
-    // Show progress feedback while testing
-    const section = document.getElementById('feedbackSection');
-    if (section) {
-      section.className = 'feedback-section';
-      section.innerHTML = `
-        <div class="waiting-indicator">
-          <span class="pulse">●</span> Testing extraction methods...
-        </div>
-      `;
-    }
-
-    // Store relative coordinates for later use (these will be stored in config)
-    state.currentFieldCoords = rectangleResult.coordinates;
-
-    // Use the stored absolute box for backend testing (backend calculates relative internally)
-    const absoluteBox = state.lastFieldAbsoluteBox;
-    if (!absoluteBox) {
-      console.error('[ConfigGen v2.3] No absolute box stored, falling back to v2.2');
-      fallbackToV22(fieldName, rectangleResult);
-      return;
-    }
-
-    // Prepare test data for backend - send ABSOLUTE box coordinates
-    // The backend handleTestFieldExtraction expects absolute viewport coordinates
-    // and will calculate relative coordinates using the card's bounding box
-    const testData = {
-      fieldName: fieldName,
-      box: absoluteBox,  // Absolute viewport coordinates
-      cardSelector: rectangleResult.cardSelector || state.previewData?.cardSelector,
-      // Include the initial extraction for reference
-      initialValue: rectangleResult.value,
-      initialMethod: 'coordinate-text'
-    };
-
-    console.log('[ConfigGen v2.3] Test data with absolute box:', testData);
-
-    try {
-      // Call backend to test all extraction methods
-      if (typeof __configGen_testFieldExtraction === 'function') {
-        console.log('[v2.3] Backend function available: __configGen_testFieldExtraction');
-        console.log('[v2.3] Calling backend with test data...');
-        await __configGen_testFieldExtraction(testData);
-        console.log('[v2.3] Backend call completed, waiting for handleExtractionResults callback');
-        // Backend will call window.handleExtractionResults when done
-      } else {
-        console.error('[v2.3] ERROR: __configGen_testFieldExtraction NOT AVAILABLE');
-        console.error('[v2.3] This should not happen - check backend function exposure');
-        console.warn('[v2.3] Falling back to v2.2 workflow for', fieldName);
-        // Fallback: use the v2.2 workflow
-        fallbackToV22(fieldName, rectangleResult);
-      }
-    } catch (error) {
-      console.error('[v2.3] ERROR: Extraction test failed:', error);
-      console.error('[v2.3] Error stack:', error.stack);
-      showErrorFeedback('Extraction testing failed: ' + error.message);
-      // Fallback to v2.2 workflow on error
-      console.warn('[v2.3] Falling back to v2.2 workflow for', fieldName);
-      fallbackToV22(fieldName, rectangleResult);
-    }
-  }
-
-  /**
-   * v2.3: Fallback to v2.2 workflow when v2.3 backend is not available
-   */
-  function fallbackToV22(fieldName, rectangleResult) {
-    console.log('');
-    console.log('========================================');
-    console.log(`[v2.2] FALLBACK - USING V2.2 WORKFLOW`);
-    console.log('========================================');
-    console.log(`[v2.2] Field: ${fieldName.toUpperCase()}`);
-    console.log('[v2.2] This means v2.3 multi-method testing was not available or failed');
-    console.log('[v2.2] The field will be saved without user-validated method selection');
-
-    const captureData = {
-      value: rectangleResult.value,
-      selector: rectangleResult.selector,
-      coordinates: rectangleResult.coordinates,
-      element: rectangleResult.element,
-      source: 'manual',
-      confidence: 1.0
-    };
-
-    state.pendingFieldCapture = captureData;
-    state.manualSelections[fieldName] = captureData;
-
-    showCapturedFeedback(rectangleResult.value);
-    updateFieldCompletionUI();
-  }
+  // NOTE: triggerV23Extraction and fallbackToV22 functions have been REMOVED
+  // All field extraction uses processFieldRectangle -> __configGen_testFieldExtraction directly
+  // There is NO fallback to v2.2 - v2.3 is the only supported workflow
 
   /**
    * Handle profile URL disambiguation when multiple links found
@@ -2509,7 +2397,7 @@
 
     // CRITICAL: Store directly in manualSelections for persistence
     state.manualSelections[fieldName] = captureData;
-    console.log('[v2.2] Stored profileUrl from disambiguation:', captureData.value);
+    console.log('[v2.3] Stored profileUrl from disambiguation:', captureData.value);
 
     // Close modal if open
     hideModal();
@@ -2579,14 +2467,14 @@
   }
 
   // ===========================
-  // v2.2: LINK DISAMBIGUATION MODAL
+  // LINK DISAMBIGUATION MODAL
   // ===========================
 
   /**
    * Show link disambiguation modal
    */
   function showLinkDisambiguationModal(links) {
-    console.log('[ConfigGen v2.2] Showing link disambiguation modal', links);
+    console.log('[ConfigGen v2.3] Showing link disambiguation modal', links);
     state.currentState = STATES.LINK_DISAMBIGUATION;
     state.pendingLinks = links;
     state.selectedLinkIndex = -1;
@@ -2972,7 +2860,7 @@
   };
 
   // ===========================
-  // v2.2: VALIDATION FUNCTIONS
+  // VALIDATION FUNCTIONS
   // ===========================
 
   /**
@@ -3025,7 +2913,7 @@
   }
 
   // ===========================
-  // v2.2: SELECTOR GENERATION
+  // SELECTOR GENERATION
   // ===========================
 
   /**
@@ -3100,7 +2988,7 @@
   }
 
   // ===========================
-  // v2.2/v2.3: CONFIG GENERATION WITH SELECTIONS
+  // v2.3: CONFIG GENERATION WITH SELECTIONS
   // ===========================
 
   /**
@@ -3115,126 +3003,88 @@
   }
 
   /**
-   * Generate config with manual selections
-   * Automatically detects v2.3 workflow and uses appropriate backend method
+   * Generate config with manual selections (v2.3)
+   * All field extraction now uses v2.3 multi-method testing
    */
   function confirmAndGenerateWithSelections() {
-    console.log('[v2.2/v2.3-DEBUG] ========================================');
-    console.log('[v2.2/v2.3-DEBUG] CONFIRM AND GENERATE WITH SELECTIONS');
-    console.log('[v2.2/v2.3-DEBUG] ========================================');
-    console.log('[v2.2/v2.3-DEBUG] Manual selections to send:', JSON.stringify(state.manualSelections, null, 2));
+    console.log('[v2.3] ========================================');
+    console.log('[v2.3] CONFIRM AND GENERATE CONFIG');
+    console.log('[v2.3] ========================================');
+    console.log('[v2.3] Manual selections:', JSON.stringify(state.manualSelections, null, 2));
 
     // Verify we have selections
     const fieldCount = Object.keys(state.manualSelections).length;
-    console.log('[v2.2/v2.3-DEBUG] Field count:', fieldCount);
+    console.log('[v2.3] Field count:', fieldCount);
 
     if (fieldCount === 0) {
-      console.error('[v2.2/v2.3-DEBUG] ERROR: No fields captured in manualSelections!');
+      console.error('[v2.3] ERROR: No fields captured!');
       showToast('No fields captured. Please capture at least the required fields.', 'error');
       showPanel('manualPanel');
       return;
     }
 
-    // Check if any field was validated through v2.3 workflow
-    const useV23 = hasV23ValidatedFields();
-    console.log('[v2.2/v2.3-DEBUG] Has v2.3 validated fields:', useV23);
+    console.log(`[v2.3] Sending ${fieldCount} fields to backend for config generation`);
 
-    console.log(`[v2.2/v2.3-DEBUG] Sending ${fieldCount} fields to backend for config generation`);
-
-    // Check backend function availability
-    console.log('[v2.2/v2.3-DEBUG] __configGen_generateV23Config exists:', typeof __configGen_generateV23Config === 'function');
-    console.log('[v2.2/v2.3-DEBUG] __configGen_confirmWithSelections exists:', typeof __configGen_confirmWithSelections === 'function');
-    console.log('[v2.2/v2.3-DEBUG] __configGen_confirmAndGenerate exists:', typeof __configGen_confirmAndGenerate === 'function');
-
-    // Use v2.3 backend if any field was validated through v2.3 workflow
-    if (useV23 && typeof __configGen_generateV23Config === 'function') {
-      console.log('[v2.3-DEBUG] Using v2.3 config generation with validated methods...');
-      console.log('[v2.3-DEBUG] Selections being sent:', state.manualSelections);
+    // v2.3 uses __configGen_generateV23Config for config generation
+    if (typeof __configGen_generateV23Config === 'function') {
+      console.log('[v2.3] Calling __configGen_generateV23Config...');
 
       try {
         __configGen_generateV23Config(state.manualSelections)
           .then(result => {
-            console.log('[v2.3-DEBUG] ========================================');
-            console.log('[v2.3-DEBUG] V2.3 BACKEND PROMISE RESOLVED');
-            console.log('[v2.3-DEBUG] ========================================');
-            console.log('[v2.3-DEBUG] Backend returned:', result);
-            console.log('[v2.3-DEBUG] Result success:', result?.success);
-            console.log('[v2.3-DEBUG] Config path:', result?.configPath);
+            console.log('[v2.3] Config generation successful:', result);
           })
           .catch(err => {
-            console.error('[v2.3-DEBUG] ========================================');
-            console.error('[v2.3-DEBUG] V2.3 BACKEND PROMISE REJECTED');
-            console.error('[v2.3-DEBUG] ========================================');
-            console.error('[v2.3-DEBUG] Backend error:', err);
-            console.error('[v2.3-DEBUG] Error message:', err?.message);
+            console.error('[v2.3] Config generation failed:', err.message);
             showToast('Config generation failed: ' + err.message, 'error');
             showPanel('manualPanel');
           });
-        console.log('[v2.3-DEBUG] V2.3 backend function called, waiting for promise...');
       } catch (syncError) {
-        console.error('[v2.3-DEBUG] Synchronous error calling v2.3 backend:', syncError);
-        // Fallback to v2.2
-        callV22Backend();
+        console.error('[v2.3] Synchronous error:', syncError);
+        // Try legacy fallback
+        callLegacyBackend();
       }
     } else {
-      // Use v2.2 backend (no v2.3 validated fields or v2.3 backend not available)
-      callV22Backend();
+      // Legacy fallback for older backend versions
+      callLegacyBackend();
     }
   }
 
   /**
-   * Call v2.2 backend for config generation
+   * Legacy backend fallback (for compatibility)
    */
-  function callV22Backend() {
+  function callLegacyBackend() {
     if (typeof __configGen_confirmWithSelections === 'function') {
-      console.log('[v2.2-DEBUG] Calling __configGen_confirmWithSelections with selections...');
-      console.log('[v2.2-DEBUG] Selections being sent:', state.manualSelections);
+      console.log('[v2.3] Using legacy __configGen_confirmWithSelections...');
 
       try {
         __configGen_confirmWithSelections(state.manualSelections)
           .then(result => {
-            console.log('[v2.2-DEBUG] ========================================');
-            console.log('[v2.2-DEBUG] BACKEND PROMISE RESOLVED');
-            console.log('[v2.2-DEBUG] ========================================');
-            console.log('[v2.2-DEBUG] Backend returned:', result);
-            console.log('[v2.2-DEBUG] Result success:', result?.success);
-            console.log('[v2.2-DEBUG] Config path:', result?.configPath);
+            console.log('[v2.3] Legacy backend returned:', result);
           })
           .catch(err => {
-            console.error('[v2.2-DEBUG] ========================================');
-            console.error('[v2.2-DEBUG] BACKEND PROMISE REJECTED');
-            console.error('[v2.2-DEBUG] ========================================');
-            console.error('[v2.2-DEBUG] Backend error:', err);
-            console.error('[v2.2-DEBUG] Error message:', err?.message);
-            console.error('[v2.2-DEBUG] Error stack:', err?.stack);
+            console.error('[v2.3] Legacy backend error:', err.message);
             showToast('Config generation failed: ' + err.message, 'error');
             showPanel('manualPanel');
           });
-        console.log('[v2.2-DEBUG] Backend function called, waiting for promise...');
       } catch (syncError) {
-        console.error('[v2.2-DEBUG] Synchronous error calling backend:', syncError);
-        console.error('[v2.2-DEBUG] Sync error stack:', syncError.stack);
+        console.error('[v2.3] Synchronous error:', syncError);
       }
-    } else if (typeof __configGen_confirmAndGenerate === 'function') {
-      // Fallback to v2.0 method
-      console.log('[v2.2-DEBUG] WARNING: Using fallback v2.0 method (manual selections may not be saved)');
-      __configGen_confirmAndGenerate();
     } else {
-      console.error('[v2.2-DEBUG] ERROR: No backend function available');
-      console.error('[v2.2-DEBUG] Available window functions:', Object.keys(window).filter(k => k.startsWith('__configGen')));
+      console.error('[v2.3] ERROR: No backend function available');
       showToast('Backend function not available', 'error');
       showPanel('manualPanel');
     }
   }
 
   // ===========================
-  // v2.2: HANDLE CARD DETECTION (OVERRIDE)
+  // HANDLE CARD DETECTION (OVERRIDE)
   // ===========================
 
   // Override handleCardDetectionResult to show preview panel
   const originalHandleCardDetectionResult = window.handleCardDetectionResult;
   window.handleCardDetectionResult = function(result) {
-    console.log('[ConfigGen v2.2] Card detection result:', result);
+    console.log('[ConfigGen v2.3] Card detection result:', result);
 
     if (!result.success) {
       showToast(result.error || 'No cards found', 'error');
