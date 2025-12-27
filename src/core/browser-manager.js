@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { RetryHandler } = require('../utils/retry');
 
 puppeteer.use(StealthPlugin());
 
@@ -125,8 +126,15 @@ class BrowserManager {
     });
   }
 
-  async navigate(url, timeout = 30000) {
-    try {
+  async navigate(url, timeout = 30000, options = {}) {
+    const retryHandler = new RetryHandler({
+      maxRetries: options.maxRetries || 2,
+      initialDelay: 2000,
+      maxDelay: 10000,
+      logger: { info: (m) => this._log('info', m), warn: (m) => this._log('warn', m), error: (m) => this._log('error', m) }
+    });
+
+    return retryHandler.execute(async () => {
       await this.checkMemoryAndRecycle();
 
       this._log('info', `Navigating to: ${url}`);
@@ -145,16 +153,7 @@ class BrowserManager {
       await this.detectCaptcha(url);
 
       return true;
-    } catch (error) {
-      if (error.name === 'TimeoutError') {
-        this._log('warn', `Navigation timeout for ${url}`);
-      } else if (error.message.includes('CAPTCHA_DETECTED')) {
-        throw error;
-      } else {
-        this._log('error', `Navigation failed for ${url}: ${error.message}`);
-      }
-      throw error;
-    }
+    }, `navigate(${url})`);
   }
 
   async detectCaptcha(url) {
