@@ -1,31 +1,24 @@
 #!/usr/bin/env node
-
 require('dotenv').config();
-
 const { Command } = require('commander');
 const fs = require('fs');
 const path = require('path');
-
 // Core imports
 const logger = require('./src/core/logger');
 const BrowserManager = require('./src/core/browser-manager');
 const { SeleniumManager } = require('./src/core');
 const RateLimiter = require('./src/core/rate-limiter');
 const ConfigLoader = require('./src/config/config-loader');
-
 // Utilities
 const DomainExtractor = require('./src/utils/domain-extractor');
 const GoogleSheetsExporter = require('./src/utils/google-sheets-exporter');
 const { logScrapingStats, logDomainStats, logSampleContacts } = require('./src/utils/stats-reporter');
-
 // Scraper factory
 const { createScraperFromConfig } = require('./src/scrapers/config-scrapers');
-
 // Pagination
 const Paginator = require('./src/features/pagination/paginator');
 const { detectPaginationFromUrl } = require('./src/constants/pagination-patterns');
 const { selectPaginationMode } = require('./src/utils/prompt-helper');
-
 // CLI setup
 const program = new Command();
 program
@@ -58,9 +51,7 @@ program
   .option('--core-only', 'Export only core contact fields (exclude enrichment metadata)')
   .option('-v, --verbose', 'Verbose logging')
   .parse(process.argv);
-
 const options = program.opts();
-
 // Utility functions
 function validateUrl(url) {
   try {
@@ -71,7 +62,6 @@ function validateUrl(url) {
     return false;
   }
 }
-
 function parseHeadless(value) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
