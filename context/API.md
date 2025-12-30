@@ -382,3 +382,120 @@ Comprehensive API documentation for all exported functions and classes.
 | `waitForFieldSelection` | `fieldName` | `Promise<Object>` | Waits for user to select field region |
 | `extractFieldMethods` | `selectionBox, fieldName` | `Promise<Array>` | Tests all extraction methods for field |
 | `end` | none | `Promise<void>` | Ends interactive session closes browser |
+
+### ConfigValidator (`src/tools/lib/config-validator.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `logger` | `ConfigValidator` | Initializes config validator with logger instance |
+| `validate` | `page, config` | `Promise<Object>` | Validates config against live page returns issues warnings |
+| `validateCardSelector` | `page, config` | `Promise<Object>` | Validates card selector matches elements on page |
+| `validateFieldSelectors` | `page, config` | `Promise<Object>` | Validates field selectors within card context |
+| `testExtraction` | `page, config` | `Promise<Object>` | Tests extraction with config returns sample contacts |
+| `analyzeExtractionQuality` | `contacts, config` | `Object` | Analyzes extraction quality returns score and issues |
+| `validatePagination` | `page, config` | `Promise<Object>` | Validates pagination configuration type and selectors |
+| `generateReport` | `results` | `string` | Generates formatted validation report string |
+
+### PaginationDiagnostic (`src/tools/lib/pagination-diagnostic.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `browserManager, rateLimiter, logger, configLoader` | `PaginationDiagnostic` | Initializes diagnostic with Paginator instance |
+| `checkUrlParams` | `url` | `Object` | Checks URL for pagination parameters highest priority |
+| `diagnose` | `url, options={}` | `Promise<Object>` | Runs full pagination diagnostic with recommendations |
+| `testPage` | `url, pattern, pageNum` | `Promise<Object>` | Tests specific page number returns validation result |
+| `generateSampleUrls` | `pattern, count=5` | `Array<Object>` | Generates sample URLs for pattern verification |
+
+### ExtractionTester (`src/tools/lib/extraction-tester.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `page` | `ExtractionTester` | Initializes tester with all specialized extractors |
+| `initialize` | none | `Promise<void>` | Initializes OCR and other async extractors |
+| `terminate` | none | `Promise<void>` | Cleans up resources terminates Tesseract worker |
+| `testFieldWithRetry` | `fieldName, cardElement, fieldCoords` | `Promise<Object>` | Tests field with auto-expand on low confidence |
+| `testField` | `fieldName, cardElement, fieldCoords` | `Promise<Object>` | Tests all extraction methods returns top 5 ranked |
+| `getMethodsForField` | `fieldName` | `Array<string>` | Returns applicable method IDs for field sorted by priority |
+| `runMethod` | `methodId, cardElement, fieldCoords, fieldName` | `Promise<Object>` | Executes single extraction method |
+| `applyFieldValidation` | `fieldName, results` | `Array<Object>` | Validates results adjusts confidence per field rules |
+| `expandCoordinates` | `coords, factor` | `Object` | Expands coordinates by factor for retry attempts |
+| `formatForUI` | `testResults, fieldName` | `Object` | Formats results for display in browser overlay |
+
+### ProfileEnrichment (`src/tools/lib/profile-enrichment.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `constructor` | `logger, options={}` | `ProfileEnrichment` | Initializes with ProfileVisitor and rate limiting options |
+| `enrichContacts` | `contacts, page, config` | `Promise<Object>` | Enriches contacts by visiting profile pages returns stats |
+| `enrichSingleContact` | `contact, page, config` | `Promise<Object>` | Visits single profile page extracts email phone name |
+| `matchProfileUrlsToContacts` | `contacts, profileLinks` | `Array<Object>` | Matches profile URLs to contacts using name matching |
+| `findBestProfileMatch` | `name, profileLinks` | `Object|null` | Finds best profile link match for name |
+| `parseNameParts` | `name` | `Object` | Parses name into firstName lastName middleName parts |
+| `calculateNameMatchScore` | `nameParts, url, linkText` | `Object` | Calculates URL and text match scores for name |
+| `getProfilePatterns` | `config` | `Array<string>` | Gets profile URL patterns from config or defaults |
+| `classifyProfileLink` | `url, text, contactName` | `Object` | Classifies profile link type and match confidence |
+
+## Utilities (Additional)
+
+### StatsReporter (`src/utils/stats-reporter.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `logScrapingStats` | `contacts, logger, context={}` | `void` | Logs scraping statistics with email phone counts |
+| `logDomainStats` | `contacts, domainExtractor, logger` | `Object` | Logs domain analysis with business personal breakdown |
+| `logSampleContacts` | `contacts, logger, limit=5` | `void` | Displays sample contacts in formatted table |
+
+### PromptHelper (`src/utils/prompt-helper.js`)
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `confirmYesNo` | `message, defaultValue=true` | `Promise<boolean>` | Asks yes/no confirmation returns boolean |
+| `confirmOptions` | `message, options` | `Promise<string>` | Asks multiple choice question returns selected option |
+| `waitForEnter` | `message` | `Promise<void>` | Waits for user to press Enter key |
+| `displayStageHeader` | `stageName` | `void` | Displays stage header with ASCII box drawing |
+| `displayStageSummary` | `stats, title=null` | `void` | Displays statistics summary in formatted table |
+| `displayProgressIndicator` | `message, current=null, total=null` | `void` | Displays progress bar or message |
+| `displaySuccess` | `message` | `void` | Displays success message with checkmark |
+| `displayError` | `message` | `void` | Displays error message with X mark |
+| `displayWarning` | `message` | `void` | Displays warning message with triangle |
+| `displayInfo` | `message` | `void` | Displays info message with i icon |
+| `displayContactsTable` | `contacts, limit=5` | `void` | Displays contacts in formatted table |
+| `displayFieldComparison` | `original, enriched, actions` | `void` | Displays field comparison for enrichment |
+| `displayCompletionSummary` | `result` | `void` | Displays pipeline completion summary |
+| `countdown` | `seconds, message` | `Promise<void>` | Displays countdown timer with message |
+| `sleep` | `ms` | `Promise<void>` | Promise-based sleep utility |
+| `truncate` | `str, maxLength` | `string` | Truncates string with ellipsis |
+| `selectPaginationMode` | `options` | `Promise<string>` | Interactive pagination mode selection |
+
+### Constants (`src/utils/constants.js`)
+
+| Constant | Type | Description |
+|----------|------|-------------|
+| `DEFAULT_TIMEOUT` | `number` | Default timeout 30000ms |
+| `NAVIGATION_TIMEOUT` | `number` | Navigation timeout 60000ms |
+| `PDF_RENDER_TIMEOUT` | `number` | PDF render timeout 60000ms |
+| `DEFAULT_MAX_PAGES` | `number` | Default max pages 200 |
+| `DEFAULT_MIN_CONTACTS` | `number` | Default minimum contacts per page 1 |
+| `DEFAULT_SCROLL_DELAY` | `number` | Default scroll delay 500ms |
+| `DEFAULT_MAX_SCROLLS` | `number` | Default max scrolls 50 |
+| `DEFAULT_MIN_DELAY` | `number` | Rate limiting min delay 2000ms |
+| `DEFAULT_MAX_DELAY` | `number` | Rate limiting max delay 5000ms |
+| `DEFAULT_MAX_RETRIES` | `number` | Default max retries 3 |
+| `MAX_NAVIGATIONS_BEFORE_RECYCLE` | `number` | Memory management 50 navigations |
+| `MAX_MEMORY_GROWTH_MB` | `number` | Memory growth limit 1024MB |
+
+## Constants Module
+
+### PaginationPatterns (`src/constants/pagination-patterns.js`)
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `PAGE_PARAMETER_NAMES` | `Array<string>` | URL parameter names for page pagination page p pg etc |
+| `OFFSET_PARAMETER_NAMES` | `Array<string>` | URL parameter names for offset pagination offset skip start |
+| `PAGE_SIZE_PARAMETER_NAMES` | `Array<string>` | URL parameter names for page size limit perPage count |
+| `PAGINATION_CONTROL_SELECTORS` | `Array<string>` | CSS selectors for pagination controls |
+| `KNOWN_DOMAIN_PAGINATION` | `Object` | Domain to pagination type mapping |
+| `getPaginationParameterType` | `paramName → string|null` | Returns parameter type page offset size or null |
+| `isPageParameter` | `paramName → boolean` | Checks if parameter is page parameter |
+| `isOffsetParameter` | `paramName → boolean` | Checks if parameter is offset parameter |
+| `detectPaginationFromUrl` | `url → Object` | Detects pagination type from URL returns analysis |
