@@ -47,6 +47,8 @@ program
   .option('--auto', 'Skip confirmation prompts in full-pipeline mode')
   .option('--skip-config-gen', 'Skip config generation, use existing config (requires --full-pipeline)')
   .option('--no-enrich', 'Skip enrichment stage in full-pipeline mode')
+  .option('--skip-cleaning', 'Skip the data cleaning stage')
+  .option('--cleaning-report', 'Output detailed cleaning report to JSON file')
   .option('--validate', 'Run validation tool (quick test with first N contacts)')
   .option('--core-only', 'Export only core contact fields (exclude enrichment metadata)')
   .option('-v, --verbose', 'Verbose logging')
@@ -122,6 +124,7 @@ async function main() {
       const orchestrator = new FullPipelineOrchestrator({
         url: options.url, limit: options.limit, auto: options.auto, autoMode: options.auto,
         skipConfigGen: options.skipConfigGen, noEnrich: options.enrich === false,
+        skipCleaning: options.skipCleaning || false, cleaningReport: options.cleaningReport || false,
         noExport: options.export === false, coreOnly: options.coreOnly || false,
         headless: parseHeadless(options.headless), verbose: options.verbose
       });

@@ -5,7 +5,8 @@
  * 1. Config Check/Generation
  * 2. Scraping
  * 3. Enrichment
- * 4. Google Sheets Export
+ * 4. Data Cleaning
+ * 5. Google Sheets Export
  *
  * Features:
  * - Confirmation prompts between stages (skippable with --auto)
@@ -25,6 +26,7 @@ const RateLimiter = require('../core/rate-limiter');
 const ConfigLoader = require('../config/config-loader');
 const ProfileEnricher = require('../features/enrichment/profile-enricher');
 const { FieldCleaner } = require('../features/enrichment/post-cleaners');
+const { DataCleaner } = require('../features/cleaning');
 const { SheetExporter } = require('../features/export');
 
 const {
@@ -52,6 +54,8 @@ class FullPipelineOrchestrator {
       autoMode: options.auto || options.autoMode || false,
       skipConfigGen: options.skipConfigGen || false,
       noEnrich: options.noEnrich || false,
+      skipCleaning: options.skipCleaning || false,
+      cleaningReport: options.cleaningReport || false,
       noExport: options.noExport || false,
       coreOnly: options.coreOnly || false,
       headless: options.headless !== false,
@@ -70,8 +74,10 @@ class FullPipelineOrchestrator {
     this.config = null;
     this.scrapedDataPath = null;
     this.enrichedDataPath = null;
+    this.cleanedDataPath = null;
     this.contacts = [];
     this.enrichedContacts = [];
+    this.cleanedContacts = [];
     this.sheetUrl = null;
     this.startTime = Date.now();
 
@@ -140,6 +146,13 @@ class FullPipelineOrchestrator {
 
         // Stage 3: Enrichment
         await this.stageEnrichment();
+      }
+
+      // Stage 4: Data Cleaning (unless skipped)
+      if (!this.options.skipCleaning) {
+        await this.stageCleaning();
+      } else {
+        displayInfo('[Pipeline] Skipping data cleaning stage');
       }
 
       // Confirm before export (if not skipping)
@@ -638,6 +651,63 @@ class FullPipelineOrchestrator {
   }
 
   /**
+   * Stage 4: Data Cleaning
+   */
+  async stageCleaning() {
+    displayStageHeader('STAGE 4: DATA CLEANING');
+
+    // Determine which contacts to clean
+    const contactsToClean = this.enrichedContacts.length > 0
+      ? this.enrichedContacts
+      : this.contacts;
+
+    if (contactsToClean.length === 0) {
+      displayWarning('No contacts to clean');
+      return;
+    }
+
+    displayInfo(`Cleaning ${contactsToClean.length} contacts...`);
+    console.log('');
+
+    try {
+      const cleaner = new DataCleaner(logger);
+      const { contacts: cleanedContacts, report: cleaningReport } = cleaner.cleanAll(contactsToClean);
+
+      this.cleanedContacts = cleanedContacts;
+
+      // Save cleaned contacts
+      this.cleanedDataPath = this.generateOutputPath('cleaned');
+      this.saveContacts(this.cleanedContacts, this.cleanedDataPath);
+
+      // Optionally save cleaning report
+      if (this.options.cleaningReport) {
+        const reportPath = this.cleanedDataPath.replace('.json', '-cleaning-report.json');
+        fs.writeFileSync(reportPath, JSON.stringify(cleaningReport, null, 2), 'utf8');
+        displayInfo(`Cleaning report written to: ${path.basename(reportPath)}`);
+      }
+
+      // Display results
+      displaySuccess(`Cleaned ${this.cleanedContacts.length} contacts`);
+      console.log('');
+
+      const cleaningStats = {
+        'Total contacts': cleaningReport.summary.totalContacts,
+        'Contacts modified': cleaningReport.summary.contactsModified,
+        'Fields modified': cleaningReport.summary.fieldsModified,
+        'Processing time': `${cleaningReport.summary.processingTimeMs}ms`,
+        'Output file': path.basename(this.cleanedDataPath)
+      };
+
+      displayStageSummary(cleaningStats, 'Cleaning Results:');
+
+    } catch (error) {
+      displayError(`Cleaning failed: ${error.message}`);
+      // Don't throw - allow pipeline to continue with enriched/scraped data
+      displayWarning('Continuing with uncleaned data');
+    }
+  }
+
+  /**
    * Confirmation point before export
    */
   async confirmProceedToExport() {
@@ -660,10 +730,10 @@ class FullPipelineOrchestrator {
   }
 
   /**
-   * Stage 4: Export
+   * Stage 5: Export
    */
   async stageExport() {
-    displayStageHeader('STAGE 4: GOOGLE SHEETS EXPORT');
+    displayStageHeader('STAGE 5: GOOGLE SHEETS EXPORT');
 
     const exporter = new SheetExporter(logger);
 
@@ -673,12 +743,14 @@ class FullPipelineOrchestrator {
     }
 
     try {
-      // Determine which data to export
-      const dataToExport = this.enrichedContacts.length > 0
-        ? this.enrichedContacts
-        : this.contacts;
+      // Determine which data to export (prefer cleaned > enriched > scraped)
+      const dataToExport = this.cleanedContacts.length > 0
+        ? this.cleanedContacts
+        : this.enrichedContacts.length > 0
+          ? this.enrichedContacts
+          : this.contacts;
 
-      const dataPath = this.enrichedDataPath || this.scrapedDataPath;
+      const dataPath = this.cleanedDataPath || this.enrichedDataPath || this.scrapedDataPath;
 
       displayInfo(`Exporting ${dataToExport.length} contacts to Google Sheets...`);
       if (this.options.coreOnly) {
@@ -715,15 +787,16 @@ class FullPipelineOrchestrator {
       configPath: this.configPath ? path.basename(this.configPath) : null,
       scrapedFile: this.scrapedDataPath ? path.basename(this.scrapedDataPath) : null,
       enrichedFile: this.enrichedDataPath ? path.basename(this.enrichedDataPath) : null,
+      cleanedFile: this.cleanedDataPath ? path.basename(this.cleanedDataPath) : null,
       sheetUrl: this.sheetUrl,
-      totalContacts: this.enrichedContacts.length || this.contacts.length,
+      totalContacts: this.cleanedContacts.length || this.enrichedContacts.length || this.contacts.length,
       duration: `${minutes}m ${seconds}s`
     });
   }
 
   /**
    * Generate output file path
-   * @param {string} stage - Stage name (scraped, enriched)
+   * @param {string} stage - Stage name (scraped, enriched, cleaned)
    * @returns {string} - Output file path
    */
   generateOutputPath(stage) {
@@ -734,7 +807,10 @@ class FullPipelineOrchestrator {
 
     const timestamp = Date.now();
     const domainSlug = this.domain.replace(/\./g, '-');
-    const filename = `scrape-${domainSlug}-${timestamp}${stage === 'enriched' ? '-enriched' : ''}.json`;
+    let suffix = '';
+    if (stage === 'enriched') suffix = '-enriched';
+    else if (stage === 'cleaned') suffix = '-cleaned';
+    const filename = `scrape-${domainSlug}-${timestamp}${suffix}.json`;
 
     return path.join(outputDir, filename);
   }
@@ -787,9 +863,11 @@ class FullPipelineOrchestrator {
       configPath: this.configPath,
       scrapedDataPath: this.scrapedDataPath,
       enrichedDataPath: this.enrichedDataPath,
+      cleanedDataPath: this.cleanedDataPath,
       sheetUrl: this.sheetUrl,
       contactsScraped: this.contacts.length,
       contactsEnriched: this.enrichedContacts.length,
+      contactsCleaned: this.cleanedContacts.length,
       duration: Date.now() - this.startTime
     };
   }

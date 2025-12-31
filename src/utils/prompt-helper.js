@@ -360,6 +360,9 @@ function displayCompletionSummary(result) {
   if (result.enrichedFile) {
     summary['Enriched Data'] = result.enrichedFile;
   }
+  if (result.cleanedFile) {
+    summary['Cleaned Data'] = result.cleanedFile;
+  }
   if (result.sheetUrl) {
     summary['Google Sheet'] = result.sheetUrl;
   }
